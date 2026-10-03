@@ -94,8 +94,11 @@ so changing your system's packages does not silently change this editor.
    **d** on an annotated source line to delete its note (choose from a picker
    if several overlap), or **:ReviewComments** to list/remove notes. **q**
    retains its normal macro-recording behavior in annotations.
-6. After reviewing an agent's response, use **:ReviewArchive** to archive the
-   round and start empty, then **Space R** to refresh the changes.
+6. Accepted/completed delivery removes the sent notes, preserving newer notes
+   and edits. Pending, failed, and local-only batches remain in this editor
+   process; a fresh launch starts without annotations. Submitted payloads and
+   receipts remain in **:ReviewOutbox**. After reviewing the agent's response,
+   use **Space R** to refresh. **:ReviewArchive** archives any remaining notes.
 
 The sidebar separates **STAGED**, **UNSTAGED**, and **UNTRACKED** with colored
 header rows, counts, and spacing; empty sections remain visible. A partially
@@ -243,8 +246,9 @@ Accepted/completed messages clear from the open composer and its saved draft,
 so the next `:harness send` opens empty. Pending, failed/uncertain, and local-only
 queued messages are retained. A late acknowledgment never clears different text
 typed while sending. An empty `:w` sends nothing, and `:wq` can close a cleared
-composer. **This does not clear individual review annotations**: `:w` in Review
-still submits the accumulated annotation batch, retained until explicitly archived.
+composer. **General-message sends do not clear review annotations**: `:w` in a
+Review diff pane or sidebar sends the saved annotation batch, and its successful
+acknowledgment clears only those sent notes.
 
 The bottom status bar shows the harness, session suffix, and delivery state in
 both Editing and Review. Use `:harness status` for the full session ID and last
@@ -371,9 +375,11 @@ to be sent to another agent; verify the binding before submitting.
 
 ## Persistence and boundaries
 
-- Drafts/outbox live under `stdpath("state")/reviews/<repository-hash>/`,
+- Message drafts/outbox live under `stdpath("state")/reviews/<repository-hash>/`,
   normally `~/.local/state/myeditor/reviews/`. Files are private (0600), with
-  atomic replacement. Drafts, snapshots and agent results stay out of Git.
+  atomic replacement. Annotations are held only in this editor process; leaving
+  and re-entering Review retains them, but quitting discards them. Reviewed marks
+  and harness bindings persist. Drafts, snapshots and agent results stay out of Git.
 - One editor owns a repository's draft at a time. A process lock prevents
   concurrent editors from overwriting each other's drafts.
 - Review reads saved disk/index content, not unsaved normal buffers. Snapshots

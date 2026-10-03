@@ -127,6 +127,11 @@ Without a harness binding, submission queues feedback locally. Repeated
 unchanged submissions reuse the same batch ID. Each new annotation panel adds
 a separate note when saved, then returns focus to its source pane.
 
+Accepted/completed delivery deletes the sent annotations. Notes added or edited
+during delivery survive; pending, failed, and local-only batches remain in this
+editor process. Leaving and re-entering Review retains annotations, but a fresh
+editor launch starts without them. Submitted payloads/receipts stay in the outbox.
+
   Space e / :Explorer    Focus the Git sidebar
   Space d / :FocusDiff   Focus the diff/editor pane
   Space E                Toggle Neo-tree; focus-only in Review
@@ -312,10 +317,11 @@ Useful native commands (not revdiff's command palette):
   :messages                Inspect previous notifications and errors
   :!{command} / :!!        Run shell command / repeat the last shell command
 
-:qa! discards unsaved ordinary files. Drafts are retained locally on exit;
-there is no revdiff-style quit guard for unsent feedback. Exiting during a
-delivery can leave it uncertain. Shell commands can mutate the worktree/index
-and bypass editor confirmations; do not run destructive commands casually.
+:qa! discards unsaved ordinary files. Exiting discards annotations, but retains
+general-message drafts and outbox payloads/receipts. There is no quit guard for
+unsent annotations. Exiting during delivery can leave it uncertain. Shell
+commands can mutate the worktree/index and bypass editor confirmations; do not
+run destructive commands casually.
 
 ==============================================================================
 DRAFTS AND DELIVERY                                          *myeditor-drafts*
@@ -324,13 +330,13 @@ DRAFTS AND DELIVERY                                          *myeditor-drafts*
   :ReviewRetry    Explicitly retry a failed/uncertain delivery
   :ReviewArchive Archive the round and clear drafts (asks for confirmation)
 
-Keep the editor running during delivery. After an agent response, close the
-annotation, archive the round, and refresh. "completed" means the agent turn
+Keep the editor running during delivery. Successful delivery clears sent notes;
+after reviewing the agent's response, refresh. "completed" means the agent turn
 finished; it does not prove the requested changes were made or tested.
 
-Drafts/outbox are private files under stdpath("state")/reviews/. Source text
-can be sensitive; only submit to a harness you intend to receive it. Errors
-and uncertain deliveries are retained, not silently retried. Inspect the
+Message drafts/outbox are private files under stdpath("state")/reviews/.
+Source text can be sensitive; only submit to a harness you intend to receive it.
+Errors and uncertain deliveries are retained, not silently retried. Inspect the
 session and receipt before retrying an interrupted built-in adapter.
 
 Review currently reads saved worktree/index changes. Feedback on stale or

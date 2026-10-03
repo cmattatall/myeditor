@@ -15,6 +15,12 @@ revdiff parity.
 - **Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode and
   command/search input, including annotations and harness messages.
   Normal-mode Vim bindings remain unchanged.
+- **Option+Left/Up/h/k** moves backward by a word; **Option+Right/Down/l/j**
+  moves forward. Works in Normal, Visual, Insert, and command/search input.
+  Terminals must send Option as Alt/Meta; Esc-b/Esc-f word-key sequences work too.
+- **s / S** in a Review source pane stages/unstages the hunk under the cursor.
+  Inside annotations and ordinary files, native `s`/`S` editing is unchanged.
+  **Space s** still toggles hunk staging; **Space S** toggles file staging.
 - **]** / **[** jump immediately to the next/previous cross-file hunk and
   accept counts. **Space j/k** select the next/previous changed file.
 - **Space f** / `:Files` fuzzy-finds nonignored project files while editing;
@@ -54,8 +60,11 @@ General-message drafts clear after accepted/completed delivery, including the
 open `:harness send` window. Failed/pending/local-only messages and newer edits
 remain intact. Review annotations are separate: annotation `:w` saves the note
 locally and closes the panel without sending. `:w` from a diff pane or Git
-sidebar sends the saved batch without clearing those comments or including
-unsaved annotation edits.
+sidebar sends only the saved batch. Accepted/completed delivery deletes the
+sent notes, preserving newer notes and edits. Pending, failed, and local-only
+batches remain in the current editor session. Annotations survive leaving and
+re-entering Review, but a fresh editor process always starts without notes.
+Submitted payloads and receipts remain in the outbox for inspection/retry.
 
 Closing an annotation with `:q` discards edits since its last write; `:wq`
 saves locally and closes. Starting another opens a fresh panel, even on the

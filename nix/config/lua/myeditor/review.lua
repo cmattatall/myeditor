@@ -860,8 +860,6 @@ function M.open()
 			"A",
 			"c",
 			"C",
-			"s",
-			"S",
 			"r",
 			"R",
 			"D",
@@ -892,6 +890,12 @@ function M.open()
 			end, "Comment instead of editing code")
 		end
 		map(buf, "n", "d", M.delete_comment, "Delete annotation on this line")
+		map(buf, "n", "s", function()
+			M.stage(false, false)
+		end, "Stage Git hunk at cursor")
+		map(buf, "n", "S", function()
+			M.stage(false, true)
+		end, "Unstage Git hunk at cursor")
 		map(buf, "x", "i", function()
 			M.compose(true)
 		end, "Comment on exact selection")

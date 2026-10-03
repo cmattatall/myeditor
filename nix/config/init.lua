@@ -30,6 +30,12 @@ vim.keymap.set({ "n", "x" }, "<C-w>", "<Nop>", { desc = "Use Cmd-w for window co
 vim.keymap.set("i", "<C-a>", "<Home>", { desc = "Start of line" })
 vim.keymap.set("i", "<C-e>", "<End>", { desc = "End of line" })
 vim.keymap.set("c", "<C-a>", "<C-b>", { desc = "Start of command line" })
+for _, key in ipairs({ "<M-Left>", "<M-Up>", "<M-h>", "<M-k>", "<M-b>" }) do
+	vim.keymap.set({ "n", "x", "i", "c" }, key, "<C-Left>", { desc = "Previous word" })
+end
+for _, key in ipairs({ "<M-Right>", "<M-Down>", "<M-l>", "<M-j>", "<M-f>" }) do
+	vim.keymap.set({ "n", "x", "i", "c" }, key, "<C-Right>", { desc = "Next word" })
+end
 
 vim.api.nvim_set_hl(0, "MyeditorHelpBorder", { fg = "#9ba8b8", bg = "#303030" })
 vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {

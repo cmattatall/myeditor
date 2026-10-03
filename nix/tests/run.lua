@@ -263,11 +263,7 @@ local function test()
 	equal(nil, s.composer, "Writing closes the annotation")
 	equal(s.new_win, vim.api.nvim_get_current_win(), "Write returns focus to the source pane")
 	equal(3, #vim.api.nvim_tabpage_list_wins(0), "Write leaves all source panes open")
-	equal(
-		"Check the expiry boundary too.",
-		s.comments[2].text,
-		"Write saves the annotation in this editor session"
-	)
+	equal("Check the expiry boundary too.", s.comments[2].text, "Write saves the annotation in this editor session")
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Composer never modifies source")
 	equal(index_before, run({ "write-tree" }), "Writing composer never stages source")
 	keys("i<Esc>:wq<CR>")
@@ -295,11 +291,13 @@ local function test()
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
 		"q records macros rather than closing annotation"
 	)
-	keys(":wq<CR>SReplacement note<Esc>0RNew<Esc>")
+	keys(":wq<CR>iOld note<Esc>Sreplacement note<Esc>0sR<Esc>")
+	equal({ "Replacement note" }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "s/S still edit inside annotations")
+	keys("0RNew<Esc>")
 	equal(
 		{ "Newlacement note" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"S and R substitute/replace annotation instead of staging/refreshing"
+		"R replaces annotation text instead of refreshing"
 	)
 	keys(":wq<CR>")
 	vim.fn.setreg("b", "Start ", "v")
@@ -508,7 +506,7 @@ local function test()
 	-- A partially staged file must show distinct HEAD/index/worktree states.
 	vim.api.nvim_set_current_win(s.new_win)
 	vim.api.nvim_win_set_cursor(s.new_win, { 5, 0 })
-	keys(" s")
+	keys("s")
 	local staged = git.snapshot(root, { path = "auth.lua", group = "staged" })
 	local expected_index = vim.deepcopy(baseline)
 	expected_index[5] = changed[5]
@@ -518,6 +516,14 @@ local function test()
 	review.refresh()
 	equal(true, vim.list_contains(sidebar(), " STAGED (1)"), "Staging updates visible count")
 	equal("unstaged", s.current.group, "Hunk staging keeps the remaining unstaged comparison selected")
+	local notify, notice = vim.notify, nil
+	vim.notify = function(message)
+		notice = message
+	end
+	keys("S")
+	vim.notify = notify
+	equal(true, notice:find("Select a STAGED entry", 1, true) ~= nil, "S rejects unstaged hunks rather than staging")
+	equal(expected_index, git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new), "Rejected S leaves index intact")
 	review.show(1)
 	equal("staged", s.current.group, "Staged entries appear first")
 	equal(expected_index, vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false), "Staged pane shows index not worktree")
@@ -536,8 +542,18 @@ local function test()
 	fails(function()
 		review.stage(false, false)
 	end, "Select an UNSTAGED")
-	keys(" s")
-	equal(index_before, run({ "write-tree" }), "Space s on STAGED unstages the hunk")
+	vim.notify = function(message)
+		notice = message
+	end
+	keys("s")
+	vim.notify = notify
+	equal(true, notice:find("Select an UNSTAGED", 1, true) ~= nil, "s rejects staged hunks rather than unstaging")
+	equal(expected_index, git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new), "Rejected s leaves index intact")
+	equal(nil, s.composer, "s/S never open an annotation in source panes")
+	vim.api.nvim_set_current_win(s.old_win)
+	keys("S")
+	equal(index_before, run({ "write-tree" }), "S from old source pane unstages only the current hunk")
+	vim.api.nvim_set_current_win(s.new_win)
 	vim.cmd("ReviewStage hunk")
 	review.show(1)
 	vim.cmd("ReviewUnstage hunk")

@@ -29,6 +29,35 @@ return function(equal)
 	local function lua(code, ...)
 		return vim.rpcrequest(child, "nvim_exec_lua", code, { ... })
 	end
+	local word_keys = {
+		{ "<M-Left>", "<M-Right>" },
+		{ "<M-Up>", "<M-Down>" },
+		{ "<M-h>", "<M-l>" },
+		{ "<M-k>", "<M-j>" },
+		{ "<M-b>", "<M-f>" },
+	}
+	local function word_shortcuts(context)
+		for _, pair in ipairs(word_keys) do
+			lua([[
+				vim.api.nvim_buf_set_lines(0, 0, -1, false, {"  alpha beta  gamma", "tail"})
+				vim.api.nvim_win_set_cursor(0, {1, 8})
+			]])
+			vim.rpcnotify(child, "nvim_input", pair[1])
+			equal(true, vim.wait(1000, function()
+				return lua([[return vim.fn.mode() == "n" and vim.api.nvim_win_get_cursor(0)[2] == 2]])
+			end, 10), context .. ": " .. pair[1] .. " moves backward by a word")
+			vim.rpcnotify(child, "nvim_input", "v" .. pair[2])
+			equal(true, vim.wait(1000, function()
+				return lua([[return vim.fn.mode() == "v" and vim.api.nvim_win_get_cursor(0)[2] == 8]])
+			end, 10), context .. ": " .. pair[2] .. " extends the selection by a word")
+			vim.rpcnotify(child, "nvim_input", "<Esc>i" .. pair[1] .. "^" .. pair[2] .. "!<Esc>")
+			equal(true, vim.wait(1000, function()
+				return lua([[return vim.fn.mode() == "n" and vim.api.nvim_get_current_line() == "  ^alpha !beta  gamma"]])
+			end, 10), context .. ": Option movement stays in Insert mode and does not insert special characters")
+			equal({ "  ^alpha !beta  gamma", "tail" }, lua([[return vim.api.nvim_buf_get_lines(0, 0, -1, false)]]),
+				context .. ": Option movement does not change lines")
+		end
+	end
 	local function line_shortcuts(context)
 		lua(
 			[[vim.api.nvim_buf_set_lines(0, 0, -1, false, {"  alpha", "tail"}); vim.api.nvim_win_set_cursor(0, {1, 4})]]
@@ -146,6 +175,7 @@ return function(equal)
 		end
 		lua([[local r=require("myeditor.review"); vim.api.nvim_set_current_win(r.state.new_win); r.compose(false)]])
 		line_shortcuts("Annotation")
+		word_shortcuts("Annotation")
 		vim.rpcnotify(child, "nvim_input", ":ft<CR>")
 		equal(
 			true,
@@ -167,6 +197,7 @@ return function(equal)
 			"Ordinary Markdown retains section mappings"
 		)
 		line_shortcuts("Ordinary file")
+		word_shortcuts("Ordinary file")
 		vim.rpcnotify(child, "nvim_input", ":ft<CR>")
 		equal(
 			true,
@@ -196,6 +227,7 @@ return function(equal)
 		end
 		lua([[vim.cmd("Harness send")]])
 		line_shortcuts("Harness message")
+		word_shortcuts("Harness message")
 		vim.rpcnotify(child, "nvim_input", "i<D-w>k")
 		equal(
 			true,
@@ -250,6 +282,16 @@ return function(equal)
 		input("<C-a>", "ft ", "", 1)
 		input("<C-e>", "ft ", "", 4)
 		input("<C-C>", "", "")
+		for _, prefix in ipairs({ ":", "/" }) do
+			for _, pair in ipairs(word_keys) do
+				input(prefix .. "echo alpha beta", "echo alpha beta", "", 16)
+				input(pair[1], "echo alpha beta", "", 12)
+				input(pair[1], "echo alpha beta", "", 6)
+				input(pair[2], "echo alpha beta", "", 12)
+				input(pair[2], "echo alpha beta", "", 16)
+				input("<C-C>", "", "")
+			end
+		end
 		input(":h", "h", "elp")
 		input("<CR>", "", "")
 		equal("h", lua([[return vim.fn.histget("cmd", -1)]]), "Enter does not accept ghost text")
