@@ -45,18 +45,54 @@ local function test()
 	local original_tab = vim.api.nvim_get_current_tabpage()
 	local index_before = run({ "write-tree" })
 	local layout = vim.fn.winlayout()
-	vim.cmd.help()
+	keys("?")
 	equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Bare help opens editor guide")
 	equal("editor", vim.api.nvim_win_get_config(0).relative, "Help opens as an overlay")
 	equal(layout, vim.fn.winlayout(), "Help leaves underlying splits unchanged")
+	local guide = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+	for name in pairs(vim.api.nvim_get_commands({ builtin = false })) do
+		if
+			name:match("^Review")
+			or vim.list_contains({ "Harness", "WriteFeedback", "Explorer", "FocusDiff", "Files", "Search" }, name)
+		then
+			equal(true, guide:find(":" .. name .. "%f[%W]") ~= nil, "Help documents command " .. name)
+		end
+	end
+	for _, subcommand in ipairs(vim.fn.getcompletion("Harness ", "cmdline")) do
+		equal(true, guide:find(":Harness " .. subcommand, 1, true) ~= nil, "Help documents Harness " .. subcommand)
+	end
+	for tag in guide:gmatch("|(myeditor[%w%-]*)|") do
+		vim.cmd("help " .. tag)
+		equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Help link resolves: " .. tag)
+	end
 	vim.cmd("help motion")
 	equal(1, vim.api.nvim_buf_get_name(0):find(vim.env.VIMRUNTIME, 1, true), "Native help topics remain available")
 	vim.cmd("help myeditor-harness")
 	equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Editor help tags resolve")
 	keys("q")
 	equal(original_buf, vim.api.nvim_get_current_buf(), "q dismisses help to the original buffer")
+	keys("A?<Esc>")
+	equal("local M = {}?", vim.api.nvim_get_current_line(), "Insert-mode question mark remains literal")
+	keys("u")
+	require("myeditor.navigation").explorer()
+	local tree_win = vim.api.nvim_get_current_win()
+	equal("neo-tree", vim.bo.filetype, "Filesystem explorer is focused")
+	keys("?")
+	equal("editor", vim.api.nvim_win_get_config(0).relative, "Explorer question mark opens the same overlay")
+	keys("?")
+	equal(tree_win, vim.api.nvim_get_current_win(), "Question mark closes help back to explorer")
+	vim.cmd("Neotree close")
 	review.open()
 	local s = review.state
+	for _, win in ipairs({ s.tree_win, s.old_win, s.new_win }) do
+		vim.api.nvim_set_current_win(win)
+		local before = vim.fn.winlayout()
+		keys("?")
+		equal("editor", vim.api.nvim_win_get_config(0).relative, "Question mark opens help from each Review pane")
+		equal(before, vim.fn.winlayout(), "Question mark preserves Review splits")
+		keys("?")
+		equal(win, vim.api.nvim_get_current_win(), "Help dismissal restores its invoking pane")
+	end
 	equal(1, vim.fn.executable("myeditor-harness"), "Nix launcher includes its receiver on PATH")
 	equal("auth.lua", s.current.path, "First changed file")
 	equal(false, vim.bo[s.new_buf].modifiable, "Review code is protected")
@@ -224,7 +260,7 @@ local function test()
 	equal(index_before, run({ "write-tree" }), "Writing composer never stages source")
 	local written = s.last_submission
 	layout = vim.fn.winlayout()
-	vim.cmd.help()
+	keys("?")
 	equal("help", vim.bo.buftype, "Help opens from annotation")
 	equal("editor", vim.api.nvim_win_get_config(0).relative, "Review help is also an overlay")
 	equal(layout, vim.fn.winlayout(), "Review layout is unchanged behind help")
@@ -240,27 +276,23 @@ local function test()
 	-- Source edit commands continue as native operators inside the annotation.
 	keys("cwVerify<Esc>")
 	equal(
-		{ "Verify the expiry boundary too." },
+		{ "Verify" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"cw consumes its motion instead of inserting w"
+		"cw starts a fresh annotation and consumes its motion instead of inserting w"
 	)
 	keys("oRemove this line<Esc>dd")
-	equal(
-		{ "Verify the expiry boundary too." },
-		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"o and dd edit only annotation lines"
-	)
+	equal({ "Verify" }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "o and dd edit only annotation lines")
 	keys("u")
 	equal(2, vim.api.nvim_buf_line_count(s.composer), "Native undo restores deleted annotation line")
 	keys("<C-r>")
 	equal(1, vim.api.nvim_buf_line_count(s.composer), "Native redo deletes it again")
 	keys("qaA!<Esc>q@a")
 	equal(
-		{ "Verify the expiry boundary too.!!" },
+		{ "Verify!!" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
 		"q records macros rather than closing annotation"
 	)
-	keys(":wq<CR>SReplacement note<Esc>:wq<CR>RNew<Esc>")
+	keys(":wq<CR>SReplacement note<Esc>0RNew<Esc>")
 	equal(
 		{ "Newlacement note" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
@@ -269,15 +301,22 @@ local function test()
 	keys(":wq<CR>")
 	vim.fn.setreg("b", "Start ", "v")
 	keys('"bP')
+	equal({ "Start " }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "Source paste preserves named register")
+	keys("Aone two note<Esc>0")
+	vim.api.nvim_set_current_win(s.new_win)
+	keys("2dw")
 	equal(
-		{ "Start Newlacement note" },
+		{ "two note" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"Source paste preserves named register"
+		"Source operator preserves count in an open annotation"
 	)
-	keys(":wq<CR>2dw")
-	equal({ "note" }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "Source operator preserves count")
 	keys(":wq<CR>")
-	equal(2, #s.comments, "Editing a saved annotation updates it in place")
+	equal(5, #s.comments, "Closed annotations remain separate even at the same source line")
+	equal(
+		"Check the expiry boundary too.",
+		s.comments[2].text,
+		"A fresh annotation does not overwrite earlier feedback"
+	)
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "All native annotation edits leave source untouched")
 	equal(index_before, run({ "write-tree" }), "Native s/S bindings never stage source")
 
@@ -327,7 +366,7 @@ local function test()
 	review.leave()
 	equal(original_tab, vim.api.nvim_get_current_tabpage(), "Return to original tab")
 	review.open()
-	equal(2, #review.state.comments, "Draft comments survive reopening")
+	equal(5, #review.state.comments, "Draft comments survive reopening")
 	equal(true, review.state.reviewed["unstaged\0auth.lua"] ~= nil, "Reviewed identity persists across reopening")
 	review.toggle_reviewed()
 	review.archive()
@@ -345,16 +384,38 @@ local function test()
 		s.draft.anchor.selection.text,
 		"Visual mapping scopes two exact lines"
 	)
-	keys(":q!<CR>")
-	equal(nil, s.composer, "Native q! hides the annotation while retaining draft")
+	local before_close = s.last_submission
+	keys(":q<CR>")
+	equal(nil, s.composer, "Native q collects and closes the annotation")
+	equal(before_close, s.last_submission, "Closing an annotation does not send feedback")
+	equal("Preserve the refresh contract.", s.comments[1].text, "Closed text is collected in the batch")
+	equal(17, s.comments[1].line_end, "Closing preserves the exact visual range")
 	keys("i<Esc>")
 	equal(
-		{ "Preserve the refresh contract." },
+		{ "" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"Reopened composer retains text"
+		"Reentering starts a fresh panel even on the same hunk"
 	)
-	keys(":wq<CR>")
-	equal(17, s.comments[1].line_end, "Reopened composer retains range")
+	keys("iA second annotation<Esc>:q!<CR>")
+	equal(2, #s.comments, "Forced close also collects without overwriting the first annotation")
+	keys("i<Esc>:q<CR>")
+	equal(2, #s.comments, "Closing a blank fresh annotation adds nothing")
+	keys(":w<CR>")
+	equal(s.comments, feedback.read(s.last_submission).comments, "Review write sends both collected annotations")
+	equal(2, #s.comments, "Sending retains the collected batch")
+	review.archive()
+	keys("iCollect on leaving Review<Esc>")
+	review.leave()
+	review.open()
+	s = review.state
+	equal("Collect on leaving Review", s.comments[1].text, "Leaving Review collects an open annotation")
+	keys("i<Esc>")
+	equal(
+		{ "" },
+		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
+		"Reopening Review also starts a fresh annotation"
+	)
+	keys(":q<CR>")
 	review.archive()
 
 	local thread = "T-00000000-1111-2222-3333-444444444444"
@@ -404,8 +465,9 @@ local function test()
 	dofile(tests .. "/harness.lua")(root, equal, fails, keys)
 
 	-- A partially staged file must show distinct HEAD/index/worktree states.
-	local snapshot = review.state.current
-	git.stage(root, snapshot, "new", 5, false)
+	vim.api.nvim_set_current_win(s.new_win)
+	vim.api.nvim_win_set_cursor(s.new_win, { 5, 0 })
+	keys(" s")
 	local staged = git.snapshot(root, { path = "auth.lua", group = "staged" })
 	local expected_index = vim.deepcopy(baseline)
 	expected_index[5] = changed[5]
@@ -414,6 +476,8 @@ local function test()
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Staging leaves worktree unchanged")
 	review.refresh()
 	equal(true, vim.list_contains(sidebar(), " STAGED (1)"), "Staging updates visible count")
+	equal("unstaged", s.current.group, "Hunk staging keeps the remaining unstaged comparison selected")
+	review.show(1)
 	equal("staged", s.current.group, "Staged entries appear first")
 	equal(expected_index, vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false), "Staged pane shows index not worktree")
 	vim.api.nvim_set_current_win(s.tree_win)
@@ -427,8 +491,48 @@ local function test()
 	review.toggle_reviewed()
 	equal(nil, s.reviewed["unstaged\0auth.lua"], "Staged reviewed mark does not mark worktree comparison")
 	review.toggle_reviewed()
-	git.stage(root, staged, "new", 5, false)
+	vim.api.nvim_set_current_win(s.new_win)
+	fails(function()
+		review.stage(false, false)
+	end, "Select an UNSTAGED")
+	vim.cmd("ReviewUnstage hunk")
 	equal(index_before, run({ "write-tree" }), "Unstage restores index")
+	local function select_tree(path, group)
+		vim.api.nvim_set_current_win(s.tree_win)
+		for row, index in pairs(s.rows) do
+			local entry = s.entries[index]
+			if entry.path == path and entry.group == group then
+				vim.api.nvim_win_set_cursor(s.tree_win, { row, 0 })
+				return
+			end
+		end
+		error("Missing tree entry " .. path .. " " .. group)
+	end
+	select_tree("plan.md", "untracked")
+	fails(function()
+		review.stage(false)
+	end, "Focus a source pane")
+	keys(" S")
+	equal(
+		{ "plan.md" },
+		vim.split(vim.trim(run({ "diff", "--cached", "--name-only" })), "\n"),
+		"Sidebar stages selected file, not displayed diff"
+	)
+	equal(s.tree_win, vim.api.nvim_get_current_win(), "File staging preserves sidebar focus")
+	select_tree("plan.md", "staged")
+	vim.cmd("ReviewUnstage file")
+	equal(index_before, run({ "write-tree" }), "Sidebar command unstages whole new file")
+	select_tree("auth.lua", "unstaged")
+	vim.cmd("ReviewStage file")
+	equal(
+		changed,
+		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
+		"File command stages both hunks"
+	)
+	select_tree("auth.lua", "staged")
+	keys(" S")
+	equal(index_before, run({ "write-tree" }), "Sidebar shortcut toggles staged file back to unstaged")
+	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Stage and unstage preserve source text")
 	local deleted = git.snapshot(root, { path = "removed.lua", group = "unstaged" })
 	equal("local obsolete = true\nreturn obsolete\n", deleted.old, "Deleted lines remain reviewable")
 	equal("", deleted.new, "Deleted new side is empty")

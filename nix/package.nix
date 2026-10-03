@@ -9,6 +9,8 @@
   ripgrep,
   fzf,
   python3,
+  bash,
+  coreutils,
   inputs,
 }:
 let
@@ -73,6 +75,12 @@ stdenv.mkDerivation {
     cp ${./amp_live.py} "$out/share/myeditor/amp_live.py"
     makeWrapper ${python3}/bin/python3 "$out/bin/myeditor-amp-live" \
       --add-flags "$out/share/myeditor/amp_live.py"
+    mkdir -p "$out/share/myeditor/amp"
+    cp ${./amp/anthrodiff.ts} "$out/share/myeditor/amp/anthrodiff.ts"
+    cp ${./amp/install.sh} "$out/share/myeditor/amp/install.sh"
+    makeWrapper ${bash}/bin/bash "$out/bin/myeditor-install-amp-plugin" \
+      --prefix PATH : ${lib.makeBinPath [ coreutils ]} \
+      --add-flags "$out/share/myeditor/amp/install.sh"
   '';
   meta = {
     description = "Portable modal editor with snapshot-based agent review";

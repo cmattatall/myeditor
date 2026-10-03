@@ -131,7 +131,7 @@ end
 
 local function render_comments()
 	local s = state()
-	if not s.current then
+	if not s.current or not api.nvim_win_is_valid(s.old_win) or not api.nvim_win_is_valid(s.new_win) then
 		return
 	end
 	local comments = {}
@@ -312,10 +312,11 @@ function M.refresh(preferred)
 		" Spc /    fuzzy text",
 		" Spc m    mark reviewed",
 		" Spc u    unreviewed only",
-		" Spc s/S  stage hunk/file",
+		" Spc s    stage hunk (diff)",
+		" Spc S    (un)stage file",
 		" Spc R    refresh",
 		" :w       send feedback",
-		" :help    keybindings",
+		" ?/:help  keybindings",
 		" Spc q    return to editor",
 	})
 	s.rows = rows
@@ -440,11 +441,28 @@ function M.jump_hunk(direction)
 	notify(direction > 0 and "Last hunk" or "First hunk")
 end
 
-function M.stage(whole_file)
-	local s = state()
-	local side = side_at_cursor()
-	git.stage(s.root, assert(s.current), side, api.nvim_win_get_cursor(0)[1], whole_file)
-	M.refresh()
+function M.stage(whole_file, unstage)
+	local s = assert(M.active(), "Enter Review first")
+	local win = api.nvim_get_current_win()
+	local snapshot, side, line = s.current, "new", 1
+	if win == s.tree_win then
+		assert(whole_file, "Focus a source pane to stage/unstage a hunk; Space S acts on the selected file")
+		local index = s.rows[api.nvim_win_get_cursor(win)[1]]
+		local entry = assert(s.entries[index], "Select a changed file")
+		snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
+	else
+		side, line = side_at_cursor(), api.nvim_win_get_cursor(win)[1]
+	end
+	assert(snapshot, "No changed file selected")
+	if unstage ~= nil then
+		assert(
+			(snapshot.group == "staged") == unstage,
+			unstage and "Select a STAGED entry" or "Select an UNSTAGED or UNTRACKED entry"
+		)
+	end
+	git.stage(s.root, snapshot, side, line, whole_file)
+	M.refresh(snapshot)
+	api.nvim_set_current_win(win)
 	notify("Index updated; source files unchanged. Existing comments retain their original snapshots.")
 end
 
@@ -482,28 +500,30 @@ end
 
 function M.save_composer()
 	local s = state()
-	if not s.composer then
+	if not s.draft then
 		return
 	end
-	local text = table.concat(api.nvim_buf_get_lines(s.composer, 0, -1, false), "\n")
-	local comment = M.add_comment(s.draft.anchor, text, s.draft.comment_id)
-	s.draft.text, s.draft.comment_id, s.draft.saved = text, comment.id, true
-	vim.bo[s.composer].modified = false
+	local loaded = s.composer and api.nvim_buf_is_loaded(s.composer)
+	local text = loaded and table.concat(api.nvim_buf_get_lines(s.composer, 0, -1, false), "\n") or s.draft.text
+	local comment
+	if vim.trim(text) ~= "" then
+		comment = M.add_comment(s.draft.anchor, text, s.draft.comment_id)
+		s.draft.comment_id = comment.id
+	end
+	s.draft.text, s.draft.saved = text, true
 	save()
+	if loaded then
+		vim.bo[s.composer].modified = false
+	end
 	return comment
 end
 
 local function release_composer()
 	local s = state()
 	local buf = s.composer
-	-- :q! can unload acwrite text before the scheduled WinClosed callback.
-	-- BufLeave has already captured it; don't replace that draft with no lines.
-	if api.nvim_buf_is_loaded(buf) then
-		s.draft.text = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-	end
-	if (s.draft.saved and s.draft.comment_id) or (not s.draft.comment_id and vim.trim(s.draft.text) == "") then
-		s.draft = nil
-	end
+	-- BufLeave captures text even if :q! unloads it before WinClosed runs.
+	M.save_composer()
+	s.draft = nil
 	s.composer, s.composer_win = nil, nil
 	save()
 	api.nvim_buf_delete(buf, { force = true })
@@ -533,24 +553,9 @@ function M.compose(visual, keys)
 	else
 		anchor.selection = selection.line(buf, line)
 	end
-	local draft = s.draft
-	if not draft then
-		draft = { anchor = anchor, text = "" }
-		if not visual then
-			for _, comment in ipairs(s.comments) do
-				if
-					comment.snapshot_id == s.current.id
-					and comment.side == side
-					and line >= comment.line
-					and line <= comment.line_end
-				then
-					draft = { anchor = anchor, text = comment.text, comment_id = comment.id }
-					break
-				end
-			end
-		end
-		s.draft = draft
-	end
+	M.save_composer() -- Collect a recovered draft before starting a fresh annotation.
+	local draft = { anchor = anchor, text = "" }
+	s.draft = draft
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
 	s.composer = composer
 	vim.bo[composer].filetype = "markdown"
@@ -560,7 +565,7 @@ function M.compose(visual, keys)
 	vim.wo[s.composer_win].number = false
 	vim.wo[s.composer_win].signcolumn = "no"
 	vim.wo[s.composer_win].wrap = true
-	vim.wo[s.composer_win].winbar = " Annotation · :w send · :wq close %<"
+	vim.wo[s.composer_win].winbar = " Annotation · :w send · :q collect+close %<"
 		.. vim.fn.strtrans(draft.anchor.file):gsub("%%", "%%%%")
 		.. ":"
 		.. draft.anchor.selection.spans[1].line
@@ -588,13 +593,7 @@ end
 function M.submit(retry)
 	local s = state()
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before submitting again")
-	if s.composer then
-		M.save_composer()
-	end
-	assert(
-		not s.draft or (s.draft.saved and s.draft.comment_id),
-		"Finish the saved comment draft before submitting (press i)"
-	)
+	M.save_composer()
 	assert(#s.comments > 0, "No feedback to submit")
 	local snapshots, snapshot_status, warnings = {}, {}, {}
 	for _, comment in ipairs(s.comments) do
@@ -694,10 +693,7 @@ end
 function M.leave()
 	local s = state()
 	if s.composer then
-		s.draft.text = table.concat(api.nvim_buf_get_lines(s.composer, 0, -1, false), "\n")
-		if not vim.bo[s.composer].modified and s.draft.comment_id then
-			s.draft = nil
-		end
+		release_composer()
 	end
 	save()
 	M.state = nil
@@ -819,12 +815,6 @@ function M.open()
 				M.compose(false, prefix .. key)
 			end, "Comment instead of editing code")
 		end
-		map(buf, "n", "<leader>s", function()
-			M.stage(false)
-		end, "Stage/unstage Git hunk")
-		map(buf, "n", "<leader>S", function()
-			M.stage(true)
-		end, "Stage/unstage file")
 		map(buf, "x", "i", function()
 			M.compose(true)
 		end, "Comment on exact selection")
@@ -834,6 +824,12 @@ function M.open()
 	end
 	for _, buf in ipairs({ s.tree_buf, s.old_buf, s.new_buf }) do
 		map_hunks(buf)
+		map(buf, "n", "<leader>s", function()
+			M.stage(false)
+		end, "Stage/unstage Git hunk (source pane)")
+		map(buf, "n", "<leader>S", function()
+			M.stage(true)
+		end, "Stage/unstage selected file")
 		map(buf, "n", "<leader>R", M.refresh, "Refresh snapshot")
 		map(buf, "n", "<leader>q", M.leave, "Leave Review")
 		map(buf, "n", "<leader>c", M.list_comments, "List/remove draft comments")
@@ -912,6 +908,21 @@ function M.setup()
 			end,
 		}
 	)
+	for _, name in ipairs({ "ReviewStage", "ReviewUnstage" }) do
+		api.nvim_create_user_command(
+			name,
+			guard(function(opts)
+				assert(opts.args == "hunk" or opts.args == "file", "Usage: " .. name .. " hunk|file")
+				M.stage(opts.args == "file", name == "ReviewUnstage")
+			end),
+			{
+				nargs = 1,
+				complete = function()
+					return { "hunk", "file" }
+				end,
+			}
+		)
+	end
 	local commands = {
 		Review = M.open,
 		ReviewLeave = M.leave,
@@ -940,12 +951,18 @@ function M.setup()
 			{}
 		)
 	end
+	api.nvim_create_autocmd("QuitPre", {
+		callback = function()
+			if M.state then
+				M.save_composer()
+			end
+		end,
+	})
 	api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			if M.state then
-				if M.state.composer then
-					M.state.draft.text = table.concat(api.nvim_buf_get_lines(M.state.composer, 0, -1, false), "\n")
-				end
+				M.save_composer()
+				M.state.draft = nil
 				save()
 				vim.uv.fs_unlink(M.state.directory .. "/editor.lock")
 			end

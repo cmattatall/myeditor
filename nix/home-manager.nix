@@ -16,6 +16,11 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       description = "The myeditor package to install.";
     };
+    ampPlugin.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = cfg.harness == "amp";
+      description = "Install the anthrodiff Amp plugin from this flake. Does not install or authenticate Amp.";
+    };
     harness = lib.mkOption {
       type = lib.types.enum [
         "none"
@@ -44,6 +49,19 @@ in
   };
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
+    home.file.".config/amp/plugins/anthrodiff.ts" = lib.mkIf cfg.ampPlugin.enable {
+      source = ./amp/anthrodiff.ts;
+    };
+    home.activation.checkAnthrodiffPlugin = lib.mkIf cfg.ampPlugin.enable (
+      lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
+        for legacy in "$HOME/.config/amp/plugins/revdiff.ts" "$HOME/.config/amp/plugins/revdiff"; do
+          if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+            echo "Disable the old revdiff plugin before enabling anthrodiff: $legacy" >&2
+            exit 1
+          fi
+        done
+      ''
+    );
     xdg.configFile."myeditor/settings.json".text = builtins.toJSON {
       harness = cfg.harness;
       feedback_command = cfg.feedbackCommand;

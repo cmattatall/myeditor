@@ -19,6 +19,13 @@ Supports **Amp**, **Claude Code**, and custom harness receivers. Select a
 thread/session per repository with `:ReviewHarness amp T-…`; configuration
 and credentials stay separate from your portable editor setup.
 
+For live Amp steering, this repository owns the **anthrodiff** plugin and
+installer in [`nix/amp/`](nix/amp/). Enable
+`programs.myeditor.ampPlugin.enable = true` in Home Manager, or run
+`:harness install amp` in the editor (shell: `bash nix/amp/install.sh`), then
+restart/reload Amp and use `:harness connect amp`.
+The revdiff plugin is no longer required or supported; see the guide for replacing it.
+
 Built on [Codediff](https://github.com/esmuellert/codediff.nvim)'s diff renderer,
 [review.nvim](https://github.com/georgeguimaraes/review.nvim)'s comment renderer,
 and [Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim) for ordinary editing.

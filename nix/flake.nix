@@ -67,6 +67,22 @@
                 }
               ];
             }).activationPackage;
+          anthrodiff =
+            pkgs.runCommand "anthrodiff-tests"
+              {
+                nativeBuildInputs = [
+                  pkgs.nodejs
+                  pkgs.python3
+                ];
+              }
+              ''
+                export HOME="$TMPDIR/home"
+                export ANTHRODIFF_TEST_BRIDGE=${./amp_live.py}
+                mkdir -p "$HOME"
+                node --test ${./amp}/tests/anthrodiff.test.ts
+                bash ${./amp}/tests/install.test.sh
+                touch "$out"
+              '';
           review =
             pkgs.runCommand "myeditor-tests"
               {

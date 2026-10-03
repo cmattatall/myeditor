@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { access, chmod, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { access, chmod, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 
 import plugin from '../anthrodiff.ts'
 
@@ -202,4 +204,31 @@ test('automatic registration skips missing workspaces and rejects a public regis
   } finally {
     await chmod(registry, 0o700)
   }
+})
+
+test('editor bridge discovers anthrodiff and sends once with neutral guidance', async (t) => {
+  const f = fakeAmp(); await plugin(f.amp)
+  t.after(() => Promise.all(f.disposers.map((dispose) => dispose())))
+  const id = 'T-editor'
+  await f.events.get('session.start')!({}, f.context(id))
+  const root = await realpath(process.cwd())
+  const bridge = process.env.ANTHRODIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../amp_live.py', import.meta.url))
+  const run = async (...args: string[]) => JSON.parse((await promisify(execFile)('python3', ['-B', bridge, ...args])).stdout)
+  const found = await run('discover', root)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].session, id)
+  assert.ok(found[0].connection.includes('/.cache/anthrodiff/amp/'))
+  assert.equal(f.messages.size, 0, 'discovery must not send')
+  const payload = join(home, 'message.json')
+  await writeFile(payload, JSON.stringify({ submission_id: 'message-one', repository: root, message: 'Explain the boundary' }))
+  const ack = await run('send', found[0].connection, id, payload)
+  assert.equal(ack.status, 'accepted')
+  assert.deepEqual(await run('send', found[0].connection, id, payload), ack)
+  assert.equal(f.messages.get(id)!.length, 1, 'retry must not deliver twice')
+  const [message, options] = f.messages.get(id)![0]
+  assert.equal(options.steer, true)
+  assert.ok(message.content.startsWith('Review feedback.'))
+  assert.ok(!message.content.toLowerCase().includes('revdiff'))
+  assert.match(message.content, /Explain the boundary/)
+  assert.match(message.content, /Do not stage, unstage, reset, commit, or push without asking/)
 })

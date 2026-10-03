@@ -80,11 +80,13 @@ so changing your system's packages does not silently change this editor.
 4. Edit the annotation with normal Vim bindings, including operators, counts,
    registers, macros, and undo/redo. **Esc**, then **:w** submits the current
    batch and keeps the annotation open. **:wq** submits and closes it. Neither
-   writes the reviewed source file. Editing on an existing comment reopens it.
+   writes the reviewed source file. **:q** (or **:q!**) collects the annotation
+   locally and closes it without sending. The next annotation starts empty,
+   even on the same hunk; previously collected comments remain in the batch.
 5. **:w** also submits from the diff panes; **:WriteFeedback** is an alias.
-   With no receiver configured, feedback is queued locally only. To leave a
-   comment unfinished without sending, use **:q!**; reopening with **i** resumes
-   that draft. **q** retains its normal macro-recording behavior in annotations.
+   With no receiver configured, feedback is queued locally only. Use
+   **:ReviewComments** to list/remove collected notes. **q** retains its normal
+   macro-recording behavior in annotations.
 6. After reviewing an agent's response, use **:ReviewArchive** to archive the
    round and start empty, then **Space R** to refresh the changes.
 
@@ -100,9 +102,17 @@ filters the sidebar, navigation, and Review pickers to unreviewed entries.
 Marks are private per worktree, separately fingerprint staged/unstaged changed
 content, survive context-only shifts, and clear when that content changes.
 
-**:help** opens a centered overlay from editing, Review, or an annotation.
-Press **q** or **Esc** to dismiss it without changing the underlying splits.
+**?** in Normal mode (or **:help**) opens a centered overlay from editing,
+either tree, Review, annotations, or harness messages. Press **?**, **q**, or
+**Esc** to dismiss it without changing the underlying splits. Insert-mode `?`
+still types normally; backward search is available via `:?pattern` or `/` then
+`N`. The guide includes navigation, annotations, harnesses, Git actions, view
+controls, a complete editor-command index, and revdiff equivalents/gaps.
 Normal help navigation and topics such as `:help motion` still work.
+
+Command names show dim inline suggestions (`:h` → `help`, `:ha` → `harness`).
+Tab accepts the hint; Enter executes only typed/accepted text. Harness
+subcommands also have hints; other arguments keep native Tab completion.
 
 | Key/command | Action |
 | --- | --- |
@@ -122,11 +132,13 @@ Normal help navigation and topics such as `:help motion` still work.
 | Visual selection, then i or Space c | Comment on exact selection |
 | Space c / `:ReviewComments` | List/remove draft comments |
 | Space s in a source pane | Stage/unstage the Git hunk containing the cursor |
-| Space S in a source pane | Stage/unstage the entire displayed file |
+| Space S in sidebar or source pane | Stage/unstage selected file or entire displayed diff |
+| `:ReviewStage hunk` / `:ReviewStage file` | Explicitly stage; rejects STAGED entries |
+| `:ReviewUnstage hunk` / `:ReviewUnstage file` | Explicitly unstage; requires STAGED entry |
 | Space R / `:ReviewRefresh` | Refresh snapshots and changed-file list |
 | `:w` / `:WriteFeedback` | Queue/send feedback; never stage or save source |
 | `:wq` in annotation | Submit feedback and close only annotation |
-| `:help` | Help overlay; q/Esc closes it |
+| `?` / `:help` | Help overlay; ?/q/Esc closes it |
 | `:ReviewHarness [name session]` | Show or change this repository's harness binding |
 | `:ReviewRetry` | Explicit retry after checking an uncertain/failed delivery |
 | `:ReviewOutbox` | Browse persisted feedback and delivery receipts |
@@ -147,11 +159,60 @@ includes the adapters, not the agent CLIs or credentials.
 
 ### Steer a live Amp process
 
-This is distinct from the CLI continuation described below. An existing
-installed revdiff plugin publishes its private live registry at
-`~/.cache/revdiff/amp`; myeditor does not install or reload that plugin.
+This repository owns the **anthrodiff** Amp plugin in `amp/anthrodiff.ts`,
+its installer, and tests. It publishes a private live registry at
+`~/.cache/anthrodiff/amp`. It has no runtime dependency on the revdiff fork
+and does not discover the old revdiff registry. Feedback starts with the
+tool-neutral **Review feedback** prefix and preserves the Git safety guidance.
+
+For Home Manager, enable the plugin alongside the editor:
+
+```nix
+programs.myeditor = {
+  enable = true;
+  ampPlugin.enable = true;
+};
+```
+
+`ampPlugin.enable` also defaults to true when `harness = "amp"`. The plugin
+is installed at `~/.config/amp/plugins/anthrodiff.ts`; Amp itself and its
+authentication remain separate. Home Manager refuses activation while a
+user-local revdiff plugin exists. Disable that old plugin first, and move
+aside any manually installed anthrodiff copy before giving Home Manager
+ownership. Do not enable another copy in a project or global plugin scope.
+
+Without Home Manager, install directly from the editor:
 
 ```vim
+:harness install amp
+```
+
+This asks for confirmation before installing the bundled **anthrodiff plugin**
+(not the Amp CLI). If the old user-local revdiff plugin exists, the confirmation
+explicitly offers to back it up and replace it. Cancel is the default. No Git
+repository is required, and installation does not bind a session or send feedback.
+Home Manager-owned symlinks are never overwritten; update those through Home Manager.
+
+The same installer can be run from this repository's root:
+
+```sh
+bash nix/amp/install.sh
+# To explicitly replace an existing user-local revdiff.ts instead:
+bash nix/amp/install.sh --replace-revdiff
+```
+
+Replacement moves the old regular file to
+`~/.config/amp/plugin-backups/revdiff.ts` without overwriting existing backups.
+The installer refuses symlinks (including Home Manager-owned files). It installs
+only the plugin; use Nix for the editor. Neither installation method reloads Amp.
+Restart Amp or reload its plugins after installation. In Amp's command palette,
+**anthrodiff: connect** shows connection instructions; **anthrodiff: disconnect**
+stops this thread's endpoint. Session/agent start registers silently by default.
+
+Relaunch myeditor using the updated package, then connect in the same checkout:
+
+```vim
+:Harness install amp
 :Harness connect amp
 :Harness send
 :Harness status
@@ -163,10 +224,18 @@ Connect performs manual discovery for the exact checkout. It directly chooses
 the only live match, or opens a fuzzy session picker. There is no automatic
 discovery or live refresh. Connecting sends nothing. `:Harness send` opens a
 general-message `acwrite` buffer with normal Vim editing: `:w` submits and
-stays open, `:wq` submits and closes, and `:q!` closes while retaining the
-draft. An `accepted` ACK means the steering message was queued, not that the
-agent completed a turn. Disconnect retains local drafts and does not stop the
-agent.
+stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
+the draft locally without sending. Hidden message drafts do not block quitting;
+ordinary unsaved files remain protected. An `accepted` ACK means the steering
+message was queued, not that the agent completed a turn. Disconnect retains
+local drafts and does not stop the agent.
+
+Accepted/completed messages clear from the open composer and its saved draft,
+so the next `:harness send` opens empty. Pending, failed/uncertain, and local-only
+queued messages are retained. A late acknowledgment never clears different text
+typed while sending. An empty `:w` sends nothing, and `:wq` can close a cleared
+composer. **This does not clear individual review annotations**: `:w` in Review
+still submits the accumulated annotation batch, retained until explicitly archived.
 
 The bottom status bar shows the harness, session suffix, and delivery state in
 both Editing and Review. Use `:harness status` for the full session ID and last
@@ -322,7 +391,8 @@ nix flake check path:./nix
 From inside this directory, use `path:.` instead; format Nix files there with
 `nix fmt -- *.nix`. `flake check` builds a sample
 Home Manager generation without activating it, runs Neovim integration tests
-against a disposable Git repository, and tests both harness adapters with mocks.
+against a disposable Git repository, tests the harness adapters, and exercises
+the anthrodiff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
 It does not contact a live LLM or alter your Home Manager profile.
 
 Update nixpkgs/Home Manager with `nix flake update --flake path:./nix` and rerun

@@ -40,22 +40,32 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 			height = height,
 			style = "minimal",
 			border = "single",
-			title = " Help · Esc/q to close ",
+			title = " Help · ?/Esc/q close ",
 			title_pos = "center",
 		})
 		vim.wo.winhighlight = "FloatBorder:MyeditorHelpBorder"
-		for _, key in ipairs({ "q", "<Esc>" }) do
+		vim.wo.wrap = true
+		vim.wo.linebreak = true
+		for _, key in ipairs({ "?", "q", "<Esc>" }) do
 			vim.keymap.set("n", key, "<Cmd>close<CR>", { buffer = event.buf, desc = "Close help overlay" })
 		end
 	end,
 })
+vim.keymap.set("n", "?", "<Cmd>help myeditor<CR>", { desc = "Editor help overlay" })
 
 require("codediff").setup({ diff = { compute_moves = false } })
 require("review.config").setup({ export = { clipboard = false, clear_on_close = false } })
 require("review.highlights").setup()
 require("neo-tree").setup({
 	filesystem = { hijack_netrw_behavior = "disabled" },
-	window = { width = 28 },
+	window = {
+		width = 28,
+		mappings = {
+			["?"] = function()
+				vim.cmd("help myeditor")
+			end,
+		},
+	},
 })
 vim.api.nvim_create_autocmd("VimEnter", {
 	once = true,
@@ -69,6 +79,7 @@ vim.api.nvim_create_autocmd("VimEnter", {
 local review = require("myeditor.review")
 review.setup()
 require("myeditor.harness").setup()
+require("myeditor.cmdline").setup()
 require("fzf-lua").setup({
 	winopts = { width = 0.85, height = 0.8, preview = { hidden = true } },
 	keymap = { fzf = { ["esc"] = "abort" } },
