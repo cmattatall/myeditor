@@ -26,8 +26,13 @@ nix run path:/path/to/myeditor/nix -- src/main.lua
 ```
 
 The filesystem tree opens on the left at startup, with focus in the editing
-pane. **Space e** focuses it, **Space d** returns to the editor, and **Space E**
-toggles it. Headless runs do not open the tree.
+pane. **Space e** or **:ft** focuses it, **Space d** returns to the editor,
+and **Space E** toggles it. Headless runs do not open the tree.
+
+**Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode (files,
+annotations, and harness messages) and in command/search input. Normal-mode
+Vim bindings remain unchanged. Typed **:ft** expands to `:Explorer` and focuses
+the Git sidebar in Review; scripts should use `:Explorer` directly.
 
 The package defines `myeditor`, not `nvim`. It uses `NVIM_APPNAME=myeditor`
 and a configuration in the Nix store. Existing Neovim configurations and
@@ -78,15 +83,17 @@ so changing your system's packages does not silently change this editor.
 3. Press **i**, **a**, **o**, or **O** on code to compose a comment. Use
    **v**, **V**, or **Ctrl-v**, then **i**, for character/line/block feedback.
 4. Edit the annotation with normal Vim bindings, including operators, counts,
-   registers, macros, and undo/redo. **Esc**, then **:w** submits the current
-   batch and keeps the annotation open. **:wq** submits and closes it. Neither
-   writes the reviewed source file. **:q** (or **:q!**) collects the annotation
-   locally and closes it without sending. The next annotation starts empty,
-   even on the same hunk; previously collected comments remain in the batch.
-5. **:w** also submits from the diff panes; **:WriteFeedback** is an alias.
+   registers, macros, and undo/redo. **Esc**, then **:w** saves the note locally
+   and closes the annotation. **:wq** does the same. Neither sends
+   feedback or writes the source file. **:q** (or **:q!**) discards edits since
+   the last write and closes. The next annotation starts empty, even on the
+   same hunk; previously saved comments remain in the batch.
+5. **:w** from a diff pane or Git sidebar submits the saved batch;
+   **:WriteFeedback** is an alias. Unsaved annotation text is never included.
    With no receiver configured, feedback is queued locally only. Use
-   **:ReviewComments** to list/remove collected notes. **q** retains its normal
-   macro-recording behavior in annotations.
+   **d** on an annotated source line to delete its note (choose from a picker
+   if several overlap), or **:ReviewComments** to list/remove notes. **q**
+   retains its normal macro-recording behavior in annotations.
 6. After reviewing an agent's response, use **:ReviewArchive** to archive the
    round and start empty, then **Space R** to refresh the changes.
 
@@ -116,7 +123,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 
 | Key/command | Action |
 | --- | --- |
-| Space e / `:Explorer` | Focus Git sidebar in Review; focus Neo-tree while editing |
+| Space e / `:ft` / `:Explorer` | Focus Git sidebar in Review; focus Neo-tree while editing |
 | Space d / `:FocusDiff` | Focus diff in Review; focus editor while editing |
 | Space E | Toggle ordinary Neo-tree while editing; focus-only in Review |
 | Space r / `:Review` | Enter/focus Review |
@@ -128,7 +135,8 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
 | Space m / `:ReviewMark` | Toggle reviewed mark |
 | Space u / `:ReviewUnreviewed` | Toggle unreviewed-only filter |
-| i/a/o/O/I/A/c/d/s/S/r/R/x/p… | Edit annotation rather than source |
+| i/a/o/O/I/A/c/s/S/r/R/x/p… | Edit annotation rather than source |
+| d in source pane | Delete annotation covering cursor; picker if several overlap |
 | Visual selection, then i or Space c | Comment on exact selection |
 | Space c / `:ReviewComments` | List/remove draft comments |
 | Space s in a source pane | Stage/unstage the Git hunk containing the cursor |
@@ -136,8 +144,9 @@ subcommands also have hints; other arguments keep native Tab completion.
 | `:ReviewStage hunk` / `:ReviewStage file` | Explicitly stage; rejects STAGED entries |
 | `:ReviewUnstage hunk` / `:ReviewUnstage file` | Explicitly unstage; requires STAGED entry |
 | Space R / `:ReviewRefresh` | Refresh snapshots and changed-file list |
-| `:w` / `:WriteFeedback` | Queue/send feedback; never stage or save source |
-| `:wq` in annotation | Submit feedback and close only annotation |
+| `:w` in diff/sidebar / `:WriteFeedback` | Queue/send saved batch; never stage or save source |
+| `:w` / `:wq` in annotation | Save note locally and close annotation |
+| `:q` / `:q!` in annotation | Discard edits since last write and close |
 | `?` / `:help` | Help overlay; ?/q/Esc closes it |
 | `:ReviewHarness [name session]` | Show or change this repository's harness binding |
 | `:ReviewRetry` | Explicit retry after checking an uncertain/failed delivery |

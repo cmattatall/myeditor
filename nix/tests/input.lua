@@ -29,6 +29,32 @@ return function(equal)
 	local function lua(code, ...)
 		return vim.rpcrequest(child, "nvim_exec_lua", code, { ... })
 	end
+	local function line_shortcuts(context)
+		lua(
+			[[vim.api.nvim_buf_set_lines(0, 0, -1, false, {"  alpha", "tail"}); vim.api.nvim_win_set_cursor(0, {1, 4})]]
+		)
+		vim.rpcnotify(child, "nvim_input", "<Esc>i<C-a>")
+		equal(
+			true,
+			vim.wait(1000, function()
+				return lua([[return vim.fn.mode() == "i" and vim.api.nvim_win_get_cursor(0)[2] == 0]])
+			end, 10),
+			context .. ": Ctrl-a moves before leading whitespace without leaving Insert mode"
+		)
+		vim.rpcnotify(child, "nvim_input", "^<C-e>!<Esc>")
+		equal(
+			true,
+			vim.wait(1000, function()
+				return lua([[return vim.fn.mode() == "n" and vim.api.nvim_get_current_line() == "^  alpha!"]])
+			end, 10),
+			context .. ": Ctrl-e moves after the last character"
+		)
+		equal(
+			{ "^  alpha!", "tail" },
+			lua([[return vim.api.nvim_buf_get_lines(0, 0, -1, false)]]),
+			context .. ": shortcuts do not insert prior text or copy from the next line"
+		)
+	end
 	local ok, err = xpcall(function()
 		local channel = vim.rpcrequest(child, "nvim_get_api_info")[1]
 		_G.myeditor_input_results = {}
@@ -71,6 +97,68 @@ return function(equal)
 				end
 			end
 		end
+		lua([[vim.api.nvim_set_current_win(require("myeditor.review").state.new_win)]])
+		for _, move in ipairs({
+			{ "<D-w>h", "old_win" },
+			{ "<D-w>h", "tree_win" },
+			{ "<D-w>l", "old_win" },
+			{ "v<D-w>l", "new_win" },
+		}) do
+			vim.rpcnotify(child, "nvim_input", move[1])
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua(
+						[=[return vim.api.nvim_get_current_win() == require("myeditor.review").state[...]]=],
+						move[2]
+					)
+				end, 10),
+				"Cmd-w moves focus to " .. move[2]
+			)
+		end
+		equal("n", lua([[return vim.fn.mode()]]), "Cmd-w leaves Visual mode before moving focus")
+		for _, prefix in ipairs({ "", "v" }) do
+			lua([[vim.g.window_input_done = false]])
+			vim.rpcnotify(child, "nvim_input", prefix .. "<C-w>h<Esc>:let g:window_input_done = v:true<CR>")
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua([[return vim.g.window_input_done]])
+				end, 10),
+				"Ctrl-w input finishes without a window prefix"
+			)
+			equal(
+				true,
+				lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.new_win]]),
+				"Ctrl-w does not navigate windows in " .. (prefix == "" and "Normal" or "Visual") .. " mode"
+			)
+		end
+		for _, pane in ipairs({ "new_win", "old_win" }) do
+			lua([[vim.api.nvim_set_current_win(require("myeditor.review").state[...])]], pane)
+			vim.rpcnotify(child, "nvim_input", ":ft<CR>")
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.tree_win]])
+				end, 10),
+				"Typed ft focuses Review tree from " .. pane
+			)
+		end
+		lua([[local r=require("myeditor.review"); vim.api.nvim_set_current_win(r.state.new_win); r.compose(false)]])
+		line_shortcuts("Annotation")
+		vim.rpcnotify(child, "nvim_input", ":ft<CR>")
+		equal(
+			true,
+			vim.wait(1000, function()
+				return lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.tree_win]])
+			end, 10),
+			"Typed ft focuses Review tree from an annotation"
+		)
+		equal(
+			0,
+			lua([[return #require("myeditor.review").state.comments]]),
+			"ft neither saves nor submits an annotation"
+		)
 		lua([[require("myeditor.review").leave(); vim.cmd("edit plan.md")]])
 		equal("", lua([[return vim.fn.maparg("[", "n")]]), "Ordinary Markdown has no bare Review mapping")
 		equal(
@@ -78,6 +166,16 @@ return function(equal)
 			lua([[return vim.fn.maparg("[[", "n", false, true).buffer]]),
 			"Ordinary Markdown retains section mappings"
 		)
+		line_shortcuts("Ordinary file")
+		vim.rpcnotify(child, "nvim_input", ":ft<CR>")
+		equal(
+			true,
+			vim.wait(1000, function()
+				return lua([[return vim.bo.filetype == "neo-tree"]])
+			end, 10),
+			"Typed ft focuses filesystem tree outside Review"
+		)
+		lua([[vim.cmd("Neotree close")]])
 		for pass = 1, 3 do
 			vim.rpcnotify(child, "nvim_input", ":hs<CR>")
 			equal(
@@ -96,6 +194,17 @@ return function(equal)
 				"Composer closes back to file on pass " .. pass
 			)
 		end
+		lua([[vim.cmd("Harness send")]])
+		line_shortcuts("Harness message")
+		vim.rpcnotify(child, "nvim_input", "i<D-w>k")
+		equal(
+			true,
+			vim.wait(1000, function()
+				return lua([[return vim.bo.buftype == "" and vim.fn.mode() == "n"]])
+			end, 10),
+			"Cmd-w leaves Insert mode and moves above the message pane"
+		)
+		lua([[vim.cmd("Harness send"); vim.cmd("q")]])
 		local function hint()
 			return lua([[
 				for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -106,12 +215,14 @@ return function(equal)
 				return ""
 			]])
 		end
-		local function input(keys, line, ghost)
+		local function input(keys, line, ghost, pos)
 			vim.rpcnotify(child, "nvim_input", keys)
 			equal(
 				true,
 				vim.wait(2000, function()
-					return lua([[return vim.fn.getcmdline()]]) == line and hint() == ghost
+					return lua([[return vim.fn.getcmdline()]]) == line
+						and hint() == ghost
+						and (not pos or lua([[return vim.fn.getcmdpos()]]) == pos)
 				end, 10),
 				"Input " .. keys .. " leaves real text " .. line .. " and hint " .. ghost
 			)
@@ -128,6 +239,16 @@ return function(equal)
 		input("/ha", "ha", "")
 		input("<C-C>", "", "")
 		input(":edit auth.l<Tab>", "edit auth.lua", "")
+		input("<C-C>", "", "")
+		input(":echo 'tail'", "echo 'tail'", "")
+		input("<C-a>", "echo 'tail'", "", 1)
+		input("<C-e>", "echo 'tail'", "", 12)
+		input("<C-C>", "", "")
+		input(":set ft=lua ", "set ft=lua ", "")
+		input("<C-C>", "", "")
+		input("/ft ", "ft ", "")
+		input("<C-a>", "ft ", "", 1)
+		input("<C-e>", "ft ", "", 4)
 		input("<C-C>", "", "")
 		input(":h", "h", "elp")
 		input("<CR>", "", "")

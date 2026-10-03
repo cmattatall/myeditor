@@ -291,7 +291,7 @@ return function(root, equal, fails, keys)
 	local review_payload = feedback.read(s.last_submission)
 	equal({ comment }, review_payload.comments, "Review :w sends the accumulated annotation batch")
 	equal(nil, review_payload.message, "Review :w excludes the harness message draft")
-	equal(comment, s.comments[1], "Successful review send retains individual annotations")
+	equal({}, s.comments, "Successful review send clears individual annotations")
 	equal("Separate unsent message", session.message, "Review acknowledgment does not clear a general message")
 	feedback.settings = settings
 	review.archive()

@@ -8,10 +8,13 @@ revdiff parity.
 
 ## Navigation and review progress
 
-- **Space e** / `:Explorer` focuses the Git sidebar in Review and Neo-tree
+- **Space e** / `:ft` / `:Explorer` focuses the Git sidebar in Review and Neo-tree
   while editing. **Space d** / `:FocusDiff` focuses the diff or editor.
   **Space E** toggles ordinary Neo-tree while editing and is focus-only in
   Review. **Tab** switches tree/diff focus in Review.
+- **Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode and
+  command/search input, including annotations and harness messages.
+  Normal-mode Vim bindings remain unchanged.
 - **]** / **[** jump immediately to the next/previous cross-file hunk and
   accept counts. **Space j/k** select the next/previous changed file.
 - **Space f** / `:Files` fuzzy-finds nonignored project files while editing;
@@ -49,13 +52,17 @@ the remaining view toggles, filters, and general commands in the revdiff fork.
 
 General-message drafts clear after accepted/completed delivery, including the
 open `:harness send` window. Failed/pending/local-only messages and newer edits
-remain intact. Review annotations are separate: Review `:w` sends the batch
-without clearing those comments.
+remain intact. Review annotations are separate: annotation `:w` saves the note
+locally and closes the panel without sending. `:w` from a diff pane or Git
+sidebar sends the saved batch without clearing those comments or including
+unsaved annotation edits.
 
-Closing an annotation with `:q` collects its text without sending; starting
-another opens a fresh panel, even on the same hunk. Existing notes remain in
-the batch. General-message `:q` retains its draft for continued editing and
-does not block quitting the editor, including when the composer is hidden.
+Closing an annotation with `:q` discards edits since its last write; `:wq`
+saves locally and closes. Starting another opens a fresh panel, even on the
+same hunk. Saved notes remain in the batch. **d** in a source pane deletes a
+note covering the cursor, with a picker if several overlap; it never deletes
+source or retracts sent feedback. General-message `:q` retains its draft for
+continued editing and does not block quitting, even with a hidden composer.
 
 `:Harness install amp` installs the bundled anthrodiff bridge plugin after
 confirmation, including explicit backup/replacement of the old user-local

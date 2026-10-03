@@ -1,5 +1,7 @@
 # myeditor
 
+Testing
+
 A Nix-packaged Neovim setup for modal editing and agent-assisted code review.
 
 The self-contained [`nix/`](nix/) directory contains the flake, Home Manager

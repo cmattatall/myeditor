@@ -4,17 +4,20 @@
 MODAL EDITING AND AGENT REVIEW
 
   Space r         Enter Review                  :Review
-  Space e         Focus tree/sidebar             :Explorer
+  Space e / :ft   Focus tree/sidebar             :Explorer
   Space d         Focus editor/diff               :FocusDiff
+  Cmd-w h/j/k/l   Focus left/below/above/right window (macOS)
   Space f         Fuzzy files                     :Files
   Space /         Fuzzy project/Review text       :Search
   ] / [           Next/previous hunk across files (also from sidebar)
   Space s         Stage/unstage hunk under cursor (source pane)
   Space S         Stage/unstage file (sidebar selection or displayed diff)
   i               Start a fresh annotation on the reviewed line
-  Esc, :q         Collect annotation locally; close its editor (no send)
-  Esc, :w         Submit annotation; stay in its editor
-  Esc, :wq        Submit annotation and close its editor
+  d               Delete annotation on the reviewed line
+  Esc, :q         Discard unsaved annotation edits; close its editor
+  Esc, :w         Save annotation locally and close its editor
+  Esc, :wq        Save annotation locally and close its editor
+  :w in diff/tree Send the saved annotation batch to the harness
   Space q         Leave Review from a source pane
   ? / :help (:h)  Open this guide as an overlay (Normal mode)
 
@@ -43,8 +46,13 @@ Insert mode; Esc returns to Normal. v/V/Ctrl-v select characters/lines/blocks.
 Use motions, operators, registers, macros, undo and redo normally. :w saves
 ordinary files to disk; :wq saves and closes a window.
 
-The filesystem tree opens at startup. Space e focuses it, Space d focuses the
-editor, and Space E toggles it. Enter on a tree entry opens it. Space f fuzzy
+In Insert mode, Ctrl-a moves to the start of the line (before indentation),
+and Ctrl-e moves to the end, without leaving Insert mode. These work in files,
+annotations, and harness messages, and in : command and / search input.
+Normal-mode Ctrl-a still increments a number; Ctrl-e still scrolls the view.
+
+The filesystem tree opens at startup. Space e or :ft focuses it, Space d
+focuses the editor, and Space E toggles it. Enter opens a tree entry. Space f fuzzy
 finds every nonignored project file. Space / fuzzy-searches saved project file
 contents. Enter chooses and Esc cancels either picker. Native / and n/N search
 the current buffer.
@@ -85,10 +93,10 @@ Save ordinary file edits first, then Space r or :Review from a Git worktree.
 A separate tab shows the Git sidebar and protected old/new snapshots. Your
 editing tab, file tree, and unsaved buffers are retained.
 
-In a source pane, editing commands (i/a/I/A/o/O, c/d with motions, s/S, r/R,
+In a source pane, editing commands (i/a/I/A/o/O, c with motions, s/S, r/R,
 x/X, p/P, u/Ctrl-r, ., ~, >/<, =, J/gJ, gq/gw, gu/gU/g~, gp/gP)
-open a fresh annotation at that line instead of altering code. Closing it
-collects the text in the review batch; starting another opens an empty panel,
+open a fresh annotation at that line instead of altering code. Write it with
+:w to save it in the review batch; starting another opens an empty panel,
 even on the same line/hunk. An already-open panel retains its in-progress text.
 The command, count, and register apply to annotation text, not source text.
 Source motions such as e remain motions. To annotate a range, use v/V/Ctrl-v
@@ -102,16 +110,22 @@ The annotation is a normal editable buffer, with no custom editing mappings:
   u / Ctrl-r     Undo/redo annotation edits
   qa ... q       Record a macro in register a; @a replays it
   Esc            Return to Normal mode in the annotation
-  :w             Submit the feedback batch and keep the annotation open
-  :wq            Submit and close only the annotation window
-  :q / :q!       Collect locally and close; do not send
+  :w             Save this note locally and close the annotation window
+  :wq            Save locally and close only the annotation window
+  :q / :q!       Discard edits since the last write and close; do not send
 
-Collected annotations remain visible on the diff and in :ReviewComments.
-Closing a blank panel adds nothing. :ReviewComments can remove unwanted notes.
-:w changes meaning only in Review-owned buffers. It never saves or stages
-the reviewed file. Without a harness binding, it queues feedback locally.
-Repeated unchanged writes reuse the same batch ID. Editing within the same
-open panel updates that comment; a new panel adds a separate annotation.
+Saved annotations remain visible on the diff and in :ReviewComments. Closing
+an unwritten panel adds nothing. In a source pane, d deletes the annotation
+whose range covers the cursor; overlapping notes open a selection picker.
+Only the displayed snapshot and side are affected. :ReviewComments can remove
+other notes. Deletion does not retract feedback already sent to the harness.
+
+:w in a diff pane or the Git sidebar sends the saved batch; :WriteFeedback
+also sends only saved notes, never unsaved composer text. Annotation :w/:wq
+never sends. Review writes never save or stage the reviewed source file.
+Without a harness binding, submission queues feedback locally. Repeated
+unchanged submissions reuse the same batch ID. Each new annotation panel adds
+a separate note when saved, then returns focus to its source pane.
 
   Space e / :Explorer    Focus the Git sidebar
   Space d / :FocusDiff   Focus the diff/editor pane
@@ -197,8 +211,8 @@ In Review, select a thread/session belonging to this checkout:
 
 Replace placeholders with real IDs. :ReviewHarness alone shows the binding.
 Selection is saved per repository/worktree and does not send anything.
-:w or :WriteFeedback sends the current batch. Install/authenticate the agent
-CLI separately. Amp uses an explicit existing local CLI thread; this editor
+:w in a diff/sidebar or :WriteFeedback sends the saved batch. Authenticate the
+agent CLI separately. Amp uses an explicit existing local CLI thread; this editor
 does not synchronize orb or remote-runner workspaces. Stop any other process
 driving the same session first. Agent permissions are not bypassed.
 
@@ -243,12 +257,18 @@ PANES AND VIEW                                                 *myeditor-view*
   Space d / :FocusDiff  Focus editor (Editing) or new-side diff (Review)
   Space E               Toggle Neo-tree in Editing; focus Git tree in Review
   Tab                   Toggle sidebar/new-side focus in Review panes
-  Ctrl-w h/j/k/l        Focus the adjacent window, including old-side diff
-  Ctrl-w w             Cycle windows; see |windows| for native window controls
+  Cmd-w h/j/k/l         Focus the adjacent window, including old-side diff
+  Cmd-w w              Cycle windows; see |windows| for native window controls
   gt / gT              Next/previous tab; Review has its own tab
   :setlocal number / :setlocal nonumber   Show/hide line numbers
   :setlocal wrap / :setlocal nowrap       Wrap/unwrap the focused buffer view
   :colorscheme habamax  Restore the default theme; |:colorscheme| lists others
+
+Cmd-w is a prefix: press Cmd-w, release it, then h/j/k/l (or w to cycle).
+It leaves Insert/Visual mode before moving focus. Ctrl-w window navigation
+is disabled; Insert-mode Ctrl-w still deletes the previous word. Your terminal
+must forward Command keys; in Kitty, unmap its close-tab shortcut with
+`map cmd+w no_op` in kitty.conf.
 
 These are Neovim views, not revdiff's collapsed/compact/word-diff toggles.
 Avoid closing protected source panes with native window commands: closing a
@@ -259,7 +279,9 @@ Neo-tree's additional file operations are documented at |neo-tree-mappings|.
 COMMAND INDEX                                              *myeditor-commands*
 
 All myeditor commands are listed here. Capitalization matters in scripts;
-typed :harness and :hs are abbreviations, not additional Ex commands.
+typed :harness, :hs, and :ft are abbreviations, not additional Ex commands.
+:ft expands to :Explorer, focusing the Git sidebar in Review or the ordinary
+file tree while editing. Scripts should call :Explorer directly.
 
   :Review                   Enter/focus Review (Space r)
   :ReviewLeave              Leave Review, retaining drafts (Space q)
@@ -271,7 +293,7 @@ typed :harness and :hs are abbreviations, not additional Ex commands.
   :ReviewRefresh            Refresh saved snapshots (Space R)
   :ReviewStage hunk|file    Stage selected hunk/file (source pane for hunks)
   :ReviewUnstage hunk|file  Unstage selected hunk/file
-  :WriteFeedback            Submit review batch (alias behavior: :w)
+  :WriteFeedback            Submit saved review batch (like :w in diff/sidebar)
   :ReviewHarness [name ID]   Show/select CLI/custom receiver; see |myeditor-harness|
   :ReviewRetry              Retry last immutable delivery (same as :Harness retry)
   :ReviewOutbox             Open persisted payloads and receipts in a new tab
@@ -334,7 +356,7 @@ Different shortcuts are intentional where Neovim owns the editing key:
   s / S                           Space s/S in source panes (s/S edit annotation)
   a / Enter on code               i/a/o/O or source Visual selection then i
   @ / annotation list             Space c / :ReviewComments
-  O / :w flush                    :w / :WriteFeedback (O edits annotation)
+  O / :w flush                    :w in diff/sidebar / :WriteFeedback
   Space mark reviewed / F          Space m / Space u
   R / :reload                     Space R / :ReviewRefresh
   :harness send (:hs)              :harness send / :hs, then compose and :w

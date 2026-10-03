@@ -24,6 +24,13 @@ vim.opt.autowriteall = false
 vim.cmd.colorscheme("habamax")
 vim.fn.mkdir(vim.fn.stdpath("data"), "p")
 
+vim.keymap.set("n", "<D-w>", "<C-w>", { desc = "Window command prefix (Cmd-w)" })
+vim.keymap.set({ "i", "x" }, "<D-w>", "<Esc><C-w>", { desc = "Leave editing/selection for window command" })
+vim.keymap.set({ "n", "x" }, "<C-w>", "<Nop>", { desc = "Use Cmd-w for window commands" })
+vim.keymap.set("i", "<C-a>", "<Home>", { desc = "Start of line" })
+vim.keymap.set("i", "<C-e>", "<End>", { desc = "End of line" })
+vim.keymap.set("c", "<C-a>", "<C-b>", { desc = "Start of command line" })
+
 vim.api.nvim_set_hl(0, "MyeditorHelpBorder", { fg = "#9ba8b8", bg = "#303030" })
 vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 	callback = function(event)
@@ -96,6 +103,7 @@ for _, binding in ipairs({
 	vim.keymap.set("n", binding[1], binding[3], { desc = binding[4] })
 	vim.api.nvim_create_user_command(binding[2], binding[3], {})
 end
+vim.cmd("cnoreabbrev <expr> ft getcmdtype() == ':' && getcmdline() == 'ft' && getcmdpos() == 3 ? 'Explorer' : 'ft'")
 vim.keymap.set("n", "<leader>r", review.open, { desc = "Enter Review workspace" })
 vim.keymap.set("n", "<leader>E", function()
 	if review.active() then

@@ -137,6 +137,7 @@ function M.deliver(root, id, path, argv, retry, callback)
 		s.delivery = status.status
 		if status.status == "accepted" or status.status == "completed" then
 			clear_sent_message(s, path)
+			require("myeditor.review").clear_sent(root, path)
 		end
 		notify(
 			"Feedback " .. status.status .. ": " .. path .. (status.error and ("\n" .. status.error) or ""),

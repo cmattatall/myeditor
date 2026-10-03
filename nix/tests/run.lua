@@ -248,16 +248,6 @@ local function test()
 		equal(false, vim.fn.maparg("<C-s>", mode, false, true).buffer == 1, "No custom Ctrl-s mapping in " .. mode)
 	end
 	local composer = s.composer
-	vim.cmd.write()
-	equal(2, #s.comments, "Writing composer adds and submits its comment")
-	equal(composer, vim.api.nvim_get_current_buf(), "Writing feedback keeps the annotation open")
-	equal(
-		"Check the expiry boundary too.",
-		feedback.read(s.last_submission).comments[2].text,
-		"Write includes the current composer text in its payload"
-	)
-	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Composer never modifies source")
-	equal(index_before, run({ "write-tree" }), "Writing composer never stages source")
 	local written = s.last_submission
 	layout = vim.fn.winlayout()
 	keys("?")
@@ -267,11 +257,24 @@ local function test()
 	equal(written, s.last_submission, "Opening help does not submit feedback")
 	keys("<Esc>")
 	equal(composer, vim.api.nvim_get_current_buf(), "Esc returns to the annotation")
-	keys(":wq<CR>")
-	equal(nil, s.composer, "Native wq closes annotation")
-	equal(s.new_win, vim.api.nvim_get_current_win(), "Native wq returns to source pane")
-	equal(3, #vim.api.nvim_tabpage_list_wins(0), "wq does not close a source pane")
-	equal(written, s.last_submission, "Unchanged wq does not duplicate the batch")
+	keys(":w<CR>")
+	equal(2, #s.comments, "Writing composer saves its comment locally")
+	equal(path, s.last_submission, "Annotation write does not submit a batch")
+	equal(nil, s.composer, "Writing closes the annotation")
+	equal(s.new_win, vim.api.nvim_get_current_win(), "Write returns focus to the source pane")
+	equal(3, #vim.api.nvim_tabpage_list_wins(0), "Write leaves all source panes open")
+	equal(
+		"Check the expiry boundary too.",
+		s.comments[2].text,
+		"Write saves the annotation in this editor session"
+	)
+	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Composer never modifies source")
+	equal(index_before, run({ "write-tree" }), "Writing composer never stages source")
+	keys("i<Esc>:wq<CR>")
+	equal(nil, s.composer, "Native wq still closes a blank annotation")
+	equal(2, #s.comments, "Blank write adds no note")
+	equal(3, #vim.api.nvim_tabpage_list_wins(0), "Deferred close after wq does not close a source pane")
+	equal(written, s.last_submission, "Annotation wq never submits")
 
 	-- Source edit commands continue as native operators inside the annotation.
 	keys("cwVerify<Esc>")
@@ -303,12 +306,11 @@ local function test()
 	keys('"bP')
 	equal({ "Start " }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "Source paste preserves named register")
 	keys("Aone two note<Esc>0")
-	vim.api.nvim_set_current_win(s.new_win)
 	keys("2dw")
 	equal(
 		{ "two note" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"Source operator preserves count in an open annotation"
+		"Native delete preserves count inside an annotation"
 	)
 	keys(":wq<CR>")
 	equal(5, #s.comments, "Closed annotations remain separate even at the same source line")
@@ -386,29 +388,66 @@ local function test()
 	)
 	local before_close = s.last_submission
 	keys(":q<CR>")
-	equal(nil, s.composer, "Native q collects and closes the annotation")
+	equal(nil, s.composer, "Native q discards and closes the annotation")
 	equal(before_close, s.last_submission, "Closing an annotation does not send feedback")
-	equal("Preserve the refresh contract.", s.comments[1].text, "Closed text is collected in the batch")
-	equal(17, s.comments[1].line_end, "Closing preserves the exact visual range")
+	equal(0, #s.comments, "Unwritten annotation never enters the batch")
+	equal(nil, feedback.read(s.directory .. "/draft.json").draft, "Discarded text is removed from persistence")
 	keys("i<Esc>")
 	equal(
 		{ "" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
 		"Reentering starts a fresh panel even on the same hunk"
 	)
-	keys("iA second annotation<Esc>:q!<CR>")
-	equal(2, #s.comments, "Forced close also collects without overwriting the first annotation")
-	keys("i<Esc>:q<CR>")
-	equal(2, #s.comments, "Closing a blank fresh annotation adds nothing")
+	keys("iDiscard this too<Esc>:q!<CR>")
+	equal(0, #s.comments, "Forced close also discards unsaved text")
+	vim.api.nvim_win_set_cursor(s.new_win, { 16, 0 })
+	keys("VjiSaved range note<Esc>:w<CR>")
+	equal(17, s.comments[1].line_end, "Annotation write preserves exact visual range")
+	equal(before_close, s.last_submission, "Annotation write is local, not a submission")
+	equal(nil, s.composer, "Visual annotation write also closes its editor")
+	keys("iUNSAVED NOTE<Esc>")
+	vim.api.nvim_set_current_win(s.new_win)
 	keys(":w<CR>")
-	equal(s.comments, feedback.read(s.last_submission).comments, "Review write sends both collected annotations")
-	equal(2, #s.comments, "Sending retains the collected batch")
+	equal(1, #feedback.read(s.last_submission).comments, "Review write excludes the unwritten new annotation")
+	equal(
+		"Saved range note",
+		feedback.read(s.last_submission).comments[1].text,
+		"Review write sends only saved notes, not open composer text"
+	)
+	vim.api.nvim_set_current_win(s.composer_win)
+	keys(":q<CR>")
+	equal("Saved range note", s.comments[1].text, "q discards the new draft, not the saved note")
+	keys("iSecond saved annotation<Esc>:wq<CR>")
+	equal(2, #s.comments, "wq saves a separate annotation without sending")
+	keys(":w<CR>")
+	local submitted = feedback.read(s.last_submission)
+	equal(s.comments, submitted.comments, "Review write sends both saved annotations")
+	equal(2, #s.comments, "Sending retains the saved batch")
+	-- Delete only visible matching anchors; overlapping notes require a choice.
+	local old_note = review.add_comment(anchor("old", 17), "Keep old-side note")
+	vim.api.nvim_win_set_cursor(s.new_win, { 17, 0 })
+	local select = vim.ui.select
+	vim.ui.select = function(items, _, choose)
+		equal(2, #items, "Deletion picker includes only new-side overlapping notes")
+		choose(items[2])
+	end
+	keys("d")
+	vim.ui.select = select
+	equal(2, #s.comments, "d removes only the chosen overlapping annotation")
+	keys("d")
+	equal({ old_note }, s.comments, "d inside the range removes the note, not the opposite side")
+	keys("d")
+	equal(nil, s.composer, "d with no matching note does not open an editor")
+	equal(submitted, feedback.read(s.last_submission), "Deletion cannot alter an already-submitted payload")
+	equal(nil, feedback.read(s.directory .. "/draft.json").comments, "Annotations are not persisted between sessions")
+	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Annotation deletion does not change source")
+	equal(index_before, run({ "write-tree" }), "Annotation deletion does not stage source")
 	review.archive()
-	keys("iCollect on leaving Review<Esc>")
+	keys("iDiscard on leaving Review<Esc>")
 	review.leave()
 	review.open()
 	s = review.state
-	equal("Collect on leaving Review", s.comments[1].text, "Leaving Review collects an open annotation")
+	equal(0, #s.comments, "Leaving Review does not save an unwritten annotation")
 	keys("i<Esc>")
 	equal(
 		{ "" },
@@ -463,6 +502,8 @@ local function test()
 	review.select_harness("none")
 	equal({}, feedback.command(s.harness), "Local outbox can be selected without an agent")
 	dofile(tests .. "/harness.lua")(root, equal, fails, keys)
+	dofile(tests .. "/review-lifecycle.lua")(root, equal, fails, keys)
+	s = review.state
 
 	-- A partially staged file must show distinct HEAD/index/worktree states.
 	vim.api.nvim_set_current_win(s.new_win)
@@ -495,6 +536,10 @@ local function test()
 	fails(function()
 		review.stage(false, false)
 	end, "Select an UNSTAGED")
+	keys(" s")
+	equal(index_before, run({ "write-tree" }), "Space s on STAGED unstages the hunk")
+	vim.cmd("ReviewStage hunk")
+	review.show(1)
 	vim.cmd("ReviewUnstage hunk")
 	equal(index_before, run({ "write-tree" }), "Unstage restores index")
 	local function select_tree(path, group)

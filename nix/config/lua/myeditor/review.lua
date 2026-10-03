@@ -7,6 +7,7 @@ local selection = require("myeditor.selection")
 local tree_ns = api.nvim_create_namespace("myeditor.tree")
 local active_ns = api.nvim_create_namespace("myeditor.active-file")
 local hunk_ns = api.nvim_create_namespace("myeditor.hunk")
+local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 
 local function notify(message, level)
 	vim.notify(message, level or vim.log.levels.INFO, { title = "myeditor" })
@@ -36,9 +37,6 @@ end
 local function save()
 	local s = state()
 	feedback.write(s.directory .. "/draft.json", {
-		comments = s.comments,
-		snapshots = s.snapshots,
-		draft = s.draft,
 		harness = s.harness,
 		reviewed = s.reviewed,
 	})
@@ -93,7 +91,18 @@ local function owned_buffer(name, lines, editable)
 			if event.match ~= api.nvim_buf_get_name(buf) then
 				reject_write()
 			end
-			M.submit()
+			if editable then
+				M.save_composer()
+				local win = state().composer_win
+				-- Defer closing so :wq can finish without closing a source pane too.
+				vim.schedule(function()
+					if api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == buf then
+						api.nvim_win_close(win, true)
+					end
+				end)
+			else
+				M.submit()
+			end
 			if api.nvim_buf_is_valid(buf) then
 				vim.bo[buf].modified = false
 			end
@@ -149,6 +158,7 @@ local function render_comments()
 	marks.render_for_buffer(s.old_buf, "old", s.current.path)
 	marks.render_for_buffer(s.new_buf, "new", s.current.path)
 	marks.align_buffers(s.old_buf, s.new_buf, s.current.path, s.current.path)
+	vim.cmd.redrawstatus()
 end
 
 local function side_at_cursor()
@@ -521,8 +531,6 @@ end
 local function release_composer()
 	local s = state()
 	local buf = s.composer
-	-- BufLeave captures text even if :q! unloads it before WinClosed runs.
-	M.save_composer()
 	s.draft = nil
 	s.composer, s.composer_win = nil, nil
 	save()
@@ -553,7 +561,6 @@ function M.compose(visual, keys)
 	else
 		anchor.selection = selection.line(buf, line)
 	end
-	M.save_composer() -- Collect a recovered draft before starting a fresh annotation.
 	local draft = { anchor = anchor, text = "" }
 	s.draft = draft
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
@@ -565,7 +572,7 @@ function M.compose(visual, keys)
 	vim.wo[s.composer_win].number = false
 	vim.wo[s.composer_win].signcolumn = "no"
 	vim.wo[s.composer_win].wrap = true
-	vim.wo[s.composer_win].winbar = " Annotation · :w send · :q collect+close %<"
+	vim.wo[s.composer_win].winbar = " Annotation · :w save+close · :q discard+close %<"
 		.. vim.fn.strtrans(draft.anchor.file):gsub("%%", "%%%%")
 		.. ":"
 		.. draft.anchor.selection.spans[1].line
@@ -590,10 +597,38 @@ function M.compose(visual, keys)
 	end
 end
 
+function M.clear_sent(root, path)
+	local s = reviews[root]
+	if not s then
+		return
+	end
+	local payload = feedback.read(path)
+	if not payload or not payload.comments then
+		return
+	end
+	local sent = {}
+	for _, comment in ipairs(payload.comments) do
+		if comment.id then
+			sent[comment.id] = comment
+		end
+	end
+	s.comments = vim.tbl_filter(function(comment)
+		if not vim.deep_equal(comment, sent[comment.id]) then
+			return true
+		end
+		if s.draft and s.draft.comment_id == comment.id then
+			s.draft.comment_id = nil
+		end
+		return false
+	end, s.comments)
+	if M.state == s then
+		render_comments()
+	end
+end
+
 function M.submit(retry)
 	local s = state()
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before submitting again")
-	M.save_composer()
 	assert(#s.comments > 0, "No feedback to submit")
 	local snapshots, snapshot_status, warnings = {}, {}, {}
 	for _, comment in ipairs(s.comments) do
@@ -659,6 +694,54 @@ function M.archive()
 	notify("Draft round archived locally; nothing sent to the agent")
 end
 
+local function remove_comment(comment)
+	local s = state()
+	for i, item in ipairs(s.comments) do
+		if item.id == comment.id then
+			table.remove(s.comments, i)
+			if s.draft and s.draft.comment_id == comment.id then
+				s.draft.comment_id = nil
+			end
+			save()
+			render_comments()
+			return
+		end
+	end
+end
+
+function M.delete_comment()
+	local s = state()
+	local side, line = side_at_cursor(), api.nvim_win_get_cursor(0)[1]
+	local matches = {}
+	for _, comment in ipairs(s.comments) do
+		if
+			s.current
+			and comment.snapshot_id == s.current.id
+			and comment.side == side
+			and comment.line <= line
+			and comment.line_end >= line
+		then
+			table.insert(matches, comment)
+		end
+	end
+	if #matches == 0 then
+		notify("No annotation on this line")
+	elseif #matches == 1 then
+		remove_comment(matches[1])
+	else
+		vim.ui.select(matches, {
+			prompt = "Delete annotation:",
+			format_item = function(comment)
+				return comment.text:gsub("\n", " ")
+			end,
+		}, function(comment)
+			if M.state == s and comment then
+				remove_comment(comment)
+			end
+		end)
+	end
+end
+
 function M.list_comments()
 	local s = state()
 	vim.ui.select(s.comments, {
@@ -678,14 +761,7 @@ function M.list_comments()
 			return
 		end
 		if vim.fn.confirm("Remove this draft comment?", "&Remove\n&Cancel", 2) == 1 then
-			for i, item in ipairs(s.comments) do
-				if item.id == comment.id then
-					table.remove(s.comments, i)
-					break
-				end
-			end
-			save()
-			render_comments()
+			remove_comment(comment)
 		end
 	end)
 end
@@ -737,12 +813,12 @@ function M.open()
 		error("Could not read saved feedback; file left intact: " .. tostring(draft))
 	end
 	draft = draft or {}
+	local pending = reviews[root] or {}
 	local s = {
 		root = root,
 		directory = directory,
-		comments = draft.comments or {},
-		snapshots = draft.snapshots or {},
-		draft = draft.draft,
+		comments = pending.comments or {},
+		snapshots = pending.snapshots or {},
 		harness = target,
 		reviewed = draft.reviewed or {},
 		previous_tab = api.nvim_get_current_tabpage(),
@@ -750,6 +826,7 @@ function M.open()
 		delivery = "draft",
 	}
 	M.state = s
+	reviews[root] = s
 	vim.cmd.tabnew()
 	s.tab = api.nvim_get_current_tabpage()
 	vim.cmd("tcd " .. vim.fn.fnameescape(root))
@@ -787,7 +864,6 @@ function M.open()
 			"S",
 			"r",
 			"R",
-			"d",
 			"D",
 			"x",
 			"X",
@@ -815,6 +891,7 @@ function M.open()
 				M.compose(false, prefix .. key)
 			end, "Comment instead of editing code")
 		end
+		map(buf, "n", "d", M.delete_comment, "Delete annotation on this line")
 		map(buf, "x", "i", function()
 			M.compose(true)
 		end, "Comment on exact selection")
@@ -953,15 +1030,15 @@ function M.setup()
 	end
 	api.nvim_create_autocmd("QuitPre", {
 		callback = function()
-			if M.state then
-				M.save_composer()
+			if M.state and M.state.composer and api.nvim_buf_is_loaded(M.state.composer) then
+				-- Closing discards edits; only explicit writes add/update comments.
+				vim.bo[M.state.composer].modified = false
 			end
 		end,
 	})
 	api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			if M.state then
-				M.save_composer()
 				M.state.draft = nil
 				save()
 				vim.uv.fs_unlink(M.state.directory .. "/editor.lock")
