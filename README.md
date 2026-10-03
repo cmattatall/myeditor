@@ -1,25 +1,27 @@
 # myeditor
 
-A portable Neovim setup for modal editing and agent-assisted code review.
+A Nix-packaged Neovim setup for modal editing and agent-assisted code review.
 
-## Planned foundation
+The self-contained [`nix/`](nix/) directory contains the flake, Home Manager
+module, pinned plugins, configuration, and tests. Copy that directory into
+your dotfiles or consume it as a flake input.
 
-- Neovim for Normal, Insert, and Visual editing.
-- [codediff.nvim](https://github.com/esmuellert/codediff.nvim) for Git diffs,
-  the changed-file sidebar, and staging.
-- [review.nvim](https://github.com/georgeguimaraes/review.nvim) for inline
-  feedback on code and selected ranges.
-- A custom Review workspace and agent adapter for submitting feedback with
-  `:w` without writing the reviewed source files.
+```sh
+nix run path:./nix
+```
 
-## Distribution plan
+The `myeditor` command uses `NVIM_APPNAME=myeditor`; your normal `nvim`
+configuration is untouched. Press **Space r** for Review, **i** to comment,
+and **:w** to queue/send feedback instead of saving source. Git staging is
+an explicit, separate action.
 
-Keep the configuration and a version-controlled `lazy-lock.json` in this
-repository. Use `NVIM_APPNAME=myeditor` to keep its configuration, plugins,
-and state separate from an existing Neovim setup. Agent credentials and
-machine-specific state stay outside this repository.
+Supports **Amp**, **Claude Code**, and custom harness receivers. Select a
+thread/session per repository with `:ReviewHarness amp T-…`; configuration
+and credentials stay separate from your portable editor setup.
 
-## Status
+Built on [Codediff](https://github.com/esmuellert/codediff.nvim)'s diff renderer,
+[review.nvim](https://github.com/georgeguimaraes/review.nvim)'s comment renderer,
+and [Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim) for ordinary editing.
 
-Repository scaffold only. The Neovim configuration, installer, and custom
-Review workflow have not been implemented yet.
+See the [installation, workflow, and agent integration guide](nix/README.md).
+Planned worktree switching and live refresh are tracked in the [feature list](FEATURES.md).

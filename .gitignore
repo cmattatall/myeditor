@@ -1,0 +1,10 @@
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Default Nix build output links
+/result
+/result-*
+/nix/result
+/nix/result-*

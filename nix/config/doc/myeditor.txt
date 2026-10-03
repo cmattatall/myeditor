@@ -1,0 +1,194 @@
+*myeditor.txt*                 myeditor help                         *myeditor*
+                                                                  *help.txt*
+
+MODAL EDITING AND AGENT REVIEW
+
+  Space r         Enter Review                  :Review
+  Space e         Focus tree/sidebar             :Explorer
+  Space d         Focus editor/diff               :FocusDiff
+  Space f         Fuzzy files                     :Files
+  Space /         Fuzzy project/Review text       :Search
+  ] / [           Next/previous hunk across files (also from sidebar)
+  i               Start/edit an annotation on the reviewed line
+  Esc, :w         Submit annotation; stay in its editor
+  Esc, :wq        Submit annotation and close its editor
+  Space q         Leave Review from a source pane
+  :help           Open this guide as an overlay from any buffer
+
+Follow a |link| with Ctrl-]; return with Ctrl-t. Close help with Esc, q, or :q.
+Use / to search. Space means the leader key, not a simultaneous chord.
+
+  |myeditor-editing|       Ordinary files and navigation
+  |myeditor-review|        Review and annotation editing
+  |myeditor-git|           Staging and refreshing
+  |myeditor-harness|       Amp, Claude Code, and custom receivers
+  |myeditor-drafts|        Drafts, retries, and limitations
+  |helphelp|              Neovim's help system
+
+==============================================================================
+ORDINARY EDITING                                            *myeditor-editing*
+
+Normal, Insert, and Visual modes use regular Neovim bindings. i/a/o enter
+Insert mode; Esc returns to Normal. v/V/Ctrl-v select characters/lines/blocks.
+Use motions, operators, registers, macros, undo and redo normally. :w saves
+ordinary files to disk; :wq saves and closes a window.
+
+The filesystem tree opens at startup. Space e focuses it, Space d focuses the
+editor, and Space E toggles it. Enter on a tree entry opens it. Space f fuzzy
+finds every nonignored project file. Space / fuzzy-searches saved project file
+contents. Enter chooses and Esc cancels either picker. Native / and n/N search
+the current buffer.
+
+Native reference topics still work: :help motion, :help registers, :help undo.
+
+==============================================================================
+REVIEW AND ANNOTATIONS                                        *myeditor-review*
+
+Save ordinary file edits first, then Space r or :Review from a Git worktree.
+A separate tab shows the Git sidebar and protected old/new snapshots. Your
+editing tab, file tree, and unsaved buffers are retained.
+
+In a source pane, editing commands (i/a/I/A/o/O, c/d with motions, s/S, r/R,
+x/X, p/P, and others) open the annotation at that line instead of altering
+code. An existing annotation is reopened; otherwise a blank one is created.
+The command, count, and register apply to annotation text, not source text.
+Source motions such as e remain motions. To annotate a range, use v/V/Ctrl-v
+on source, then i or Space c. The exact selection is attached to the comment.
+
+The annotation is a normal editable buffer, with no custom editing mappings:
+  i/a/I/A/o/O     Insert/append/open a line in the annotation
+  cw, ciw, cc     Change annotation text using normal operators/motions
+  dd, x, p       Delete/paste annotation text
+  v/V/Ctrl-v     Select annotation text for editing
+  u / Ctrl-r     Undo/redo annotation edits
+  qa ... q       Record a macro in register a; @a replays it
+  Esc            Return to Normal mode in the annotation
+  :w             Submit the feedback batch and keep the annotation open
+  :wq            Submit and close only the annotation window
+  :q             Close a saved annotation without submitting again
+  :q!            Close an unfinished annotation without sending it
+
+Unfinished text is retained as a draft even after :q!; reopen it with i.
+:w changes meaning only in Review-owned buffers. It never saves or stages
+the reviewed file. Without a harness binding, it queues feedback locally.
+Repeated unchanged writes reuse the same batch ID. A modified annotation
+updates its existing comment rather than adding a duplicate.
+
+  Space e / :Explorer    Focus the Git sidebar
+  Space d / :FocusDiff   Focus the diff/editor pane
+  Space E                Toggle Neo-tree; focus-only in Review
+  Tab                    Toggle tree/diff focus
+  Space j / Space k      Next/previous changed file
+  ] / [                  Next/previous hunk across files and Git groups
+  Space f / :Files       Fuzzy visible entries (staged/unstaged distinct)
+  Space / / :Search      Fuzzy old+new lines, including deletions
+  Space m / :ReviewMark Toggle reviewed ✓ / unreviewed ○ on selected entry
+  Space u / :ReviewUnreviewed  Toggle unreviewed-only filtering
+  Space c (Normal)       List/remove draft comments
+  Space q / :ReviewLeave Return to editing, retaining drafts
+  q (sidebar only)       Return to editing
+
+Hunk jumps work from either source pane or the sidebar without changing focus.
+Counts work (3] skips three hunks). Navigation stops at the first/last hunk;
+it does not wrap. A gutter arrow/bar marks the selected change in both panes.
+Small hunks are centered; tall hunks start near the top of the view.
+
+Reviewed marks are private per worktree and fingerprint changed content,
+independently for staged and unstaged entries. They survive reopen, refresh,
+and context-only shifts, but clear if changed content changes. The unreviewed
+filter also affects Review pickers and navigation.
+
+==============================================================================
+GIT ACTIONS                                                     *myeditor-git*
+
+STAGED, UNSTAGED, and UNTRACKED have separate colored headers and file counts.
+Empty sections remain visible. Partially staged files appear in both groups:
+STAGED compares HEAD/index; UNSTAGED compares index/worktree.
+
+  Space s (source pane)  Stage/unstage the Git hunk at the cursor
+  Space S (source pane)  Stage/unstage the whole file
+  Space R                Refresh snapshots and changed files
+  :ReviewRefresh         Same as Space R
+
+Lowercase s and uppercase S/R are annotation editing keys, not Git actions.
+New/deleted files require whole-file staging. Renames appear as delete/add
+pairs. Stage before commenting where possible: changing the comparison can
+make an annotation stale. Git context hunks can differ from rendered changes.
+
+==============================================================================
+AGENT HARNESSES                                             *myeditor-harness*
+
+To steer an already-running Amp process through the installed revdiff plugin:
+  :Harness connect amp   Manually discover a live match in this checkout
+  :Harness send          Open a general-message acwrite buffer
+  :Harness status        Show connection/delivery status
+  :Harness retry         Retry explicitly after inspection
+  :Harness disconnect    Disconnect; retain drafts; do not stop the agent
+
+One exact live match is chosen directly; multiple matches open a fuzzy session
+picker. Discovery and refresh are not automatic. Connecting performs no send.
+In the message buffer, normal Vim editing applies; :w submits only, :wq submits
+and closes, and :q! closes while retaining the draft. An accepted ACK means
+queued steering, not a completed agent turn.
+
+The existing revdiff plugin supplies the private ~/.cache/revdiff/amp registry;
+myeditor does not install or reload it. Lowercase typed :harness and :hs expand
+to :Harness and :Harness send. Programmatic callers must use uppercase Neovim
+custom commands. Credentials never belong in Nix or Git.
+
+The bottom bar in Editing and Review shows the harness, session suffix, and
+delivery state. :harness status shows the full session ID and last receipt.
+This is binding/delivery information, not a live agent health check. "local"
+means feedback stays in the local outbox; "accepted" means queued steering.
+
+The following is a separate transport: it starts a CLI continuation rather
+than steering a live plugin connection.
+
+In Review, select a thread/session belonging to this checkout:
+  :ReviewHarness amp T-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  :ReviewHarness claude YOUR-SESSION-ID
+  :ReviewHarness custom
+  :ReviewHarness none
+
+Replace placeholders with real IDs. :ReviewHarness alone shows the binding.
+Selection is saved per repository/worktree and does not send anything.
+:w or :WriteFeedback sends the current batch. Install/authenticate the agent
+CLI separately. Amp uses an explicit existing local CLI thread; this editor
+does not synchronize orb or remote-runner workspaces. Stop any other process
+driving the same session first. Agent permissions are not bypassed.
+
+The custom receiver is configured through programs.myeditor.feedbackCommand
+in Home Manager (harness = "custom"), or feedback_command in settings.json.
+It receives a JSON file path and must acknowledge the submission ID.
+
+==============================================================================
+DRAFTS AND DELIVERY                                          *myeditor-drafts*
+
+  :ReviewOutbox   Browse local feedback payloads and delivery receipts
+  :ReviewRetry    Explicitly retry a failed/uncertain delivery
+  :ReviewArchive Archive the round and clear drafts (asks for confirmation)
+
+Keep the editor running during delivery. After an agent response, close the
+annotation, archive the round, and refresh. "completed" means the agent turn
+finished; it does not prove the requested changes were made or tested.
+
+Drafts/outbox are private files under stdpath("state")/reviews/. Source text
+can be sensitive; only submit to a harness you intend to receive it. Errors
+and uncertain deliveries are retained, not silently retried. Inspect the
+session and receipt before retrying an interrupted built-in adapter.
+
+Review currently reads saved worktree/index changes. Feedback on stale or
+unverifiable snapshots includes a warning, status, and the original reviewed
+text/coordinates. The agent must reconcile these with current files; comments
+are not silently re-anchored. Staging still rejects stale snapshots. Retries
+send the original submission, even if drafts or files have since changed.
+Live refresh and a worktree switcher are planned;
+use Space R for now. Binary files, merge conflicts and files over 2 MiB are
+not supported. Existing editing buffers retain normal Neovim behavior.
+
+Revdiff parity is intentionally partial. Worktree switching, automatic refresh,
+LSP symbols/definition/references, blame, collapsed/compact presentation,
+file/hunk annotation scopes and annotation navigation, and broader filters and
+general command parity remain pending. See FEATURES.md for the inventory.
+
+ vim:tw=78:ts=8:ft=help:norl:

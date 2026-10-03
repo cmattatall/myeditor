@@ -1,0 +1,84 @@
+{
+  "nodes": {
+    "codediff": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789430628,
+        "narHash": "sha256-7jJrPKEhJup9p0GJhb3W0NvIPpOOzwqcDRKj9/qaOkc=",
+        "owner": "esmuellert",
+        "repo": "codediff.nvim",
+        "rev": "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "esmuellert",
+        "repo": "codediff.nvim",
+        "rev": "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e",
+        "type": "github"
+      }
+    },
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790989254,
+        "narHash": "sha256-ZN+riaeFuE+DZ5zfqJiXlM12jLwZzeIXiNkU1YeHMXI=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "acd21c5a3420a9d5fd0ed06299b10828267ef9ba",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1790769526,
+        "narHash": "sha256-5AIVFLRcx8YAwbFTVPTs7YhwJH7JyHfAQsvXmpovcXI=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c9fe7d12cd78d1adcd12dd15e24432dde5b155a0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "review": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789657151,
+        "narHash": "sha256-yt5/ixbXwKzxonbwQJGUd3dPIdDeZe9E0KPiMJOK4bA=",
+        "owner": "georgeguimaraes",
+        "repo": "review.nvim",
+        "rev": "f72a347538913ac558d2440dd3899426a2dd85ae",
+        "type": "github"
+      },
+      "original": {
+        "owner": "georgeguimaraes",
+        "repo": "review.nvim",
+        "rev": "f72a347538913ac558d2440dd3899426a2dd85ae",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "codediff": "codediff",
+        "home-manager": "home-manager",
+        "nixpkgs": "nixpkgs",
+        "review": "review"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
