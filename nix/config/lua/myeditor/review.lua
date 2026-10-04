@@ -256,6 +256,7 @@ function M.show(index, snapshot)
 	local entry = assert(s.entries[index], "No changed file selected")
 	snapshot = snapshot or git.snapshot(s.root, entry)
 	s.index, s.current = index, snapshot
+	s.unstaged_exhausted = nil
 	s.snapshots[snapshot.id] = snapshot
 	local old_lines, new_lines = git.lines(snapshot.old), git.lines(snapshot.new)
 	set_lines(s.old_buf, old_lines)
@@ -370,6 +371,15 @@ local function read_changes(s, preferred)
 		end
 	end
 	local index = math.min(s.index or 1, #visible)
+	if s.unstaged_exhausted and not preferred then
+		index = nil
+		for i, entry in ipairs(visible) do
+			if entry.group ~= "staged" then
+				index = i
+				break
+			end
+		end
+	end
 	if preferred then
 		for i, entry in ipairs(visible) do
 			if entry_key(entry) == entry_key(preferred) then
@@ -429,7 +439,6 @@ function M.refresh(preferred, changes)
 	end
 	vim.list_extend(lines, {
 		" ─────────────────────────",
-		" Enter    focus diff",
 		" ] / [    next/prev hunk",
 		" Tab      tree/diff focus",
 		" Spc f    fuzzy files",
@@ -450,7 +459,7 @@ function M.refresh(preferred, changes)
 	for row, highlight in pairs(headings) do
 		api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 0, { line_hl_group = highlight })
 	end
-	if #s.entries > 0 then
+	if changes.index and s.entries[changes.index] then
 		local ok, err = false, changes.error
 		if not err then
 			ok, err = pcall(M.show, changes.index, changes.snapshot)
@@ -464,11 +473,21 @@ function M.refresh(preferred, changes)
 			notify(tostring(err), vim.log.levels.WARN)
 		end
 	else
-		s.current = nil
+		s.index, s.current = nil, nil
 		s.diff = nil
 		mark_hunk(nil)
 		set_lines(s.old_buf, {})
 		set_lines(s.new_buf, {})
+		for _, buf in ipairs({ s.old_buf, s.new_buf }) do
+			api.nvim_buf_clear_namespace(buf, -1, 0, -1)
+		end
+		if s.unstaged_exhausted then
+			api.nvim_win_set_cursor(s.tree_win, { s.unstaged_row, 0 })
+			vim.wo[s.new_win].winbar = " No unstaged hunks · :fs to review staged changes"
+			if s.old_win then
+				vim.wo[s.old_win].winbar = ""
+			end
+		end
 	end
 	save()
 end
@@ -645,6 +664,51 @@ function M.jump_hunk(direction)
 	notify("No hunks in this Git group")
 end
 
+local function advance_staged_hunk(snapshot, hunk, entries, index)
+	local s = state()
+	-- Worktree coordinates survive staging, even when the old side shifts.
+	if s.current and entry_key(s.current) == entry_key(snapshot) then
+		for i, change in ipairs(s.diff.changes) do
+			if change.modified.start_line >= hunk.new_start + hunk.new_count then
+				focus_hunk(i)
+				return true
+			end
+		end
+	end
+	local remaining, order = {}, {}
+	for i, entry in ipairs(s.entries) do
+		if entry.group ~= "staged" then
+			remaining[entry_key(entry)] = i
+		end
+	end
+	-- Follow the previous file order, wrapping to earlier hunks only at the end.
+	for offset = 1, #entries do
+		local key = entry_key(entries[(index - 1 + offset) % #entries + 1])
+		if remaining[key] then
+			table.insert(order, remaining[key])
+			remaining[key] = nil
+		end
+	end
+	-- Include files that appeared while Git was applying the patch.
+	for i, entry in ipairs(s.entries) do
+		if remaining[entry_key(entry)] then
+			table.insert(order, i)
+		end
+	end
+	for _, i in ipairs(order) do
+		local ok, err = pcall(M.show, i)
+		if ok and #s.diff.changes > 0 then
+			focus_hunk(1)
+			return true
+		elseif not ok then
+			notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
+		end
+	end
+	s.unstaged_exhausted = true
+	M.refresh()
+	return false
+end
+
 function M.stage(whole_file, unstage)
 	local s = assert(M.active(), "Enter Review first")
 	local win = api.nvim_get_current_win()
@@ -682,8 +746,12 @@ function M.stage(whole_file, unstage)
 			unstage and "Select a STAGED entry" or "Select an UNSTAGED entry"
 		)
 	end
-	git.stage(s.root, snapshot, side, line, whole_file)
+	local entries, index = s.entries, s.index
+	local hunk = git.stage(s.root, snapshot, side, line, whole_file)
 	M.refresh(next_entry or snapshot)
+	if hunk and snapshot.group ~= "staged" and not advance_staged_hunk(snapshot, hunk, entries, index) then
+		win = s.tree_win
+	end
 	if staging_from_tree and not next_entry then
 		api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
 		api.nvim_win_set_cursor(s.tree_win, { s.unstaged_row, 0 })
@@ -1067,13 +1135,6 @@ function M.open()
 	vim.wo[s.tree_win].winhighlight = "CursorLine:ReviewTreeSelection"
 	api.nvim_win_set_width(s.tree_win, math.min(28, math.floor(vim.o.columns / 5)))
 	vim.cmd("wincmd =")
-	map(s.tree_buf, "n", "<CR>", function()
-		local index = assert(s.rows[api.nvim_win_get_cursor(0)[1]], "Select a changed file")
-		if index ~= s.index or not s.current then
-			M.show(index)
-		end
-		api.nvim_set_current_win(s.new_win)
-	end, "Focus selected diff")
 	map(s.tree_buf, "n", "q", M.leave, "Leave Review")
 	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
 		for _, key in ipairs({
@@ -1153,7 +1214,8 @@ end
 function M.statusline()
 	local s = M.state
 	if s and api.nvim_get_current_tabpage() == s.tab then
-		local file = s.current and vim.fn.strtrans(s.current.path):gsub("%%", "%%%%") or "No changes"
+		local file = s.current and vim.fn.strtrans(s.current.path):gsub("%%", "%%%%")
+			or (#s.entries > 0 and "No file selected" or "No changes")
 		return " REVIEW · "
 			.. vim.fn.strtrans(s.reference or ""):gsub("%%", "%%%%")
 			.. " · "

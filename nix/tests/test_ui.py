@@ -165,7 +165,7 @@ class EditorUI(unittest.TestCase):
 
     def test_split_balances_on_resize(self):
         editor = self.launch(self.root, columns=80)
-        self.keys(editor, "<CR>")
+        self.keys(editor, "<Tab>")
         self.keys(editor, "]")
         snapshot = self.lua(editor, "return s.current.id")
 
@@ -292,7 +292,7 @@ class EditorUI(unittest.TestCase):
         self.assertEqual("", editor.options["guicursor"])
         self.assertTrue(self.lua(editor, "return s == nil"))
 
-    def test_enter_focuses_diff_for_hunk_staging(self):
+    def test_tab_focuses_diff_for_hunk_staging(self):
         editor = self.launch(self.root)
         baseline = subprocess.check_output(
             ["git", "-C", self.root, "show", "HEAD:auth.lua"]
@@ -302,7 +302,7 @@ class EditorUI(unittest.TestCase):
             self.keys(editor, f":view {layout}<CR>")
             self.keys(editor, "]")
             self.keys(editor, " e")
-            self.keys(editor, "<CR>")
+            self.keys(editor, "<Tab>")
             self.assertEqual(
                 [True, "table", 2],
                 self.lua(
@@ -324,15 +324,17 @@ class EditorUI(unittest.TestCase):
             )
             self.keys(editor, ":fs<CR>")
             self.keys(editor, " e")
-            self.keys(editor, "<CR>")
+            self.keys(editor, "<Tab>")
             self.keys(editor, "s")
             self.assertEqual(
                 baseline,
                 subprocess.check_output(["git", "-C", self.root, "show", ":auth.lua"]),
             )
             self.assertEqual(changed, Path(self.root, "auth.lua").read_bytes())
-        # Queued movement + Enter can run before CursorMoved previews that row.
-        self.keys(editor, "<Tab>j<CR>")
+        self.keys(editor, "<Tab>")
+        self.assertEqual("", self.lua(editor, 'return vim.fn.maparg("<CR>", "n")'))
+        self.keys(editor, "j")
+        self.keys(editor, "<Tab>")
         self.assertEqual(
             [True, "removed.lua"],
             self.lua(
@@ -341,9 +343,181 @@ class EditorUI(unittest.TestCase):
             ),
         )
 
+    def test_hunk_staging_ignores_metadata_words_in_file_contents(self):
+        baseline = [f"original line {i}\n" for i in range(1, 46)]
+        baseline[3:5] = ["new file mode 100644\n", "deleted file mode 100644\n"]
+        path = Path(self.root, "auth.lua")
+        path.write_text("".join(baseline))
+        subprocess.run(["git", "-C", self.root, "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-qm", "Metadata words fixture"],
+            check=True,
+        )
+        changed = baseline.copy()
+        changed[5], changed[35] = "first edit\n", "later edit\n"
+        path.write_text("".join(changed))
+        editor = self.launch(self.root)
+        self.keys(editor, "<Tab>")
+        self.keys(editor, "s")
+        partial = baseline.copy()
+        partial[5] = changed[5]
+        self.assertEqual(
+            "".join(partial),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.keys(editor, ":fs<CR>")
+        self.keys(editor, "s")
+        self.assertEqual(
+            "".join(baseline),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.assertEqual("".join(changed), path.read_text())
+
+    def test_staging_advances_hunks_across_files_and_wraps(self):
+        baseline = [f"-- original line {i}\n" for i in range(1, 61)]
+        path = Path(self.root, "auth.lua")
+        path.write_text("".join(baseline))
+        Path(self.root, "beta.lua").write_text("return false\n")
+        subprocess.run(["git", "-C", self.root, "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-qm", "Navigation fixture"], check=True
+        )
+        changed = (
+            baseline[:4] + ["-- inserted one\n", "-- inserted two\n"] + baseline[4:]
+        )
+        changed[26], changed[46] = "-- changed middle\n", "-- changed last\n"
+        path.write_text("".join(changed))
+        Path(self.root, "beta.lua").write_text("return true\n")
+        editor = self.launch(self.root)
+        self.lua(editor, "vim.api.nvim_set_current_win(s.old_win)")
+        self.keys(editor, "]")
+        self.keys(editor, "s")
+        self.assertEqual(
+            ["unstaged", "auth.lua", 45, 47, True],
+            self.lua(
+                editor,
+                "return {s.current.group, s.current.path, vim.api.nvim_win_get_cursor(s.old_win)[1], vim.api.nvim_win_get_cursor(s.new_win)[1], vim.api.nvim_get_current_win() == s.old_win}",
+            ),
+        )
+        partial = baseline.copy()
+        partial[24] = "-- changed middle\n"
+        self.assertEqual(
+            "".join(partial),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.keys(editor, "s")
+        self.assertEqual(
+            ["unstaged", "beta.lua"],
+            self.lua(editor, "return {s.current.group, s.current.path}"),
+        )
+        self.keys(editor, "s")
+        self.assertEqual(
+            ["unstaged", "auth.lua", 1],
+            self.lua(
+                editor, "return {s.current.group, s.current.path, s.selected_hunk}"
+            ),
+        )
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return vim.api.nvim_get_current_win() == s.old_win and s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]] == s.index",
+            )
+        )
+        self.keys(editor, "s")
+        self.assertEqual(
+            "".join(changed),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.assertEqual("".join(changed), path.read_text())
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return s.current == nil and vim.api.nvim_get_current_win() == s.tree_win",
+            )
+        )
+        self.assertEqual(" UNSTAGED (0)", editor.current.line)
+        self.assertIn("No file selected", self.lua(editor, "return r.statusline()"))
+        self.lua(editor, "r.refresh_live()")
+        self.keys(editor, " R")
+        self.keys(editor, "]")
+        self.assertTrue(self.lua(editor, "return s.current == nil"))
+        self.assertEqual(" UNSTAGED (0)", editor.current.line)
+        path.write_text(path.read_text() + "-- agent made another change\n")
+        self.wait_for(editor, 's.current ~= nil and s.current.group == "unstaged"')
+        self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
+
+    def test_staging_uses_git_hunk_boundary_in_merged_view(self):
+        baseline = [f"-- original line {i}\n" for i in range(1, 61)]
+        path = Path(self.root, "auth.lua")
+        path.write_text("".join(baseline))
+        subprocess.run(["git", "-C", self.root, "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-qm", "Grouped hunk fixture"],
+            check=True,
+        )
+        changed = baseline.copy()
+        changed[4], changed[7], changed[39] = "-- first\n", "-- nearby\n", "-- later\n"
+        path.write_text("".join(changed))
+        editor = self.launch(self.root)
+        self.keys(editor, ":view merged<CR>")
+        self.keys(editor, "<Tab>")
+        self.assertEqual(3, self.lua(editor, "return #s.diff.changes"))
+        self.keys(editor, "s")
+        partial = baseline.copy()
+        partial[4], partial[7] = changed[4], changed[7]
+        self.assertEqual(
+            "".join(partial),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.assertEqual(
+            ["unstaged", 40],
+            self.lua(
+                editor,
+                "return {s.current.group, vim.api.nvim_win_get_cursor(s.new_win)[1]}",
+            ),
+        )
+        self.keys(editor, "s")
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return s.current == nil and vim.api.nvim_get_current_win() == s.tree_win",
+            )
+        )
+        self.assertEqual(
+            [""],
+            self.lua(
+                editor, "return vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false)"
+            ),
+        )
+        self.assertEqual(
+            0,
+            self.lua(
+                editor,
+                'return #vim.api.nvim_buf_get_extmarks(s.new_buf, vim.api.nvim_get_namespaces()["codediff-inline"], 0, -1, {})',
+            ),
+        )
+        self.assertEqual(
+            "".join(changed),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":auth.lua"], text=True
+            ),
+        )
+        self.keys(editor, ":fs<CR>")
+        self.assertEqual("staged", self.lua(editor, "return s.current.group"))
+
     def test_lowercase_s_toggles_only_current_hunk(self):
         editor = self.launch(self.root)
-        self.keys(editor, "<CR>")
+        self.keys(editor, "<Tab>")
         changed = Path(self.root, "auth.lua").read_bytes()
         self.keys(editor, "S")
         self.assertEqual("staged", self.lua(editor, "return s.current.group"))
@@ -436,7 +610,7 @@ class EditorUI(unittest.TestCase):
             )
         )
         editor = self.launch(self.root)
-        self.keys(editor, "<CR>")
+        self.keys(editor, "<Tab>")
         # Layout changes themselves must use the current snapshot, not read disk.
         self.lua(editor, 'require("myeditor.live").stop(s)')
         self.keys(editor, "]")
@@ -704,7 +878,7 @@ class EditorUI(unittest.TestCase):
         os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
         os.environ["HARNESS_TEST_LOG"] = str(marker)
         editor = self.launch(self.root, file="auth.lua")
-        self.keys(editor, "<CR>")
+        self.keys(editor, "<Tab>")
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         self.keys(editor, ":harness use amp<CR>")
         self.assertEqual(

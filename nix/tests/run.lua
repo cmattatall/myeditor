@@ -383,7 +383,7 @@ local function test()
 	review.toggle_reviewed()
 	review.archive()
 	s = review.state
-	keys("<CR>")
+	keys("<Tab>")
 	vim.api.nvim_win_set_cursor(s.new_win, { 16, 0 })
 	keys("VjiPreserve the refresh contract.<Esc>")
 	equal(
@@ -459,7 +459,7 @@ local function test()
 	review.open()
 	s = review.state
 	equal(0, #s.comments, "Leaving Review does not save an unwritten annotation")
-	keys("<CR>")
+	keys("<Tab>")
 	keys("i<Esc>")
 	equal(
 		{ "" },

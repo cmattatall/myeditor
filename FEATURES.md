@@ -11,7 +11,7 @@ revdiff parity.
 - Interactive launches inside Git open Review automatically; **Space q** returns
   to ordinary editing. Outside Git, startup opens the filesystem tree instead.
   Review starts focused on the file tree, with the first diff previewed;
-  **Enter** or **Tab** moves into the diff for hunk navigation and staging.
+  **Tab** moves into the diff for hunk navigation and staging.
   Headless runs open neither. Startup does not send feedback or change the index.
 - **:view split** / **:view merged** selects side-by-side or unified presentation;
   **:view** toggles. Merged deletions are display-only; use split to select old text.
@@ -36,6 +36,8 @@ revdiff parity.
   Terminals must send Option as Alt/Meta; Esc-b/Esc-f word-key sequences work too.
 - **s** in a Review source pane toggles staging for the current hunk; **S** toggles
   staging for the entire file from either the sidebar or a source pane.
+  Staging a hunk advances to the next remaining UNSTAGED hunk, wrapping across
+  files. When none remain, focus rests on the UNSTAGED header, not STAGED.
   Inside annotations and ordinary files, native `s`/`S` editing is unchanged.
 - **]** / **[** cycle through hunks across visible files within the current
   STAGED or UNSTAGED group, including untracked files, and accept counts.

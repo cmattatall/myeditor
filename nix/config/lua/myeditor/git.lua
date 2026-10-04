@@ -193,13 +193,13 @@ function M.stage(root, snapshot, side, line, whole_file)
 		return
 	end
 	local patch = snapshot.patch
+	local chosen
 	if not whole_file then
 		assert(
-			not patch:find("new file mode", 1, true) and not patch:find("deleted file mode", 1, true),
+			not patch:find("\nnew file mode ", 1, true) and not patch:find("\ndeleted file mode ", 1, true),
 			"Added/deleted files must be staged or unstaged with S"
 		)
 		local header, hunks = M.hunks(patch)
-		local chosen
 		for _, hunk in ipairs(hunks) do
 			local start = hunk[side .. "_start"]
 			local count = hunk[side .. "_count"]
@@ -217,6 +217,7 @@ function M.stage(root, snapshot, side, line, whole_file)
 		table.insert(args, "--reverse")
 	end
 	M.run(root, args, patch)
+	return chosen
 end
 
 return M

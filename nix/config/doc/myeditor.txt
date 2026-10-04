@@ -101,7 +101,7 @@ Review opens automatically on interactive startup inside a Git worktree.
 From ordinary editing, save file edits first, then use Space r or :Review.
 A separate tab shows the Git sidebar and protected old/new snapshots. Space q
 returns to the retained editing tab, file arguments, tree, and buffers.
-Focus starts on the file tree, with the first diff previewed. Enter or Tab
+Focus starts on the file tree, with the first diff previewed. Tab
 moves into the diff for hunk navigation ([/]) and staging (s).
 Space R / :ReviewRefresh refreshes snapshots immediately; startup never submits
 feedback or stages files. The bottom Review bar shows the branch, or @short-SHA
@@ -178,7 +178,7 @@ explicitly, retaining pane focus. An empty group leaves selection unchanged.
 A gutter arrow/bar marks the selected change in both panes.
 Small hunks are centered; tall hunks start near the top of the view.
 Space j/k file navigation wraps across groups. Moving onto a sidebar file row
-displays its diff immediately, retaining tree focus. Enter focuses that diff.
+displays its diff immediately, retaining tree focus. Tab focuses that diff.
 The Review-only leader bindings above apply in the sidebar and source panes,
 not inside annotation/message text. Global focus/search/help commands remain
 available there; use Esc before invoking Normal-mode shortcuts.
@@ -317,6 +317,11 @@ Both toggles follow the selected group:
 UNSTAGED stages; STAGED unstages. For a hunk, focus either source pane
 and use ]/[ to choose the change, then s. From the sidebar, S acts
 on the highlighted file; hunk actions require source focus.
+
+After staging a hunk, the next remaining UNSTAGED hunk is selected, wrapping
+across files. Git may group several nearby highlighted edits into one staged
+hunk. When no hunks remain, focus rests on UNSTAGED rather than following the
+file into STAGED; :fs explicitly switches to staged changes.
 
 Staging changes the index, not the source file; marking reviewed changes only
 private review metadata. The explicit stage/unstage shortcuts apply immediately

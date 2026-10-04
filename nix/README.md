@@ -141,8 +141,8 @@ so changing your system's packages does not silently change this editor.
    press **Space r** (`:Review`) to enter it. A separate tab contains the Git
    changes sidebar and protected old/new snapshots. The original editing tab,
    sidebar, buffers, and unsaved edits are retained.
-   Focus starts on the file tree with the first diff previewed. Press **Enter**
-   or **Tab** to focus the diff, then **[ / ]** to select a hunk and **s** to stage it.
+   Focus starts on the file tree with the first diff previewed. Press **Tab**
+   to focus the diff, then **[ / ]** to select a hunk and **s** to stage it.
 3. Press **i**, **a**, **o**, or **O** on code to compose a comment. Use
    **v**, **V**, or **Ctrl-v**, then **i**, for character/line/block feedback.
 4. Edit the annotation with normal Vim bindings, including operators, counts,
@@ -181,7 +181,7 @@ Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
 the previous one at the end. With none left, focus stays on the UNSTAGED header.
 Focused tree navigation highlights a full row instead of a character cursor;
 moving onto a file immediately displays its diff without leaving the tree.
-Enter focuses that diff. Normal cursor styling returns when focus leaves the tree.
+Tab focuses that diff. Normal cursor styling returns when focus leaves the tree.
 A partially staged file appears in both comparisons. **] / [** jump between changes,
 cycling across visible files within the current STAGED or UNSTAGED group.
 Untracked files belong to the UNSTAGED cycle. They work from
@@ -229,7 +229,6 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space E | Toggle ordinary Neo-tree while editing; focus-only in Review |
 | Space r / `:Review` | Enter/focus Review |
 | `:view [split\|merged]` / `:View` | Select a diff layout; no argument toggles |
-| Enter in sidebar | Focus the selected file's diff; moving between rows previews it automatically |
 | Tab | Toggle tree/diff focus in Review |
 | Space j / Space k | Next/previous changed file |
 | `]` / `[` | Cycle hunks across files within the current Git group; retain pane focus |
