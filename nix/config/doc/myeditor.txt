@@ -232,7 +232,9 @@ picker. Session discovery is manual; Review refresh is automatic. Connecting
 performs no send.
 In the message buffer, normal Vim editing applies; :w submits only, :wq submits
 and closes, and :q (or :q!) closes while retaining the draft locally, without
-sending. Hidden message drafts do not block exit, but all message drafts are
+sending. In Review, Normal-mode Tab returns to the file tree without closing or
+sending the message; subsequent Tab presses toggle tree/diff focus. Insert-mode
+Tab remains text input. Hidden message drafts do not block exit, but all drafts are
 discarded on editor exit. Every fresh process starts with an empty composer;
 ordinary unsaved files retain Neovim's write protection. An accepted ACK means
 queued steering, not a completed agent turn.

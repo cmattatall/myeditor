@@ -510,6 +510,38 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
 
+    def test_message_tab_returns_to_review_without_sending(self):
+        editor = self.launch(self.root)
+        self.keys(editor, ":harness send<CR>iDraft<Tab>message<Esc>")
+        message = editor.current.buffer
+        draft = message[:]
+        self.assertRegex(draft[0], r"^Draft\s+message$")
+        self.assertTrue(message.name.startswith("harness://"))
+        self.keys(editor, "<Tab>")
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
+        )
+        self.keys(editor, "<Tab>")
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.new_win")
+        )
+        self.keys(editor, "<Tab>")
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
+        )
+        self.keys(editor, ":harness send<CR>")
+        self.assertEqual(message.number, editor.current.buffer.number)
+        self.assertEqual(draft, message[:])
+        self.assertTrue(
+            self.lua(
+                editor, 'return require("myeditor.harness").get(s.root).last == nil'
+            )
+        )
+        self.keys(editor, "<Tab>")
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
+        )
+
     def test_successful_message_clears_without_enter_prompt(self):
         editor = self.launch(self.root)
         self.lua(

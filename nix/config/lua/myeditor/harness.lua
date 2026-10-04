@@ -303,6 +303,9 @@ function M.compose()
 		vim.bo[buf].filetype = "markdown"
 		api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(s.message, "\n", { plain = true }))
 		vim.bo[buf].modified = false
+		vim.keymap.set("n", "<Tab>", function()
+			return require("myeditor.review").active() and "<Cmd>Explorer<CR>" or "<Tab>"
+		end, { buffer = buf, expr = true, desc = "Focus Review tree" })
 		local function capture()
 			if api.nvim_buf_is_loaded(buf) then
 				s.message = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
