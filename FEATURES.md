@@ -94,9 +94,12 @@ the feedback. Annotations retain absolute paths, old/new side, Git group, and
 snapshot status.
 Visual **a** annotates the whole character, line, or block selection; column
 ranges and partial-tab offsets accompany character/block references.
-Full source, selected text, and patches stay in the local outbox, referenced
-by archive path rather than pasted into the conversation. Custom receivers
-still receive the complete JSON payload.
+Stale/unverified, old-side, and character/block annotations include a selected
+source excerpt capped at five lines and 400 characters, with truncation marked.
+Current new-side line annotations remain reference-only. Full files, patches,
+and complete selections stay in the local outbox. Archive paths are local to
+rediff; remote agents may need historical context supplied separately.
+Custom receivers still receive the complete JSON payload.
 
 General-message drafts clear after accepted/completed delivery, including the
 open `:harness send` window. Success updates the status bar quietly, without a

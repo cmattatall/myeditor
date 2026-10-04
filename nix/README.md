@@ -333,9 +333,15 @@ Built-in Amp and Claude delivery uses JSON: `rules` first, `repository` and
 there is no prose prefix or epilogue. Ask-first defaults explicitly permit actions
 the user authorizes in the feedback, including commits, pushes, and pull requests.
 Annotations retain absolute file paths, old/new side, line ranges, Git group,
-snapshot identity/status, and exact selection spans. Full files, patches and
-selected source text stay in the local outbox, referenced by archive path.
-Custom receivers still get the full original payload.
+snapshot identity/status, and exact selection spans. Stale/unverified, old-side,
+and character/block annotations also carry `selected_text`: up to five lines
+and 400 Unicode characters from the saved selection. `selected_text_truncated`
+is true when either limit omits text; the exact range/spans remain unchanged.
+Current new-side line annotations omit excerpts. Full files, patches, and complete
+selections stay in the local outbox, referenced by archive path. That path is
+local to rediff, not automatically accessible to a remote agent; the rules ask
+for needed historical context if it cannot be read. Custom receivers still get
+the full original payload.
 
 To upgrade from the old prose format, update the editor and bundled Amp plugin,
 reload Amp's plugins, then reconnect. Older plugins still prepend the old guidance.

@@ -180,7 +180,7 @@ class AmpLiveTests(unittest.TestCase):
         original = self.payload.read_bytes()
         amp_live.send(self.connection, THREAD, self.payload)
         content = Handler.requests[-1][2]["content"]
-        self.assertLess(len(content.encode()), 2048)
+        self.assertLess(len(content.encode()), 3072)
         message = json.loads(content)
         self.assertEqual(["rules", "repository", "snapshot_archive", "annotations"], list(message))
         self.assertEqual(str(self.payload.absolute()), message["snapshot_archive"])
@@ -188,8 +188,9 @@ class AmpLiveTests(unittest.TestCase):
             **{key: note[key] for key in ("side", "line", "line_end", "snapshot_id", "text")},
             "file": str(self.root.resolve() / note["file"]), "comparison": "staged", "snapshot_status": "changed",
             "selection": {key: value for key, value in note["selection"].items() if key != "text"},
+            "selected_text": "selected α" * 40, "selected_text_truncated": True,
         }], message["annotations"])
-        for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", "selected α", '"snapshots"', '"comments"'):
+        for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", "selected α" * 41, '"snapshots"', '"comments"'):
             self.assertNotIn(excluded, content)
         self.assertEqual(original, self.payload.read_bytes())
 

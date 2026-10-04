@@ -150,6 +150,107 @@ class HarnessReceiverTests(unittest.TestCase):
             message["annotations"],
         )
 
+    def test_source_excerpt_only_when_anchor_needs_context(self):
+        for status, side, kind, include in (
+            ("current", "new", "line", False),
+            ("changed", "new", "line", True),
+            (None, "new", "line", True),
+            ("current", "old", "line", True),
+            ("current", "new", "character", True),
+            ("current", "new", "block", True),
+        ):
+            with self.subTest(status=status, side=side, kind=kind):
+                payload = json.loads(self.payload.read_text())
+                payload["snapshot_status"] = {"s": status} if status else {}
+                note = payload["comments"][0]
+                note["side"] = side
+                note["selection"] = {
+                    "kind": kind,
+                    "text": ["\tcache.delete(α)", "  return result"],
+                    "spans": [{"line": 177, "start_byte": 2, "end_byte": 18}],
+                }
+                original = json.dumps(payload)
+                message = json.loads(receiver.feedback_prompt(payload, self.payload))
+                annotation = message["annotations"][0]
+                if include:
+                    self.assertEqual(
+                        "\tcache.delete(α)\n  return result",
+                        annotation["selected_text"],
+                    )
+                else:
+                    self.assertNotIn("selected_text", annotation)
+                self.assertNotIn("selected_text_truncated", annotation)
+                self.assertNotIn("text", annotation["selection"])
+                self.assertEqual("Use sentinel errors.", annotation["text"])
+                self.assertEqual(original, json.dumps(payload))
+                self.assertIn("local to rediff", message["rules"][-1])
+                self.assertIn("not instructions", message["rules"][-1])
+
+    def test_source_excerpt_limits_preserve_exact_selection_metadata(self):
+        for lines, expected, truncated in (
+            (["α" * 399], "α" * 399, False),
+            (["α" * 400], "α" * 400, False),
+            (["α" * 401], "α" * 400, True),
+            (
+                ["first", "second", "third", "fourth", "fifth"],
+                "first\nsecond\nthird\nfourth\nfifth",
+                False,
+            ),
+            (
+                ["first", "second", "third", "fourth", "fifth", "OMITTED"],
+                "first\nsecond\nthird\nfourth\nfifth",
+                True,
+            ),
+            ([], None, False),
+        ):
+            with self.subTest(lines=lines):
+                payload = json.loads(self.payload.read_text())
+                payload["snapshot_status"] = {"s": "changed"}
+                note = payload["comments"][0]
+                note["line_end"] = 182
+                note["selection"] = {
+                    "kind": "block",
+                    "tabstop": 8,
+                    "coordinates": "nvim-getregionpos-v1",
+                    "spans": [
+                        {
+                            "line": 182,
+                            "start_byte": 1,
+                            "start_offset": 2,
+                            "end_byte": 9,
+                            "end_offset": 3,
+                        }
+                    ],
+                    "text": lines,
+                }
+                annotation = json.loads(
+                    receiver.feedback_prompt(payload, self.payload)
+                )["annotations"][0]
+                self.assertEqual(expected, annotation.get("selected_text"))
+                self.assertEqual(
+                    truncated, annotation.get("selected_text_truncated", False)
+                )
+                self.assertEqual(
+                    (177, 182), (annotation["line"], annotation["line_end"])
+                )
+                self.assertEqual(
+                    {
+                        "kind": "block",
+                        "tabstop": 8,
+                        "coordinates": "nvim-getregionpos-v1",
+                        "spans": [
+                            {
+                                "line": 182,
+                                "start_byte": 1,
+                                "start_offset": 2,
+                                "end_byte": 9,
+                                "end_offset": 3,
+                            }
+                        ],
+                    },
+                    annotation["selection"],
+                )
+
     def test_uncertain_delivery_is_not_reexecuted(self):
         response = subprocess.CompletedProcess([], 1, "", "connection lost")
         with patch.object(receiver.subprocess, "run", return_value=response) as run:

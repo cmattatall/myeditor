@@ -237,7 +237,8 @@ test('editor bridge sends rules once before annotations or message, without pros
   await writeFile(review, JSON.stringify({
     submission_id: 'review-one', repository: root,
     comments: [
-      { file: 'demo.lua', side: 'new', line: 42, line_end: 42, text: 'Check this boundary', snapshot_id: 's' },
+      { file: 'demo.lua', side: 'new', line: 42, line_end: 42, text: 'Check this boundary', snapshot_id: 's',
+        selection: { kind: 'character', spans: [{ line: 42, start_byte: 3, end_byte: 12 }], text: ['cache[key]'] } },
       { file: 'demo.lua', side: 'new', line: 51, line_end: 53, text: instruction, snapshot_id: 's' },
     ],
     snapshots: { s: { group: 'unstaged', old: 'UNRELATED OLD CONTENT'.repeat(100000), new: 'UNRELATED NEW CONTENT'.repeat(100000) } },
@@ -251,7 +252,8 @@ test('editor bridge sends rules once before annotations or message, without pros
   assert.match(batch.rules[0], /unless the user explicitly authorizes that action/)
   assert.deepEqual(batch.annotations, [
     { file: `${root}/demo.lua`, side: 'new', line: 42, line_end: 42, snapshot_id: 's',
-      comparison: 'unstaged', snapshot_status: 'current', text: 'Check this boundary' },
+      comparison: 'unstaged', snapshot_status: 'current', text: 'Check this boundary',
+      selection: { kind: 'character', spans: [{ line: 42, start_byte: 3, end_byte: 12 }] }, selected_text: 'cache[key]' },
     { file: `${root}/demo.lua`, side: 'new', line: 51, line_end: 53, snapshot_id: 's',
       comparison: 'unstaged', snapshot_status: 'current', text: instruction },
   ])
