@@ -138,10 +138,11 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
 | Space m / `:ReviewMark` | Toggle reviewed mark |
 | Space u / `:ReviewUnreviewed` | Toggle unreviewed-only filter |
-| i/a/o/O/I/A/c/s/S/r/R/x/p… | Edit annotation rather than source |
+| i/a/o/O/I/A/c/r/R/x/p… | Edit annotation rather than source |
 | d in source pane | Delete annotation covering cursor; picker if several overlap |
 | Visual selection, then i or Space c | Comment on exact selection |
 | Space c / `:ReviewComments` | List/remove draft comments |
+| s / S in a source pane | Stage / unstage the Git hunk containing the cursor; reject wrong group |
 | Space s in a source pane | Stage/unstage the Git hunk containing the cursor |
 | Space S in sidebar or source pane | Stage/unstage selected file or entire displayed diff |
 | `:ReviewStage hunk` / `:ReviewStage file` | Explicitly stage; rejects STAGED entries |
@@ -161,6 +162,12 @@ Git hunks include Git's context lines and can group nearby edits differently
 from Codediff's highlighted ranges. New/deleted files require **Space S**. Renames
 are shown as deletion/addition pairs. Stage before commenting if possible:
 staging changes the index comparison and can make existing anchors stale.
+
+**Option+Left/Up/h/k** moves backward by a word; **Option+Right/Down/l/j** moves
+forward in Normal, Visual, Insert, and command/search input, including annotations
+and harness messages. Configure the terminal to send Option as Alt/Meta rather
+than special characters; Esc-b/Esc-f word-key sequences are also supported.
+Bare **s/S** retains native substitution inside annotations and ordinary files.
 
 ## Connect an agent: Amp, Claude Code, or a custom harness
 

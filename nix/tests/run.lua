@@ -292,7 +292,11 @@ local function test()
 		"q records macros rather than closing annotation"
 	)
 	keys(":wq<CR>iOld note<Esc>Sreplacement note<Esc>0sR<Esc>")
-	equal({ "Replacement note" }, vim.api.nvim_buf_get_lines(s.composer, 0, -1, false), "s/S still edit inside annotations")
+	equal(
+		{ "Replacement note" },
+		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
+		"s/S still edit inside annotations"
+	)
 	keys("0RNew<Esc>")
 	equal(
 		{ "Newlacement note" },
@@ -523,7 +527,11 @@ local function test()
 	keys("S")
 	vim.notify = notify
 	equal(true, notice:find("Select a STAGED entry", 1, true) ~= nil, "S rejects unstaged hunks rather than staging")
-	equal(expected_index, git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new), "Rejected S leaves index intact")
+	equal(
+		expected_index,
+		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
+		"Rejected S leaves index intact"
+	)
 	review.show(1)
 	equal("staged", s.current.group, "Staged entries appear first")
 	equal(expected_index, vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false), "Staged pane shows index not worktree")
@@ -548,7 +556,11 @@ local function test()
 	keys("s")
 	vim.notify = notify
 	equal(true, notice:find("Select an UNSTAGED", 1, true) ~= nil, "s rejects staged hunks rather than unstaging")
-	equal(expected_index, git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new), "Rejected s leaves index intact")
+	equal(
+		expected_index,
+		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
+		"Rejected s leaves index intact"
+	)
 	equal(nil, s.composer, "s/S never open an annotation in source panes")
 	vim.api.nvim_set_current_win(s.old_win)
 	keys("S")

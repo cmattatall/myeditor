@@ -43,19 +43,36 @@ return function(equal)
 				vim.api.nvim_win_set_cursor(0, {1, 8})
 			]])
 			vim.rpcnotify(child, "nvim_input", pair[1])
-			equal(true, vim.wait(1000, function()
-				return lua([[return vim.fn.mode() == "n" and vim.api.nvim_win_get_cursor(0)[2] == 2]])
-			end, 10), context .. ": " .. pair[1] .. " moves backward by a word")
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua([[return vim.fn.mode() == "n" and vim.api.nvim_win_get_cursor(0)[2] == 2]])
+				end, 10),
+				context .. ": " .. pair[1] .. " moves backward by a word"
+			)
 			vim.rpcnotify(child, "nvim_input", "v" .. pair[2])
-			equal(true, vim.wait(1000, function()
-				return lua([[return vim.fn.mode() == "v" and vim.api.nvim_win_get_cursor(0)[2] == 8]])
-			end, 10), context .. ": " .. pair[2] .. " extends the selection by a word")
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua([[return vim.fn.mode() == "v" and vim.api.nvim_win_get_cursor(0)[2] == 8]])
+				end, 10),
+				context .. ": " .. pair[2] .. " extends the selection by a word"
+			)
 			vim.rpcnotify(child, "nvim_input", "<Esc>i" .. pair[1] .. "^" .. pair[2] .. "!<Esc>")
-			equal(true, vim.wait(1000, function()
-				return lua([[return vim.fn.mode() == "n" and vim.api.nvim_get_current_line() == "  ^alpha !beta  gamma"]])
-			end, 10), context .. ": Option movement stays in Insert mode and does not insert special characters")
-			equal({ "  ^alpha !beta  gamma", "tail" }, lua([[return vim.api.nvim_buf_get_lines(0, 0, -1, false)]]),
-				context .. ": Option movement does not change lines")
+			equal(
+				true,
+				vim.wait(1000, function()
+					return lua(
+						[[return vim.fn.mode() == "n" and vim.api.nvim_get_current_line() == "  ^alpha !beta  gamma"]]
+					)
+				end, 10),
+				context .. ": Option movement stays in Insert mode and does not insert special characters"
+			)
+			equal(
+				{ "  ^alpha !beta  gamma", "tail" },
+				lua([[return vim.api.nvim_buf_get_lines(0, 0, -1, false)]]),
+				context .. ": Option movement does not change lines"
+			)
 		end
 	end
 	local function line_shortcuts(context)
@@ -287,7 +304,8 @@ return function(equal)
 				input(prefix .. "echo alpha beta", "echo alpha beta", "", 16)
 				input(pair[1], "echo alpha beta", "", 12)
 				input(pair[1], "echo alpha beta", "", 6)
-				input(pair[2], "echo alpha beta", "", 12)
+				-- Command-line forward-word stops after alpha, before its following space.
+				input(pair[2], "echo alpha beta", "", 11)
 				input(pair[2], "echo alpha beta", "", 16)
 				input("<C-C>", "", "")
 			end

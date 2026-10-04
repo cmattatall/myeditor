@@ -10,7 +10,7 @@ MODAL EDITING AND AGENT REVIEW
   Space f         Fuzzy files                     :Files
   Space /         Fuzzy project/Review text       :Search
   ] / [           Next/previous hunk across files (also from sidebar)
-  Space s         Stage/unstage hunk under cursor (source pane)
+  s / S           Stage / unstage hunk under cursor (source pane)
   Space S         Stage/unstage file (sidebar selection or displayed diff)
   i               Start a fresh annotation on the reviewed line
   d               Delete annotation on the reviewed line
@@ -50,6 +50,11 @@ In Insert mode, Ctrl-a moves to the start of the line (before indentation),
 and Ctrl-e moves to the end, without leaving Insert mode. These work in files,
 annotations, and harness messages, and in : command and / search input.
 Normal-mode Ctrl-a still increments a number; Ctrl-e still scrolls the view.
+
+Option+Left/Up/h/k moves backward by a word; Option+Right/Down/l/j moves
+forward. These work in Normal, Visual, Insert, and command/search input.
+Configure your terminal to send Option as Alt/Meta instead of special characters.
+Esc-b/Esc-f sequences (sent by some terminals for Option+Left/Right) also work.
 
 The filesystem tree opens at startup. Space e or :ft focuses it, Space d
 focuses the editor, and Space E toggles it. Enter opens a tree entry. Space f fuzzy
@@ -93,7 +98,7 @@ Save ordinary file edits first, then Space r or :Review from a Git worktree.
 A separate tab shows the Git sidebar and protected old/new snapshots. Your
 editing tab, file tree, and unsaved buffers are retained.
 
-In a source pane, editing commands (i/a/I/A/o/O, c with motions, s/S, r/R,
+In a source pane, editing commands (i/a/I/A/o/O, c with motions, r/R,
 x/X, p/P, u/Ctrl-r, ., ~, >/<, =, J/gJ, gq/gw, gu/gU/g~, gp/gP)
 open a fresh annotation at that line instead of altering code. Write it with
 :w to save it in the review batch; starting another opens an empty panel,
@@ -232,7 +237,8 @@ STAGED, UNSTAGED, and UNTRACKED have separate colored headers and file counts.
 Empty sections remain visible. Partially staged files appear in both groups:
 STAGED compares HEAD/index; UNSTAGED compares index/worktree.
 
-  Space s (source pane)  Stage/unstage the Git hunk at the cursor
+  s / S (source pane)    Stage / unstage the Git hunk at the cursor
+  Space s (source pane)  Toggle staging for the Git hunk at the cursor
   Space S                Stage/unstage selected sidebar file or displayed diff
   :ReviewStage hunk|file    Stage the chosen hunk/file
   :ReviewUnstage hunk|file  Unstage the chosen hunk/file
@@ -240,17 +246,19 @@ STAGED compares HEAD/index; UNSTAGED compares index/worktree.
   Space u / :ReviewUnreviewed  Filter to unreviewed entries
   Space R / :ReviewRefresh    Reload snapshots and changed files manually
 
-Shortcuts toggle according to the selected group: UNSTAGED/UNTRACKED stages;
-STAGED unstages. The explicit commands reject the wrong group instead of
-silently toggling. For a hunk, focus either source pane and use ]/[ to choose
-the change, then Space s. From the sidebar, Space S acts on the highlighted
-file even when a different file is displayed; hunk actions require source focus.
+Bare s stages and S unstages; they reject the wrong group, like the explicit
+commands. Space s/S still toggle according to the selected group:
+UNSTAGED/UNTRACKED stages; STAGED unstages. For a hunk, focus either source pane
+and use ]/[ to choose the change, then s or S. From the sidebar, Space S acts
+on the highlighted file even when a different file is displayed; hunk actions
+require source focus.
 
 Staging changes the index, not the source file; marking reviewed changes only
 private review metadata. The explicit stage/unstage shortcuts apply immediately
 without a second confirmation. Reviewed marks and staging both reject stale
 snapshots. Refresh does not send feedback.
-Lowercase s and uppercase S/R are annotation editing keys, not Git actions.
+Inside annotations and ordinary files, s/S retain native substitution behavior.
+In source panes, R still opens an annotation; Space R refreshes the Review.
 New/deleted files require whole-file staging. Renames appear as delete/add
 pairs. Stage before commenting where possible: changing the comparison can
 make an annotation stale. Git context hunks can differ from rendered changes.
@@ -359,7 +367,7 @@ Different shortcuts are intentional where Neovim owns the editing key:
   ? / :help                       ? / :help overlay
   [ / ]                           [ / ] in Review panes
   h/l, :focus diff (:fd)           Space e/d, :Explorer / :FocusDiff
-  s / S                           Space s/S in source panes (s/S edit annotation)
+  s / S                           s/S in source panes (stage/unstage hunk)
   a / Enter on code               i/a/o/O or source Visual selection then i
   @ / annotation list             Space c / :ReviewComments
   O / :w flush                    :w in diff/sidebar / :WriteFeedback
