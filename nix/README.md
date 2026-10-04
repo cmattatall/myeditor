@@ -34,13 +34,46 @@ annotations, and harness messages) and in command/search input. Normal-mode
 Vim bindings remain unchanged. Typed **:ft** expands to `:Explorer` and focuses
 the Git sidebar in Review; scripts should use `:Explorer` directly.
 
-The package defines `myeditor`, not `nvim`. It uses `NVIM_APPNAME=myeditor`
-and a configuration in the Nix store. Existing Neovim configurations and
+The package defines `myeditor`; Home Manager can also expose it as `nvim`.
+Both use `NVIM_APPNAME=myeditor` and a configuration in the Nix store.
+The theme is **Rosé Pine (main)**, bundled through the pinned nixpkgs.
+Existing Neovim configurations and
 plugins are not modified. Targets are Apple Silicon macOS and ARM64/x86-64
 Linux; a build on one architecture does not verify the other targets.
 Intel macOS is not supported by the pinned unstable nixpkgs release.
 
 ## Home Manager
+
+### Bootstrap without an existing Home Manager setup
+
+From the repository root:
+
+```sh
+./install.sh           # Build the Home Manager generation only
+./install.sh --switch  # Build and activate it; then open a new shell
+command -v nvim       # Should resolve to a Nix store path, not Homebrew
+```
+
+The root installer delegates to `nix/install-home-manager.sh`; a vendored copy
+of this directory can use `bash install-home-manager.sh` with the same flags.
+Nix and flakes must already be available. No separate Home Manager CLI is needed.
+`standalone-home.nix` uses this flake's locked Home Manager/nixpkgs and reads
+only the host system, username, and home directory through impure evaluation.
+Repeat `--switch` after changing the checkout to rebuild and install updates.
+
+Activation installs the package and its `nvim` wrapper through Home Manager.
+The installer backs up an existing regular shell rc and appends the standard
+`hm-session-vars.sh` source line once: `.zshrc` (respecting `ZDOTDIR`), `.bashrc`
+on Linux, or `.bash_profile` for macOS Bash login shells. Home Manager puts
+only the wrapper's directory ahead of Homebrew on PATH. It does not replace
+your Neovim config, install/reload Amp plugins, or send feedback.
+
+The installer refuses unrelated Home Manager generations/configurations and
+managed shell-rc symlinks. For other shells or existing Home Manager/nix-darwin
+setups, use the module below instead. Do not activate this minimal standalone
+configuration over a larger home configuration: Home Manager manages one profile.
+
+### Add to an existing configuration
 
 Add the flake to your existing flake's inputs:
 
@@ -54,8 +87,15 @@ Add its module and enable it in your Home Manager configuration:
 {
   imports = [ inputs.myeditor.homeManagerModules.default ];
   programs.myeditor.enable = true;
+  programs.myeditor.nvimAlias = true;
 }
 ```
+
+`nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
+they opt in. Disable any other Home Manager `nvim` package to avoid a profile
+collision. If Home Manager does not manage your shell, source
+`~/.nix-profile/etc/profile.d/hm-session-vars.sh` after other PATH setup so the
+Nix-built wrapper takes precedence. Restart your shell after switching.
 
 Here `inputs` is the inputs argument from your flake's `outputs` function;
 pass it through `extraSpecialArgs` if your home module is a separate file.

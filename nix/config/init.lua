@@ -21,7 +21,8 @@ vim.opt.shiftwidth = 2
 vim.opt.tabstop = 2
 vim.opt.autowrite = false
 vim.opt.autowriteall = false
-vim.cmd.colorscheme("habamax")
+require("rose-pine").setup({ variant = "main", dark_variant = "main" })
+vim.cmd.colorscheme("rose-pine")
 vim.fn.mkdir(vim.fn.stdpath("data"), "p")
 
 vim.keymap.set("n", "<D-w>", "<C-w>", { desc = "Window command prefix (Cmd-w)" })
@@ -37,7 +38,8 @@ for _, key in ipairs({ "<M-Right>", "<M-Down>", "<M-l>", "<M-j>", "<M-f>" }) do
 	vim.keymap.set({ "n", "x", "i", "c" }, key, "<C-Right>", { desc = "Next word" })
 end
 
-vim.api.nvim_set_hl(0, "MyeditorHelpBorder", { fg = "#9ba8b8", bg = "#303030" })
+local palette = require("rose-pine.palette")
+vim.api.nvim_set_hl(0, "MyeditorHelpBorder", { fg = palette.iris, bg = palette.surface })
 vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 	callback = function(event)
 		if vim.bo[event.buf].filetype ~= "help" or vim.api.nvim_get_current_buf() ~= event.buf then

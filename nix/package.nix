@@ -41,6 +41,7 @@ let
     vimPlugins.fzf-lua
     vimPlugins.plenary-nvim
     vimPlugins.nvim-web-devicons
+    vimPlugins.rose-pine
   ];
   runtime = lib.concatMapStringsSep "," toString plugins;
 in

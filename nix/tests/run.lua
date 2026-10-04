@@ -39,6 +39,8 @@ local function keys(input)
 end
 
 local function test()
+	equal(0x191724, vim.api.nvim_get_hl(0, { name = "Normal" }).bg, "Rose Pine main background matches the local theme")
+	equal(0xe0def4, vim.api.nvim_get_hl(0, { name = "Normal" }).fg, "Rose Pine main foreground matches the local theme")
 	vim.cmd("cd " .. vim.fn.fnameescape(root))
 	vim.cmd("edit auth.lua")
 	local original_buf = vim.api.nvim_get_current_buf()

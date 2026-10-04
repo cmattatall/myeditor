@@ -950,10 +950,11 @@ function M.statusline()
 end
 
 function M.setup()
-	api.nvim_set_hl(0, "ReviewStaged", { fg = "#a9dc76", bg = "#26352b", bold = true })
-	api.nvim_set_hl(0, "ReviewUnstaged", { fg = "#ffd580", bg = "#3b3324", bold = true })
-	api.nvim_set_hl(0, "ReviewActiveFile", { bg = "#333d4d", bold = true })
-	api.nvim_set_hl(0, "ReviewHunk", { fg = "#ffd580", bold = true })
+	local palette = require("rose-pine.palette")
+	api.nvim_set_hl(0, "ReviewStaged", { fg = palette.foam, bg = palette.surface, bold = true })
+	api.nvim_set_hl(0, "ReviewUnstaged", { fg = palette.gold, bg = palette.surface, bold = true })
+	api.nvim_set_hl(0, "ReviewActiveFile", { bg = palette.highlight_med, bold = true })
+	api.nvim_set_hl(0, "ReviewHunk", { fg = palette.gold, bold = true })
 	api.nvim_create_autocmd("CursorMoved", {
 		callback = function()
 			local s = M.state

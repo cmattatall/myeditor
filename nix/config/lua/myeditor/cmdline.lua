@@ -81,7 +81,7 @@ end
 
 function M.setup()
 	local function highlight()
-		api.nvim_set_hl(0, "MyeditorCommandHint", { fg = "#808080" })
+		api.nvim_set_hl(0, "MyeditorCommandHint", { link = "Comment" })
 	end
 	highlight()
 	api.nvim_create_autocmd("ColorScheme", { callback = highlight })

@@ -50,6 +50,13 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          standalone = import ./standalone-home.nix {
+            flake = self;
+            inherit system;
+            username = "review-test";
+            homeDirectory =
+              if pkgs.stdenv.hostPlatform.isDarwin then "/Users/review-test" else "/home/review-test";
+          };
         in
         {
           home-manager =
@@ -67,6 +74,29 @@
                 }
               ];
             }).activationPackage;
+          home-manager-install =
+            pkgs.runCommand "myeditor-home-manager-install-tests"
+              {
+                nativeBuildInputs = [
+                  pkgs.python3
+                  pkgs.bash
+                ];
+              }
+              ''
+                export HOME="$TMPDIR/home"
+                mkdir -p "$HOME/homebrew/bin"
+                printf '#!/bin/sh\nexit 1\n' > "$HOME/homebrew/bin/nvim"
+                chmod +x "$HOME/homebrew/bin/nvim"
+                export PATH="$HOME/homebrew/bin:$PATH"
+                python3 -B ${./tests/test_install_home_manager.py} ${self}/install-home-manager.sh
+                unset __HM_SESS_VARS_SOURCED
+                . ${standalone}/home-path/etc/profile.d/hm-session-vars.sh
+                test "$(readlink "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/myeditor"
+                nvim --headless -i NONE -c 'lua if vim.env.NVIM_APPNAME ~= "myeditor" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' -c 'qa!'
+                test "$(cat ${standalone}/home-files/.config/myeditor/standalone-owner)" = myeditor-standalone-v1
+                test ! -e ${standalone}/home-files/.config/amp/plugins/anthrodiff.ts
+                touch "$out"
+              '';
           anthrodiff =
             pkgs.runCommand "anthrodiff-tests"
               {

@@ -12,6 +12,19 @@ your dotfiles or consume it as a flake input.
 nix run path:./nix
 ```
 
+To install the Nix-built editor as `nvim` through Home Manager:
+
+```sh
+./install.sh           # Build only; no activation or shell changes
+./install.sh --switch  # Install, then open a new terminal and type nvim
+```
+
+The installer bootstraps Home Manager using this repository's pinned inputs.
+It refuses to replace an existing Home Manager setup; use the module in the
+[installation guide](nix/README.md#home-manager) for that case. It preserves
+your existing Neovim configuration. The theme is **Rosé Pine (main)**, packaged
+by Nix along with the editor and plugins.
+
 The `myeditor` command uses `NVIM_APPNAME=myeditor`; your normal `nvim`
 configuration is untouched. Press **Space r** for Review, **i** to comment,
 and **:w** to queue/send feedback instead of saving source. Git staging is
