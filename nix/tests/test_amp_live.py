@@ -72,6 +72,31 @@ class AmpLiveTests(unittest.TestCase):
         with patch.dict(os.environ, {"HOME": str(self.home)}):
             return amp_live.discover(self.root)
 
+    def test_reload_requests_are_small_scoped_and_not_claimed_complete(self):
+        for wrong_thread, wrong_root in (("T-other", self.root), (THREAD, self.home)):
+            with self.assertRaisesRegex(ValueError, "nothing sent"):
+                amp_live.request_reload(self.connection, wrong_thread, wrong_root)
+        self.assertEqual([], Handler.requests)
+        Handler.descriptor["thread"] = "T-other"
+        with self.assertRaisesRegex(RuntimeError, "nothing sent"):
+            amp_live.request_reload(self.connection, THREAD, self.root)
+        self.assertFalse(any(method == "POST" for method, *_ in Handler.requests))
+        Handler.descriptor = dict(self.descriptor)
+        result = amp_live.request_reload(self.connection, THREAD, self.root)
+        self.assertIn("queued", result)
+        self.assertIn("not confirmation", result)
+        method, authenticated, body = Handler.requests[-1]
+        self.assertEqual(("POST", True), (method, authenticated))
+        self.assertIn("reload_plugins", body["content"])
+        self.assertLess(len(json.dumps(body)), 600)
+        amp_live.request_reload(self.connection, THREAD, self.root)
+        self.assertNotEqual(body["id"], Handler.requests[-1][2]["id"])
+        Handler.post_status = 500
+        before = len(Handler.requests)
+        with self.assertRaisesRegex(RuntimeError, "uncertain"):
+            amp_live.request_reload(self.connection, THREAD, self.root)
+        self.assertEqual(2, len(Handler.requests) - before, "No automatic retry after an uncertain POST")
+
     def payload_write(self, **extra):
         value = {"submission_id": "one", "repository": str(self.root.resolve()),
                  "comments": [{"text": "fix this"}], "snapshots": {"s": {"text": "old"}}}
@@ -123,6 +148,39 @@ class AmpLiveTests(unittest.TestCase):
         Handler.post_status = 204
         amp_live.send(self.connection, THREAD, self.payload)
         self.assertEqual(first_id, Handler.requests[-1][2]["id"])
+
+    def test_review_sends_references_not_full_files_and_keeps_archive(self):
+        note = {"file": "src/space name.lua", "side": "old", "line": 17, "line_end": 19,
+                "text": "Keep the boundary check", "snapshot_id": "s",
+                "selection": {"text": ["selected α" * 200]}}
+        self.payload_write(comments=[note], snapshot_status={"s": "changed"},
+                           snapshots={"s": {"group": "staged", "old": "OLD FILE " * 150000,
+                                             "new": "NEW FILE " * 150000, "patch": "FULL PATCH"}})
+        original = self.payload.read_bytes()
+        amp_live.send(self.connection, THREAD, self.payload)
+        content = Handler.requests[-1][2]["content"]
+        self.assertLess(len(content.encode()), 3000)
+        compact = json.loads(content.split("\n\n", 1)[1])
+        sent = compact["comments"][0]
+        for key in ("file", "side", "line", "line_end", "text"):
+            self.assertEqual(note[key], sent[key])
+        self.assertEqual("staged", sent["comparison"])
+        self.assertEqual("changed", sent["snapshot_status"])
+        self.assertTrue(sent["selected_text"].endswith("[excerpt truncated]"))
+        self.assertEqual(str(self.payload.absolute()), compact["snapshot_archive"])
+        for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", '"snapshots"'):
+            self.assertNotIn(excluded, content)
+        self.assertEqual(original, self.payload.read_bytes())
+
+    def test_changed_archived_snapshot_cannot_reuse_uncertain_receipt(self):
+        self.payload_write()
+        Handler.post_status = 500
+        with self.assertRaises(RuntimeError):
+            amp_live.send(self.connection, THREAD, self.payload)
+        self.payload_write(snapshots={"s": {"text": "different history"}})
+        with self.assertRaisesRegex(RuntimeError, "content differs"):
+            amp_live.send(self.connection, THREAD, self.payload)
+        self.assertEqual(1, sum(request[0] == "POST" for request in Handler.requests))
 
     def test_generation_payload_target_and_size_changes_are_refused(self):
         self.payload_write()

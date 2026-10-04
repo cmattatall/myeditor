@@ -8,6 +8,7 @@ import stat
 import sys
 import tempfile
 import urllib.parse
+import uuid
 from pathlib import Path
 
 MAX_BODY = 1024 * 1024
@@ -116,6 +117,28 @@ def _write_private(path, value, exclusive=False):
             os.unlink(temporary)
 
 
+def _review_content(payload, archive):
+    comments = []
+    for note in payload["comments"]:
+        comment = {key: note[key] for key in ("file", "side", "line", "line_end", "text") if key in note}
+        snapshot_id = note.get("snapshot_id")
+        snapshot = payload["snapshots"].get(snapshot_id, {})
+        comment["comparison"] = snapshot.get("group", "unknown")
+        comment["snapshot_status"] = payload.get("snapshot_status", {}).get(snapshot_id, "unverified")
+        selection = note.get("selection", {})
+        excerpt = "\n".join(selection.get("text", []))
+        if excerpt:
+            comment["selected_text"] = excerpt[:1000] + ("\n[excerpt truncated]" if len(excerpt) > 1000 else "")
+        comments.append(comment)
+    return (
+        "Address these review annotations. " + GUIDANCE + "\n"
+        "Line ranges refer to the reviewed old/new side, not necessarily today's file. "
+        "Read the referenced files; use the local archive only if historical context is needed.\n\n"
+        + json.dumps({"repository": payload["repository"], "comments": comments,
+                      "snapshot_archive": str(archive.absolute())}, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 def send(connection_path, expected_thread, submission_path):
     connection_path, desc, port, generation = _load(connection_path)
     canonical_root = os.path.realpath(desc["root"])
@@ -135,7 +158,7 @@ def send(connection_path, expected_thread, submission_path):
     else:
         if not isinstance(payload.get("comments"), list) or not isinstance(payload.get("snapshots"), dict):
             raise ValueError("invalid review submission")
-        content = "Address this human code-review feedback. " + GUIDANCE + "\n\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        content = _review_content(payload, submission_path)
     request_id = payload["submission_id"]
     request = {"id": request_id, "content": content}
     body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
@@ -145,7 +168,8 @@ def send(connection_path, expected_thread, submission_path):
     # Reuse the submission ID, and refuse changed content or connection generations.
     fingerprint = hashlib.sha256(content.encode()).hexdigest()
     identity = {"connection": str(connection_path), "generation": generation, "thread": expected_thread,
-                "submission_id": payload["submission_id"], "request_id": request_id, "content_hash": fingerprint}
+                "submission_id": payload["submission_id"], "request_id": request_id, "content_hash": fingerprint,
+                "payload_hash": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()}
     if receipt.exists():
         if not _private(receipt):
             raise RuntimeError("unsafe Amp live receipt")
@@ -178,13 +202,40 @@ def send(connection_path, expected_thread, submission_path):
     return ack
 
 
+def request_reload(connection_path, expected_thread, root):
+    _, desc, port, _ = _load(connection_path)
+    if desc["thread"] != expected_thread or desc["root"] != os.path.realpath(root):
+        raise ValueError("Amp reload target does not match this checkout and thread; nothing sent")
+    status, response = _request(desc, port, "GET")
+    identity = json.loads(response) if status == 200 and len(response) <= 65536 else None
+    if not isinstance(identity, dict) or any(identity.get(key) != desc[key] for key in ("version", "root", "thread")):
+        raise RuntimeError("Amp connection identity could not be verified; nothing sent")
+    body = json.dumps({
+        "id": "reload-" + uuid.uuid4().hex,
+        "content": (
+            "I just confirmed :harness install amp in myeditor and installed the updated anthrodiff plugin. "
+            "Please call reload_plugins now to activate it. This request authorizes only that reload; "
+            "do not install anything else, edit files, or change Git state. Continue any existing work afterward."
+        ),
+    }).encode()
+    try:
+        status, _ = _request(desc, port, "POST", body, timeout=15)
+    except (OSError, http.client.HTTPException) as error:
+        raise RuntimeError("Reload request outcome is uncertain; check Amp before requesting again") from error
+    if status != 204:
+        raise RuntimeError(f"Reload request outcome is uncertain (HTTP {status}); check Amp before requesting again")
+    return "Plugin reload request queued in Amp; this is not confirmation that plugins have reloaded."
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "discover":
         print(json.dumps(discover(sys.argv[2])))
     elif len(sys.argv) == 5 and sys.argv[1] == "send":
         print(json.dumps(send(*sys.argv[2:])))
+    elif len(sys.argv) == 5 and sys.argv[1] == "reload":
+        print(request_reload(*sys.argv[2:]))
     else:
-        raise ValueError("usage: myeditor-amp-live discover ROOT | send CONNECTION EXPECTED_THREAD SUBMISSION.json")
+        raise ValueError("usage: myeditor-amp-live discover ROOT | send CONNECTION THREAD SUBMISSION.json | reload CONNECTION THREAD ROOT")
 
 
 if __name__ == "__main__":

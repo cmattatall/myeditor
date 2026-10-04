@@ -8,6 +8,7 @@
   git,
   ripgrep,
   fzf,
+  difftastic,
   python3,
   bash,
   coreutils,
@@ -66,6 +67,7 @@ stdenv.mkDerivation {
           git
           ripgrep
           fzf
+          difftastic
         ]
       } \
       --prefix PATH : "$out/bin" \

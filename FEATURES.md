@@ -8,6 +8,18 @@ revdiff parity.
 
 ## Navigation and review progress
 
+- Interactive launches inside Git open Review automatically; **Space q** returns
+  to ordinary editing. Outside Git, startup opens the filesystem tree instead.
+  Headless runs open neither. Startup does not send feedback or change the index.
+- **:view split** / **:view merged** selects side-by-side or unified presentation;
+  **:view** toggles. Merged deletions are display-only; use split to select old text.
+  Difftastic supplies syntax-aware token highlights, with green additions and red
+  deletions. Native text alignment and Git staging stay independent; tool failures
+  or oversized files retain ordinary text highlights.
+- The sidebar has **STAGED** and **UNSTAGED** sections. Untracked files appear in
+  UNSTAGED with `U`; `M`, `R`, `A`, and `D` identify modified, Git-detected renamed,
+  added, and deleted paths. Staging a sidebar file advances to the next unstaged
+  entry, or the previous one at the end; an exhausted section keeps header focus.
 - **Space e** / `:ft` / `:Explorer` focuses the Git sidebar in Review and Neo-tree
   while editing. **Space d** / `:FocusDiff` focuses the diff or editor.
   **Space E** toggles ordinary Neo-tree while editing and is focus-only in
@@ -40,7 +52,7 @@ revdiff parity.
 ## Revdiff parity inventory
 
 Implemented: tree/diff focus and pane switching; cross-file counted hunk and
-file navigation; fuzzy file/content search; staged/unstaged/untracked groups;
+file navigation; fuzzy file/content search; staged/unstaged groups and status badges;
 hunk/file staging; reviewed marks and unreviewed filtering; protected diffs;
 line/range feedback drafts; help; and explicit manual refresh.
 
@@ -56,9 +68,15 @@ the remaining view toggles, filters, and general commands in the revdiff fork.
 
 ## Live harness steering
 
+Live Amp feedback sends annotations, file/line references, snapshot status, and
+at most 1,000 selected-text characters per note. Full old/new files and patches
+stay in the local outbox, referenced by archive path rather than pasted into Amp.
+
 General-message drafts clear after accepted/completed delivery, including the
 open `:harness send` window. Failed/pending/local-only messages and newer edits
-remain intact. Review annotations are separate: annotation `:w` saves the note
+remain intact within this editor process only. A fresh editor always opens an
+empty composer, including when an older version saved draft text to disk.
+Review annotations are separate: annotation `:w` saves the note
 locally and closes the panel without sending. `:w` from a diff pane or Git
 sidebar sends only the saved batch. Accepted/completed delivery deletes the
 sent notes, preserving newer notes and edits. Pending, failed, and local-only
@@ -75,8 +93,11 @@ continued editing and does not block quitting, even with a hidden composer.
 
 `:Harness install amp` installs the bundled anthrodiff bridge plugin after
 confirmation, including explicit backup/replacement of the old user-local
-plugin. It preserves Home Manager symlinks and does not install the Amp CLI,
-reload Amp, select a session, or send feedback.
+plugin. With a selected live Amp target, it then asks that thread to call
+`reload_plugins`; queued acknowledgment is not proof the reload completed.
+Without a live target, reload manually once and use `:harness connect amp`.
+It preserves Home Manager symlinks, does not install the Amp CLI, and never
+sends annotations or composer text as part of installation.
 
 `:Harness connect amp` manually discovers live anthrodiff-plugin registrations
 for this exact checkout: one live match is selected directly, otherwise a
@@ -90,7 +111,8 @@ Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate
 from `:ReviewHarness amp THREAD`, which starts an Amp CLI continuation. This
 repository owns the anthrodiff plugin, installer, and tests under `nix/amp/`.
-Home Manager can install it; installation never reloads Amp. The registry is
+Home Manager can install it; Home Manager and shell installs require a manual
+reload. The registry is
 `~/.cache/anthrodiff/amp` with no legacy discovery. Feedback uses the neutral
 "Review feedback" prefix. Discovery and refresh are manual, no real sends
 occur merely by connecting, and credentials never belong in Nix or Git.

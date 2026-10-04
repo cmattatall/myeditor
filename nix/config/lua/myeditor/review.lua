@@ -61,7 +61,7 @@ local function map_hunks(buf)
 			{
 				buffer = buf,
 				nowait = true,
-				desc = direction > 0 and "Next hunk across files" or "Previous hunk across files",
+				desc = direction > 0 and "Next hunk in Git group" or "Previous hunk in Git group",
 			}
 		)
 	end
@@ -140,7 +140,7 @@ end
 
 local function render_comments()
 	local s = state()
-	if not s.current or not api.nvim_win_is_valid(s.old_win) or not api.nvim_win_is_valid(s.new_win) then
+	if not s.current or not api.nvim_win_is_valid(s.new_win) then
 		return
 	end
 	local comments = {}
@@ -157,7 +157,9 @@ local function render_comments()
 	local marks = require("review.marks")
 	marks.render_for_buffer(s.old_buf, "old", s.current.path)
 	marks.render_for_buffer(s.new_buf, "new", s.current.path)
-	marks.align_buffers(s.old_buf, s.new_buf, s.current.path, s.current.path)
+	if s.old_win then
+		marks.align_buffers(s.old_buf, s.new_buf, s.current.path, s.current.path)
+	end
 	vim.cmd.redrawstatus()
 end
 
@@ -198,7 +200,11 @@ end
 local function focus_hunk(index)
 	local s = state()
 	mark_hunk(index)
-	for _, pane in ipairs({ { s.old_win, s.old_buf, "old" }, { s.new_win, s.new_buf, "new" } }) do
+	local panes = { { s.new_win, s.new_buf, "new" } }
+	if s.old_win then
+		table.insert(panes, 1, { s.old_win, s.old_buf, "old" })
+	end
+	for _, pane in ipairs(panes) do
 		local win, buf, side = unpack(pane)
 		local first, last = hunk_range(s.diff.changes[index], side, buf)
 		api.nvim_win_call(win, function()
@@ -219,10 +225,10 @@ local function focus_hunk(index)
 	end
 end
 
-function M.show(index)
+function M.show(index, snapshot)
 	local s = state()
 	local entry = assert(s.entries[index], "No changed file selected")
-	local snapshot = git.snapshot(s.root, entry)
+	snapshot = snapshot or git.snapshot(s.root, entry)
 	s.index, s.current = index, snapshot
 	s.snapshots[snapshot.id] = snapshot
 	local old_lines, new_lines = git.lines(snapshot.old), git.lines(snapshot.new)
@@ -239,19 +245,30 @@ function M.show(index)
 	-- Filetype plugins (e.g. Markdown's [[/]]) install these on every switch.
 	map_hunks(s.old_buf)
 	map_hunks(s.new_buf)
-	vim.wo[s.old_win].winbar = " OLD · " .. (entry.group == "staged" and "HEAD" or "INDEX")
-	vim.wo[s.new_win].winbar = " NEW · " .. (entry.group == "staged" and "INDEX" or "WORKTREE")
-	s.diff = require("codediff.ui.view.render").compute_and_render(
-		s.old_buf,
-		s.new_buf,
-		old_lines,
-		new_lines,
-		true,
-		true,
-		s.old_win,
-		s.new_win,
-		true
-	)
+	local renderer = require("codediff.ui.view.render")
+	if s.layout == "merged" then
+		vim.wo[s.new_win].winbar = " MERGED · red: old / green: new · :view split for old-line selections"
+		vim.wo[s.new_win].scrollbind = false
+		vim.wo[s.new_win].wrap = false
+		s.diff = assert(require("codediff.core.diff").compute_diff(old_lines, new_lines, renderer.diff_options()))
+		-- Deleted virtual lines use the diff's readable foreground, not syntax colors.
+		require("codediff.ui.inline").render_inline_diff(s.new_buf, s.diff, old_lines, new_lines, { filetype = "" })
+	else
+		vim.wo[s.old_win].winbar = " OLD · " .. (entry.group == "staged" and "HEAD" or "INDEX")
+		vim.wo[s.new_win].winbar = " NEW · " .. (entry.group == "staged" and "INDEX" or "WORKTREE")
+		s.diff = renderer.compute_and_render(
+			s.old_buf,
+			s.new_buf,
+			old_lines,
+			new_lines,
+			true,
+			true,
+			s.old_win,
+			s.new_win,
+			true
+		)
+	end
+	require("myeditor.difftastic").highlight(s, snapshot)
 	render_comments()
 	api.nvim_set_current_win(s.new_win)
 	mark_hunk(nil)
@@ -269,6 +286,43 @@ function M.show(index)
 		end
 	end
 	save()
+end
+
+function M.view(layout)
+	local s = assert(M.active(), "Enter Review first")
+	layout = layout or (s.layout == "merged" and "split" or "merged")
+	assert(layout == "split" or layout == "merged", "Usage: view [split|merged]")
+	if layout == s.layout then
+		return
+	end
+	local selected = s.selected_hunk
+	local source_line = api.nvim_win_get_cursor(s.new_win)
+	local focus = api.nvim_get_current_win()
+	s.layout = layout
+	if layout == "merged" then
+		local old_win = s.old_win
+		s.old_win = nil
+		api.nvim_win_close(old_win, true)
+	else
+		api.nvim_set_current_win(s.new_win)
+		vim.cmd("leftabove vsplit")
+		s.old_win = api.nvim_get_current_win()
+		api.nvim_win_set_buf(s.old_win, s.old_buf)
+	end
+	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
+		for _, name in ipairs({ "codediff-highlight", "codediff-filler", "codediff-inline" }) do
+			api.nvim_buf_clear_namespace(buf, api.nvim_create_namespace(name), 0, -1)
+		end
+	end
+	if s.current then
+		M.show(s.index, vim.deepcopy(s.current))
+		if selected and s.diff.changes[selected] then
+			focus_hunk(selected)
+		else
+			api.nvim_win_set_cursor(s.new_win, source_line)
+		end
+	end
+	api.nvim_set_current_win(api.nvim_win_is_valid(focus) and focus or s.new_win)
 end
 
 function M.refresh(preferred)
@@ -290,20 +344,26 @@ function M.refresh(preferred)
 	s.reviewed = reviewed
 	local lines, rows, headings =
 		{ s.only_unreviewed and " REVIEW · Unreviewed only" or " REVIEW · Git changes", "" }, {}, {}
-	for _, group in ipairs({ "staged", "unstaged", "untracked" }) do
+	for _, group in ipairs({ "staged", "unstaged" }) do
 		local count = 0
 		for _, entry in ipairs(s.entries) do
-			if entry.group == group then
+			if (entry.group == "staged") == (group == "staged") then
 				count = count + 1
 			end
 		end
 		table.insert(lines, string.format(" %s (%d)", group:upper(), count))
 		headings[#lines] = group == "staged" and "ReviewStaged" or "ReviewUnstaged"
+		if group == "unstaged" then
+			s.unstaged_row = #lines
+		end
 		for i, entry in ipairs(s.entries) do
-			if entry.group == group then
+			if (entry.group == "staged") == (group == "staged") then
 				table.insert(
 					lines,
-					(s.reviewed[entry_key(entry)] and " ✓ " or " ○ ") .. vim.fn.strtrans(entry.path)
+					(s.reviewed[entry_key(entry)] and " ✓ " or " ○ ")
+						.. entry.status
+						.. " "
+						.. vim.fn.strtrans(entry.path)
 				)
 				rows[#lines] = i
 			end
@@ -322,7 +382,7 @@ function M.refresh(preferred)
 		" Spc /    fuzzy text",
 		" Spc m    mark reviewed",
 		" Spc u    unreviewed only",
-		" Spc s    stage hunk (diff)",
+		" s/S      (un)stage hunk",
 		" Spc S    (un)stage file",
 		" Spc R    refresh",
 		" :w       send feedback",
@@ -382,14 +442,16 @@ function M.toggle_reviewed()
 		s.reviewed[key] = git.review_fingerprint(snapshot)
 	end
 	local current = s.current and s.current.id
-	local old_view = api.nvim_win_call(s.old_win, vim.fn.winsaveview)
+	local old_view = s.old_win and api.nvim_win_call(s.old_win, vim.fn.winsaveview)
 	local new_view = api.nvim_win_call(s.new_win, vim.fn.winsaveview)
 	s.index = index
 	M.refresh(entry)
 	if s.current and s.current.id == current then
-		api.nvim_win_call(s.old_win, function()
-			vim.fn.winrestview(old_view)
-		end)
+		if old_view then
+			api.nvim_win_call(s.old_win, function()
+				vim.fn.winrestview(old_view)
+			end)
+		end
 		api.nvim_win_call(s.new_win, function()
 			vim.fn.winrestview(new_view)
 		end)
@@ -405,6 +467,22 @@ function M.toggle_unreviewed()
 	api.nvim_set_current_win(win)
 end
 
+function M.focus(group)
+	local s = assert(M.active(), "Enter Review first")
+	assert(group == "staged" or group == "modified", "Usage: focus staged|modified")
+	local win = api.nvim_get_current_win()
+	for i, entry in ipairs(s.entries) do
+		if (entry.group == "staged") == (group == "staged") then
+			M.show(i)
+			if win == s.tree_win or win == s.old_win then
+				api.nvim_set_current_win(win)
+			end
+			return
+		end
+	end
+	notify(group == "staged" and "No visible STAGED files" or "No visible UNSTAGED files")
+end
+
 function M.jump_hunk(direction)
 	local s = state()
 	local win = api.nvim_get_current_win()
@@ -417,49 +495,75 @@ function M.jump_hunk(direction)
 		first, last, step = #changes, 1, -1
 	end
 	for i = first, last, step do
-		local target = hunk_range(changes[i], side, buf)
-		if (direction > 0 and target > line) or (direction < 0 and target < line) then
+		local start_line, end_line = hunk_range(changes[i], side, buf)
+		if (direction > 0 and start_line > line) or (direction < 0 and end_line < line) then
 			focus_hunk(i)
 			return
 		end
 	end
-	-- Boundaries cross files/groups but never wrap back to already-reviewed work.
-	local previous, selected = s.index, s.selected_hunk
-	local old_view = api.nvim_win_call(s.old_win, vim.fn.winsaveview)
+	-- Wrap within the visible Git group; untracked entries belong to UNSTAGED.
+	local previous, selected, snapshot = s.index, s.selected_hunk, s.current
+	local staged = s.entries[previous or 0] and s.entries[previous].group == "staged"
+	local old_view = s.old_win and api.nvim_win_call(s.old_win, vim.fn.winsaveview)
 	local new_view = api.nvim_win_call(s.new_win, vim.fn.winsaveview)
-	for i = (s.index or 0) + direction, direction > 0 and #s.entries or 1, direction do
-		local ok, err = pcall(M.show, i)
-		if not ok then
-			notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
-		elseif #s.diff.changes > 0 then
-			focus_hunk(direction > 0 and 1 or #s.diff.changes)
-			api.nvim_set_current_win(win)
-			return
+	for offset = 1, #s.entries do
+		local i = ((previous or 1) - 1 + direction * offset) % #s.entries + 1
+		if (s.entries[i].group == "staged") == staged then
+			local ok, err = pcall(M.show, i, i == previous and snapshot or nil)
+			if not ok then
+				notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
+			elseif #s.diff.changes > 0 then
+				focus_hunk(direction > 0 and 1 or #s.diff.changes)
+				api.nvim_set_current_win(win)
+				return
+			end
 		end
 	end
-	if s.index ~= previous and previous then
-		M.show(previous)
-		api.nvim_win_call(s.old_win, function()
-			vim.fn.winrestview(old_view)
-		end)
+	if previous then
+		if s.index ~= previous then
+			M.show(previous, snapshot)
+		end
+		if old_view then
+			api.nvim_win_call(s.old_win, function()
+				vim.fn.winrestview(old_view)
+			end)
+		end
 		api.nvim_win_call(s.new_win, function()
 			vim.fn.winrestview(new_view)
 		end)
 		mark_hunk(selected)
-		api.nvim_set_current_win(win)
 	end
-	notify(direction > 0 and "Last hunk" or "First hunk")
+	api.nvim_set_current_win(win)
+	notify("No hunks in this Git group")
 end
 
 function M.stage(whole_file, unstage)
 	local s = assert(M.active(), "Enter Review first")
 	local win = api.nvim_get_current_win()
 	local snapshot, side, line = s.current, "new", 1
+	local next_entry, staging_from_tree
 	if win == s.tree_win then
 		assert(whole_file, "Focus a source pane to stage/unstage a hunk; Space S acts on the selected file")
 		local index = s.rows[api.nvim_win_get_cursor(win)[1]]
 		local entry = assert(s.entries[index], "Select a changed file")
 		snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
+		staging_from_tree = entry.group ~= "staged"
+		if staging_from_tree then
+			for i = index + 1, #s.entries do
+				if s.entries[i].group ~= "staged" then
+					next_entry = s.entries[i]
+					break
+				end
+			end
+			if not next_entry then
+				for i = index - 1, 1, -1 do
+					if s.entries[i].group ~= "staged" then
+						next_entry = s.entries[i]
+						break
+					end
+				end
+			end
+		end
 	else
 		side, line = side_at_cursor(), api.nvim_win_get_cursor(win)[1]
 	end
@@ -467,11 +571,15 @@ function M.stage(whole_file, unstage)
 	if unstage ~= nil then
 		assert(
 			(snapshot.group == "staged") == unstage,
-			unstage and "Select a STAGED entry" or "Select an UNSTAGED or UNTRACKED entry"
+			unstage and "Select a STAGED entry" or "Select an UNSTAGED entry"
 		)
 	end
 	git.stage(s.root, snapshot, side, line, whole_file)
-	M.refresh(snapshot)
+	M.refresh(next_entry or snapshot)
+	if staging_from_tree and not next_entry then
+		api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
+		api.nvim_win_set_cursor(s.tree_win, { s.unstaged_row, 0 })
+	end
 	api.nvim_set_current_win(win)
 	notify("Index updated; source files unchanged. Existing comments retain their original snapshots.")
 end
@@ -824,6 +932,7 @@ function M.open()
 		previous_tab = api.nvim_get_current_tabpage(),
 		id = string.format("%.0f", vim.uv.hrtime()),
 		delivery = "draft",
+		layout = "split",
 	}
 	M.state = s
 	reviews[root] = s
@@ -941,6 +1050,8 @@ function M.statusline()
 		return " REVIEW · "
 			.. harness.statusline(s.root)
 			.. " · "
+			.. (s.current and s.diff_engine or "text")
+			.. " · "
 			.. #s.comments
 			.. " comments   %<"
 			.. file
@@ -977,6 +1088,35 @@ function M.setup()
 			mark_hunk(nil)
 		end,
 	})
+	api.nvim_create_user_command(
+		"View",
+		guard(function(opts)
+			M.view(opts.args ~= "" and opts.args or nil)
+		end),
+		{
+			nargs = "?",
+			complete = function()
+				return { "split", "merged" }
+			end,
+		}
+	)
+	vim.cmd(
+		[[cnoreabbrev <expr> view getcmdtype() == ':' && getcmdline() == 'view' && getcmdpos() == 5 && luaeval("require('myeditor.review').active() ~= nil") ? 'View' : 'view']]
+	)
+	api.nvim_create_user_command("Focus", guard(function(opts)
+		M.focus(opts.args)
+	end), {
+		nargs = 1,
+		complete = function()
+			return { "staged", "modified" }
+		end,
+	})
+	for alias, command in pairs({ focus = "Focus", fs = "Focus staged", fm = "Focus modified" }) do
+		vim.cmd(string.format(
+			[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('myeditor.review').active() ~= nil") ? '%s' : '%s']],
+			alias, alias, #alias + 1, command, alias
+		))
+	end
 	api.nvim_create_user_command(
 		"ReviewHarness",
 		guard(function(opts)
@@ -1068,7 +1208,7 @@ function M.setup()
 					release_composer()
 				end
 				if
-					not api.nvim_win_is_valid(s.old_win)
+					(s.old_win and not api.nvim_win_is_valid(s.old_win))
 					or not api.nvim_win_is_valid(s.new_win)
 					or not api.nvim_win_is_valid(s.tree_win)
 				then

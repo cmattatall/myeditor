@@ -61,6 +61,57 @@ return function(root, equal, fails, keys)
 	vim.fn.delete(install_home, "rf")
 	assert(install_ok, install_err)
 
+	-- Reload uses the existing authenticated bridge, never the draft composer.
+	local original_system, original_target = vim.system, session.target
+	local calls, callbacks = {}, {}
+	session.target = { name = "amp-live", connection = "/fake/connection.json", session = thread }
+	local original_message, original_last = session.message, session.last
+	vim.fn.confirm = function(message)
+		assert(message:find(thread, 1, true) and message:find("reload", 1, true))
+		return choice
+	end
+	vim.notify = function(message)
+		table.insert(notices, message)
+	end
+	vim.system = function(argv, _, callback)
+		table.insert(calls, argv)
+		table.insert(callbacks, callback)
+	end
+	local reload_ok, reload_err = xpcall(function()
+		choice = 2
+		harness.install()
+		equal(0, #calls, "Cancelled install never requests reload")
+		choice = 1
+		harness.install()
+		callbacks[1]({ code = 1, stderr = "Install failed" })
+		vim.wait(10)
+		equal(1, #calls, "Failed install never requests reload")
+		harness.install()
+		callbacks[2]({ code = 0, stdout = "Installed" })
+		vim.wait(10)
+		equal(
+			{ "myeditor-amp-live", "reload", "/fake/connection.json", thread, root },
+			calls[3],
+			"Successful install requests reload of the confirmed target"
+		)
+		fails(harness.install, "already running")
+		callbacks[3]({ code = 0, stdout = "Reload request queued" })
+		vim.wait(10)
+		equal("Reload request queued", notices[#notices], "Queued is not reported as reloaded")
+		harness.install()
+		callbacks[4]({ code = 0, stdout = "Installed" })
+		vim.wait(10)
+		callbacks[5]({ code = 1, stderr = "Reload outcome uncertain" })
+		vim.wait(10)
+		equal("Reload outcome uncertain", notices[#notices], "Reload failure remains visible")
+		equal(5, #calls, "Uncertain reload is never automatically retried")
+		equal(original_message, session.message, "Reload does not change the message draft")
+		equal(original_last, session.last, "Reload preserves the last feedback retry target")
+	end, debug.traceback)
+	vim.system, vim.fn.confirm, vim.notify = original_system, confirm, notify
+	session.target = original_target
+	assert(reload_ok, reload_err)
+
 	equal(1, vim.fn.executable("myeditor-amp-live"), "Live adapter is packaged")
 	local system, discover, picker = vim.system, nil, nil
 	local fzf = require("fzf-lua")
@@ -161,7 +212,7 @@ return function(root, equal, fails, keys)
 	equal(comment, s.comments[1], "General send retains review drafts")
 	equal(win, vim.api.nvim_get_current_win(), "Write keeps composer open")
 	equal({ "" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false), "Successful :w clears the visible message")
-	equal("", feedback.read(session.directory .. "/harness.json").message, "Cleared message is persisted")
+	equal(nil, feedback.read(session.directory .. "/harness.json").message, "Composer text is never persisted")
 	keys(":w<CR>")
 	equal({ "1" }, vim.fn.readfile(path .. ".calls"), "Writing an empty composer sends nothing")
 	keys(":wq<CR>")
@@ -263,9 +314,9 @@ return function(root, equal, fails, keys)
 		"Late ACK preserves newer buffer edits even before capture"
 	)
 	equal(
-		"New draft typed during delivery",
+		nil,
 		feedback.read(session.directory .. "/harness.json").message,
-		"Late ACK also persists newer buffer edits"
+		"Late ACK does not persist draft text across sessions"
 	)
 	keys(":q!<CR>")
 	vim.cmd("Harness send")
@@ -348,15 +399,15 @@ return function(root, equal, fails, keys)
 	end
 	local ok, err = xpcall(function()
 		for _, case in ipairs({
-			{ status = "accepted", expected = "" },
-			{ status = "completed", expected = "" },
-			{ status = "failed", expected = "Sent text" },
-			{ status = "running", expected = "Sent text" },
-			{ status = "queued", expected = "Sent text" },
-			{ status = "accepted", draft = "New unsent draft", expected = "New unsent draft" },
-			{ status = "accepted", review = true, expected = "Sent text" },
-			{ status = "accepted", tracked = false, expected = "Sent text" },
-			{ status = "accepted", tracked = true, expected = "" },
+			{ status = "accepted" },
+			{ status = "completed" },
+			{ status = "failed" },
+			{ status = "running" },
+			{ status = "queued" },
+			{ status = "accepted", draft = "New unsent draft" },
+			{ status = "accepted", review = true },
+			{ status = "accepted", tracked = false },
+			{ status = "accepted", tracked = true },
 		}) do
 			local id, payload_path = feedback.enqueue(
 				restart_root,
@@ -373,22 +424,14 @@ return function(root, equal, fails, keys)
 				last = last,
 				last_message = case.tracked == true and last or case.tracked,
 			})
-			equal(
-				case.expected,
-				reopen(case.expected == "" and "Sent text" or nil),
-				"Fresh launch: " .. vim.inspect(case)
-			)
-			if case.expected == "" then
-				equal(
-					false,
-					feedback.read(directory .. "/harness.json").last_message,
-					"Consumed ACK is persisted explicitly"
-				)
-				equal("Sent text", reopen(), "Another restart preserves a newly typed identical draft")
-			end
+			equal("", reopen("Sent text"), "Fresh launch: " .. vim.inspect(case))
+			equal(nil, feedback.read(directory .. "/harness.json").message, "Legacy draft text is removed on save")
+			equal(nil, feedback.read(directory .. "/harness.json").last_message, "ACK draft identity is process-local")
+			equal(last, feedback.read(directory .. "/harness.json").last, "Delivery reference remains available")
+			equal("", reopen(), "Another restart discards even a newly typed identical draft")
 		end
 		reopen("Hidden pending draft", true)
-		equal("Hidden pending draft", reopen(), "Quit persists a hidden composer without requiring a send")
+		equal("", reopen(), "Fresh launch never restores hidden composer text")
 	end, debug.traceback)
 	vim.fn.delete(restart_root, "rf")
 	vim.fn.delete(directory, "rf")

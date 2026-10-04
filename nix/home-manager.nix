@@ -54,7 +54,8 @@ in
   };
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ] ++ lib.optional cfg.nvimAlias nvim;
-    home.sessionPath = lib.optional cfg.nvimAlias "${nvim}/bin";
+    # A store path here pins existing shells to an obsolete editor after switch.
+    home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
     home.file.".config/amp/plugins/anthrodiff.ts" = lib.mkIf cfg.ampPlugin.enable {
       source = ./amp/anthrodiff.ts;
     };

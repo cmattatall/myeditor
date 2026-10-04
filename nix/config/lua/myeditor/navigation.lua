@@ -72,6 +72,9 @@ local function pick_review(text)
 					review.show(target.index)
 					if target.side then
 						assert(s.current.id == target.snapshot.id, "Search result changed; search again")
+						if target.side == "old" and not s.old_win then
+							review.view("split")
+						end
 						api.nvim_set_current_win(target.side == "old" and s.old_win or s.new_win)
 						api.nvim_win_set_cursor(0, { target.line, 0 })
 						vim.cmd("normal! zz")

@@ -68,7 +68,29 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 })
 vim.keymap.set("n", "?", "<Cmd>help myeditor<CR>", { desc = "Editor help overlay" })
 
-require("codediff").setup({ diff = { compute_moves = false } })
+require("codediff").setup({
+	diff = { compute_moves = false, highlight_priority = 150 },
+	highlights = {
+		line_insert = "#28683e",
+		line_delete = "#c62828",
+		char_insert = "#58a46b",
+		char_delete = "#ff5252",
+	},
+})
+local function diff_contrast()
+	-- Syntax colors cannot stay readable against both vivid red and green fills.
+	for _, kind in ipairs({ "Line", "Char" }) do
+		for _, side in ipairs({ "Insert", "Delete" }) do
+			local name = "CodeDiff" .. kind .. side
+			local highlight = vim.api.nvim_get_hl(0, { name = name })
+			highlight.fg = kind == "Line" and "#ffffff" or "#101010"
+			highlight.nocombine = true
+			vim.api.nvim_set_hl(0, name, highlight)
+		end
+	end
+end
+-- CodeDiff's plugin entry point resets these groups after init.lua and on theme changes.
+vim.api.nvim_create_autocmd({ "VimEnter", "ColorScheme" }, { callback = vim.schedule_wrap(diff_contrast) })
 require("review.config").setup({ export = { clipboard = false, clear_on_close = false } })
 require("review.highlights").setup()
 require("neo-tree").setup({
@@ -84,11 +106,18 @@ require("neo-tree").setup({
 })
 vim.api.nvim_create_autocmd("VimEnter", {
 	once = true,
-	callback = function()
+	callback = vim.schedule_wrap(function()
 		if #vim.api.nvim_list_uis() > 0 then
+			if pcall(require("myeditor.git").root) then
+				local ok, err = pcall(require("myeditor.review").open)
+				if ok then
+					return
+				end
+				vim.notify("Could not open Review: " .. tostring(err), vim.log.levels.WARN)
+			end
 			require("neo-tree.command").execute({ action = "show", source = "filesystem", position = "left" })
 		end
-	end,
+	end),
 })
 
 local review = require("myeditor.review")

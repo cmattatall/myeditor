@@ -26,9 +26,10 @@ your existing Neovim configuration. The theme is **Rosé Pine (main)**, packaged
 by Nix along with the editor and plugins.
 
 The `myeditor` command uses `NVIM_APPNAME=myeditor`; your normal `nvim`
-configuration is untouched. Press **Space r** for Review, **i** to comment,
-and **:w** to queue/send feedback instead of saving source. Git staging is
-an explicit, separate action.
+configuration is untouched. Interactive launches inside a Git worktree open
+Review automatically. Press **i** to comment and **:w** in a diff pane to send
+saved feedback. **Space q** returns to ordinary editing; **Space r** re-enters
+Review. Git staging is an explicit, separate action.
 
 Supports **Amp**, **Claude Code**, and custom harness receivers. Select a
 thread/session per repository with `:ReviewHarness amp T-…`; configuration

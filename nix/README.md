@@ -1,6 +1,6 @@
 # Portable Review editor
 
-This directory is a self-contained flake. It packages Neovim, Git, ripgrep,
+This directory is a self-contained flake. It packages Neovim, Git, ripgrep, difftastic,
 Neo-tree, Codediff (including its compiled native library), review.nvim, and
 the custom Review workspace. Nix owns dependency versions; there is no
 runtime plugin manager and no first-launch plugin/library download.
@@ -25,9 +25,14 @@ Run from a Git worktree to review its changes. Arguments are passed to Neovim:
 nix run path:/path/to/myeditor/nix -- src/main.lua
 ```
 
-The filesystem tree opens on the left at startup, with focus in the editing
-pane. **Space e** or **:ft** focuses it, **Space d** returns to the editor,
-and **Space E** toggles it. Headless runs do not open the tree.
+Interactive launches inside a Git worktree open Review automatically, focused
+on the protected new-side pane. **Space q** returns to the editing tab, retaining
+any file arguments; **Space r** re-enters Review. **Space R** refreshes snapshots.
+Outside Git, the filesystem tree opens on the left with focus in the editor.
+**Space e** or **:ft** focuses it, **Space d** returns to the editor, and
+**Space E** toggles it. Headless runs open neither Review nor the tree.
+If Review is locked by another editor or cannot open, startup reports the
+reason and leaves ordinary editing available. Startup never sends feedback.
 
 **Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode (files,
 annotations, and harness messages) and in command/search input. Normal-mode
@@ -37,8 +42,8 @@ the Git sidebar in Review; scripts should use `:Explorer` directly.
 The package defines `myeditor`; Home Manager can also expose it as `nvim`.
 Both use `NVIM_APPNAME=myeditor` and a configuration in the Nix store.
 The theme is **Rosé Pine (main)**, bundled through the pinned nixpkgs.
-Existing Neovim configurations and
-plugins are not modified. Targets are Apple Silicon macOS and ARM64/x86-64
+Existing Neovim configurations and plugins are not modified.
+Targets are Apple Silicon macOS and ARM64/x86-64
 Linux; a build on one architecture does not verify the other targets.
 Intel macOS is not supported by the pinned unstable nixpkgs release.
 
@@ -65,8 +70,22 @@ Activation installs the package and its `nvim` wrapper through Home Manager.
 The installer backs up an existing regular shell rc and appends the standard
 `hm-session-vars.sh` source line once: `.zshrc` (respecting `ZDOTDIR`), `.bashrc`
 on Linux, or `.bash_profile` for macOS Bash login shells. Home Manager puts
-only the wrapper's directory ahead of Homebrew on PATH. It does not replace
+its stable profile `bin` directory ahead of Homebrew on PATH, not a
+version-specific Nix store path. It does not replace
 your Neovim config, install/reload Amp plugins, or send feedback.
+
+For the first install, or when migrating from the older version-specific PATH,
+refresh your existing shell once (a new terminal is not required):
+
+```sh
+unset __HM_SESS_VARS_SOURCED
+. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
+hash -r
+```
+
+Later `--switch` updates take effect when you quit and reopen Neovim in the same
+terminal. An already-running Neovim retains its original Nix build. To bypass
+a stale shell PATH at any time, launch `~/.nix-profile/bin/nvim` directly.
 
 The installer refuses unrelated Home Manager generations/configurations and
 managed shell-rc symlinks. For other shells or existing Home Manager/nix-darwin
@@ -95,7 +114,8 @@ Add its module and enable it in your Home Manager configuration:
 they opt in. Disable any other Home Manager `nvim` package to avoid a profile
 collision. If Home Manager does not manage your shell, source
 `~/.nix-profile/etc/profile.d/hm-session-vars.sh` after other PATH setup so the
-Nix-built wrapper takes precedence. Restart your shell after switching.
+Nix-built wrapper takes precedence. Its stable profile path follows updates;
+subsequent switches require reopening Neovim, not restarting your shell.
 
 Here `inputs` is the inputs argument from your flake's `outputs` function;
 pass it through `extraSpecialArgs` if your home module is a separate file.
@@ -117,9 +137,10 @@ so changing your system's packages does not silently change this editor.
 ## Review workflow
 
 1. Save your ordinary file edits and pause any agent writing to this worktree.
-2. Press **Space r** (`:Review`). A new tab replaces the editing layout with
-   a Git changes sidebar and protected old/new snapshot panes. Your original
-   tab, sidebar, buffers, and unsaved edits are retained.
+2. Review opens automatically on startup inside Git. From ordinary editing,
+   press **Space r** (`:Review`) to enter it. A separate tab contains the Git
+   changes sidebar and protected old/new snapshots. The original editing tab,
+   sidebar, buffers, and unsaved edits are retained.
 3. Press **i**, **a**, **o**, or **O** on code to compose a comment. Use
    **v**, **V**, or **Ctrl-v**, then **i**, for character/line/block feedback.
 4. Edit the annotation with normal Vim bindings, including operators, counts,
@@ -140,12 +161,27 @@ so changing your system's packages does not silently change this editor.
    receipts remain in **:ReviewOutbox**. After reviewing the agent's response,
    use **Space R** to refresh. **:ReviewArchive** archives any remaining notes.
 
-The sidebar separates **STAGED**, **UNSTAGED**, and **UNTRACKED** with colored
-header rows, counts, and spacing; empty sections remain visible. A partially
-staged file appears in both comparisons. **] / [** jump between changes,
+The sidebar separates **STAGED** and **UNSTAGED** with colored header rows and
+counts; empty sections remain visible. Untracked files are included in UNSTAGED.
+Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
+`D` deleted. Staging a file from the sidebar selects the next unstaged file, or
+the previous one at the end. With none left, focus stays on the UNSTAGED header.
+A partially staged file appears in both comparisons. **] / [** jump between changes,
 crossing files and groups in sidebar order without wrapping. They work from
 either source pane or the sidebar, retain focus, and accept counts (e.g.
 **3]**). A gutter arrow/bar marks the selected hunk in both source panes.
+
+Use **:view split** for side-by-side panes, **:view merged** for a unified view,
+or **:view** to toggle. The selected file/hunk and saved notes survive switching.
+Merged deletions are virtual display lines: use split for exact old-side
+selections or annotations. Scripts use `:View`; native lowercase `:view` remains
+unchanged outside Review.
+
+Additions are green and deletions red, with stronger token highlights from the
+Nix-pinned **difftastic** engine. Codediff retains text alignment/navigation and
+Git retains staging boundaries. Unsupported languages use difftastic's text
+comparison; missing/failed tools, a two-second timeout, or files over 1 MB retain
+the ordinary text renderer. The bottom bar shows `difftastic` or `text`.
 
 **Space m** toggles reviewed (`✓`) / unreviewed (`○`); **Space u**
 filters the sidebar, navigation, and Review pickers to unreviewed entries.
@@ -170,6 +206,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space d / `:FocusDiff` | Focus diff in Review; focus editor while editing |
 | Space E | Toggle ordinary Neo-tree while editing; focus-only in Review |
 | Space r / `:Review` | Enter/focus Review |
+| `:view [split\|merged]` / `:View` | Select a diff layout; no argument toggles |
 | Enter in sidebar | Open selected changed file |
 | Tab | Toggle tree/diff focus in Review |
 | Space j / Space k | Next/previous changed file |
@@ -224,6 +261,13 @@ its installer, and tests. It publishes a private live registry at
 and does not discover the old revdiff registry. Feedback starts with the
 tool-neutral **Review feedback** prefix and preserves the Git safety guidance.
 
+Annotation delivery sends the note, file/line reference, comparison side and
+snapshot status, with at most 1,000 selected-text characters per note. It does
+not paste complete old/new files or patches into Amp. Full immutable payloads
+remain in the local outbox; the message includes their archive path for optional
+historical lookup. This formatting happens in the editor bridge, not the plugin,
+so updating the editor is sufficient; no plugin reload is needed for this change.
+
 For Home Manager, enable the plugin alongside the editor:
 
 ```nix
@@ -249,7 +293,12 @@ Without Home Manager, install directly from the editor:
 This asks for confirmation before installing the bundled **anthrodiff plugin**
 (not the Amp CLI). If the old user-local revdiff plugin exists, the confirmation
 explicitly offers to back it up and replace it. Cancel is the default. No Git
-repository is required, and installation does not bind a session or send feedback.
+repository is required. With a selected live Amp target, the confirmation also
+authorizes a small request to that thread to call `reload_plugins` after a
+successful installation. Amp's plugin API has no direct reload method, so this
+is agent-mediated: queued does not mean reloaded. It never sends annotations or
+composer text, changes the binding, or replaces the last feedback retry target.
+Without a live target, reload manually once, then `:harness connect amp`.
 Home Manager-owned symlinks are never overwritten; update those through Home Manager.
 
 The same installer can be run from this repository's root:
@@ -263,10 +312,12 @@ bash nix/amp/install.sh --replace-revdiff
 Replacement moves the old regular file to
 `~/.config/amp/plugin-backups/revdiff.ts` without overwriting existing backups.
 The installer refuses symlinks (including Home Manager-owned files). It installs
-only the plugin; use Nix for the editor. Neither installation method reloads Amp.
-Restart Amp or reload its plugins after installation. In Amp's command palette,
-**anthrodiff: connect** shows connection instructions; **anthrodiff: disconnect**
-stops this thread's endpoint. Session/agent start registers silently by default.
+only the plugin; use Nix for the editor. Shell and Home Manager installations
+still require a manual plugin reload. Reload invalidates the live connection;
+use `:harness connect amp` again once Amp has registered the new endpoint.
+In Amp's command palette, **anthrodiff: connect** shows connection instructions;
+**anthrodiff: disconnect** stops this thread's endpoint. Session/agent start
+registers silently by default.
 
 Relaunch myeditor using the updated package, then connect in the same checkout:
 
@@ -287,12 +338,14 @@ stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
 the draft locally without sending. Hidden message drafts do not block quitting;
 ordinary unsaved files remain protected. An `accepted` ACK means the steering
 message was queued, not that the agent completed a turn. Disconnect retains
-local drafts and does not stop the agent.
+local drafts in this editor process and does not stop the agent. Every fresh
+editor starts with an empty composer, even if an older version saved a draft.
 
-Accepted/completed messages clear from the open composer and its saved draft,
+Accepted/completed messages clear from the open composer and its session draft,
 so the next `:harness send` opens empty. Pending, failed/uncertain, and local-only
-queued messages are retained. A late acknowledgment never clears different text
-typed while sending. An empty `:w` sends nothing, and `:wq` can close a cleared
+queued messages are retained only until the editor exits; submitted payloads
+and receipts remain in the outbox for retry. A late acknowledgment never clears
+different text typed while sending. An empty `:w` sends nothing, and `:wq` can close a cleared
 composer. **General-message sends do not clear review annotations**: `:w` in a
 Review diff pane or sidebar sends the saved annotation batch, and its successful
 acknowledgment clears only those sent notes.
@@ -422,11 +475,12 @@ to be sent to another agent; verify the binding before submitting.
 
 ## Persistence and boundaries
 
-- Message drafts/outbox live under `stdpath("state")/reviews/<repository-hash>/`,
+- Outbox payloads/receipts live under `stdpath("state")/reviews/<repository-hash>/`,
   normally `~/.local/state/myeditor/reviews/`. Files are private (0600), with
-  atomic replacement. Annotations are held only in this editor process; leaving
-  and re-entering Review retains them, but quitting discards them. Reviewed marks
-  and harness bindings persist. Drafts, snapshots and agent results stay out of Git.
+  atomic replacement. Annotation and message drafts live only in this editor
+  process; closing and reopening their views retains them, but quitting discards
+  them. Reviewed marks and harness bindings persist. Drafts, snapshots and agent
+  results stay out of Git.
 - One editor owns a repository's draft at a time. A process lock prevents
   concurrent editors from overwriting each other's drafts.
 - Review reads saved disk/index content, not unsaved normal buffers. Snapshots

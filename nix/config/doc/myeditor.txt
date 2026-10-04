@@ -56,7 +56,9 @@ forward. These work in Normal, Visual, Insert, and command/search input.
 Configure your terminal to send Option as Alt/Meta instead of special characters.
 Esc-b/Esc-f sequences (sent by some terminals for Option+Left/Right) also work.
 
-The filesystem tree opens at startup. Space e or :ft focuses it, Space d
+Interactive startup opens Review inside a Git worktree; Space q returns to
+ordinary editing. Outside Git, startup opens the filesystem tree instead.
+Headless startup opens neither. Space e or :ft focuses the tree, Space d
 focuses the editor, and Space E toggles it. Enter opens a tree entry. Space f fuzzy
 finds every nonignored project file. Space / fuzzy-searches saved project file
 contents. Enter chooses and Esc cancels either picker. Native / and n/N search
@@ -94,9 +96,11 @@ Without a hint, Tab keeps native argument/file completion and menu cycling.
 ==============================================================================
 REVIEW AND ANNOTATIONS                                        *myeditor-review*
 
-Save ordinary file edits first, then Space r or :Review from a Git worktree.
-A separate tab shows the Git sidebar and protected old/new snapshots. Your
-editing tab, file tree, and unsaved buffers are retained.
+Review opens automatically on interactive startup inside a Git worktree.
+From ordinary editing, save file edits first, then use Space r or :Review.
+A separate tab shows the Git sidebar and protected old/new snapshots. Space q
+returns to the retained editing tab, file arguments, tree, and buffers.
+Space R refreshes snapshots; startup never submits feedback or stages files.
 
 In a source pane, editing commands (i/a/I/A/o/O, c with motions, r/R,
 x/X, p/P, u/Ctrl-r, ., ~, >/<, =, J/gJ, gq/gw, gu/gU/g~, gp/gP)
@@ -180,12 +184,14 @@ One exact live match is chosen directly; multiple matches open a fuzzy session
 picker. Discovery and refresh are not automatic. Connecting performs no send.
 In the message buffer, normal Vim editing applies; :w submits only, :wq submits
 and closes, and :q (or :q!) closes while retaining the draft locally, without
-sending. Hidden message drafts also persist on :q/:qa and do not block exit;
+sending. Hidden message drafts do not block exit, but all message drafts are
+discarded on editor exit. Every fresh process starts with an empty composer;
 ordinary unsaved files retain Neovim's write protection. An accepted ACK means
 queued steering, not a completed agent turn.
 After accepted/completed delivery, the sent message clears from the open
 composer and from the next :hs. New text typed while delivery runs is preserved.
-Pending, failed/uncertain, and local-only queued messages remain drafts.
+Pending, failed/uncertain, and local-only queued messages remain drafts only
+within this process. Submitted payloads and receipts persist for inspection/retry.
 Writing an empty message sends nothing; :wq can close the cleared window.
 Review annotations are not cleared by a successful general-message send.
 
@@ -193,8 +199,13 @@ This repository ships the plugin and installer under nix/amp/. Home Manager's
 programs.myeditor.ampPlugin.enable installs it (also enabled by harness = "amp").
 Alternatively use :harness install amp, which defaults to Cancel and explicitly
 confirms replacement of an existing revdiff.ts. It installs the bridge plugin,
-not the Amp CLI, and does not connect, send feedback, or reload Amp. Home Manager
-symlinks are preserved. Installation works outside Git repositories too.
+not the Amp CLI. With a selected live Amp target, confirmation also authorizes
+a small request to that thread to call reload_plugins after installation.
+This is agent-mediated (Amp's plugin API has no direct reload method); queued
+does not mean reloaded. No annotations/composer text are sent, and the last
+feedback retry target is preserved. Without a live target, reload manually once
+and :harness connect amp. Reconnect after reload invalidates the old endpoint.
+Home Manager symlinks are preserved. Installation works outside Git too.
 From a shell, bash nix/amp/install.sh --replace-revdiff explicitly backs
 up and replaces the old user-local plugin. Restart/reload Amp after installing.
 Anthrodiff uses ~/.cache/anthrodiff/amp only; old revdiff connections are not
@@ -233,7 +244,10 @@ It receives a JSON file path and must acknowledge the submission ID.
 ==============================================================================
 GIT ACTIONS                                                     *myeditor-git*
 
-STAGED, UNSTAGED, and UNTRACKED have separate colored headers and file counts.
+STAGED and UNSTAGED have separate colored headers and file counts. UNSTAGED
+includes untracked files. Badges: M modified, U untracked, R Git-detected rename,
+A added, D deleted. After staging from the sidebar, focus advances to the next
+unstaged file (previous at the end), or the empty UNSTAGED header when finished.
 Empty sections remain visible. Partially staged files appear in both groups:
 STAGED compares HEAD/index; UNSTAGED compares index/worktree.
 
@@ -248,7 +262,7 @@ STAGED compares HEAD/index; UNSTAGED compares index/worktree.
 
 Bare s stages and S unstages; they reject the wrong group, like the explicit
 commands. Space s/S still toggle according to the selected group:
-UNSTAGED/UNTRACKED stages; STAGED unstages. For a hunk, focus either source pane
+UNSTAGED stages; STAGED unstages. For a hunk, focus either source pane
 and use ]/[ to choose the change, then s or S. From the sidebar, Space S acts
 on the highlighted file even when a different file is displayed; hunk actions
 require source focus.
@@ -265,6 +279,20 @@ make an annotation stale. Git context hunks can differ from rendered changes.
 
 ==============================================================================
 PANES AND VIEW                                                 *myeditor-view*
+
+  :view split          Side-by-side old/new panes
+  :view merged         Unified diff with deleted lines above new text
+  :view                Toggle split/merged, preserving file/hunk and notes
+
+In Review, typed :view expands to :View; scripts must use :View. Outside Review,
+native :view is unchanged. Merged deletions are virtual display rows; switch to
+split for exact selections/annotations on old text. Old-side search results
+automatically return to split. Saved old-side notes remain in :ReviewComments.
+
+Diff additions are green, deletions red. Nix bundles difftastic for structural
+token highlights; Codediff still aligns text and Git defines staging hunks.
+Tool failure/timeout or files over 1 MB retain text highlights. Unsupported
+languages use difftastic's line-based comparison. The bar names the active tool.
 
   Space e / :Explorer   Focus filesystem tree (Editing) or Git tree (Review)
   Space d / :FocusDiff  Focus editor (Editing) or new-side diff (Review)
@@ -304,6 +332,7 @@ file tree while editing. Scripts should call :Explorer directly.
   :ReviewMark               Toggle reviewed mark (Space m)
   :ReviewUnreviewed         Toggle unreviewed filter (Space u)
   :ReviewRefresh            Refresh saved snapshots (Space R)
+  :View [split|merged]       Select diff layout; no argument toggles (:view)
   :ReviewStage hunk|file    Stage selected hunk/file (source pane for hunks)
   :ReviewUnstage hunk|file  Unstage selected hunk/file
   :WriteFeedback            Submit saved review batch (like :w in diff/sidebar)
@@ -325,8 +354,8 @@ Useful native commands (not revdiff's command palette):
   :messages                Inspect previous notifications and errors
   :!{command} / :!!        Run shell command / repeat the last shell command
 
-:qa! discards unsaved ordinary files. Exiting discards annotations, but retains
-general-message drafts and outbox payloads/receipts. There is no quit guard for
+:qa! discards unsaved ordinary files. Exiting discards annotations and message
+drafts, but retains outbox payloads/receipts. There is no quit guard for
 unsent annotations. Exiting during delivery can leave it uncertain. Shell
 commands can mutate the worktree/index and bypass editor confirmations; do not
 run destructive commands casually.
@@ -342,10 +371,15 @@ Keep the editor running during delivery. Successful delivery clears sent notes;
 after reviewing the agent's response, refresh. "completed" means the agent turn
 finished; it does not prove the requested changes were made or tested.
 
-Message drafts/outbox are private files under stdpath("state")/reviews/.
+Outbox payloads/receipts are private files under stdpath("state")/reviews/.
+Draft text is session-only; legacy saved message drafts are never restored.
 Source text can be sensitive; only submit to a harness you intend to receive it.
 Errors and uncertain deliveries are retained, not silently retried. Inspect the
 session and receipt before retrying an interrupted built-in adapter.
+
+Live Amp messages contain annotations, file/line references, snapshot status,
+and at most 1,000 selected-text characters per note, not full files or patches.
+The full payload stays in the local outbox; its path is included for lookup.
 
 Review currently reads saved worktree/index changes. Feedback on stale or
 unverifiable snapshots includes a warning, status, and the original reviewed

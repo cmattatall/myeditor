@@ -231,4 +231,19 @@ test('editor bridge discovers anthrodiff and sends once with neutral guidance', 
   assert.ok(!message.content.toLowerCase().includes('revdiff'))
   assert.match(message.content, /Explain the boundary/)
   assert.match(message.content, /Do not stage, unstage, reset, commit, or push without asking/)
+
+  const review = join(home, 'review.json')
+  await writeFile(review, JSON.stringify({
+    submission_id: 'review-one', repository: root,
+    comments: [{ file: 'demo.lua', side: 'new', line: 42, line_end: 42, text: 'Check this boundary', snapshot_id: 's' }],
+    snapshots: { s: { group: 'unstaged', old: 'UNRELATED OLD CONTENT'.repeat(100000), new: 'UNRELATED NEW CONTENT'.repeat(100000) } },
+    snapshot_status: { s: 'current' },
+  }))
+  await run('send', found[0].connection, id, review)
+  const feedback = f.messages.get(id)!.at(-1)![0].content
+  assert.match(feedback, /Check this boundary/)
+  assert.match(feedback, /demo.lua/)
+  assert.match(feedback, /"line":42/)
+  assert.ok(!feedback.includes('UNRELATED'))
+  assert.ok(feedback.length < 1500, 'Amp receives a compact annotation, not the local snapshot archive')
 })

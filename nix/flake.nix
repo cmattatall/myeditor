@@ -50,12 +50,12 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          testHome = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/review-test" else "/home/review-test";
           standalone = import ./standalone-home.nix {
             flake = self;
             inherit system;
             username = "review-test";
-            homeDirectory =
-              if pkgs.stdenv.hostPlatform.isDarwin then "/Users/review-test" else "/home/review-test";
+            homeDirectory = testHome;
           };
         in
         {
@@ -89,10 +89,20 @@
                 chmod +x "$HOME/homebrew/bin/nvim"
                 export PATH="$HOME/homebrew/bin:$PATH"
                 python3 -B ${./tests/test_install_home_manager.py} ${self}/install-home-manager.sh
+                ln -s ${standalone}/home-path "$HOME/.nix-profile"
+                sed 's|${testHome}|'"$HOME"'|g' ${standalone}/home-path/etc/profile.d/hm-session-vars.sh > "$TMPDIR/session-vars.sh"
                 unset __HM_SESS_VARS_SOURCED
-                . ${standalone}/home-path/etc/profile.d/hm-session-vars.sh
-                test "$(readlink "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/myeditor"
+                . "$TMPDIR/session-vars.sh"
+                test "$(command -v nvim)" = "$HOME/.nix-profile/bin/nvim"
+                test "$(realpath "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/myeditor"
                 nvim --headless -i NONE -c 'lua if vim.env.NVIM_APPNAME ~= "myeditor" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' -c 'qa!'
+                # A profile switch must update nvim in this same shell, without
+                # sourcing session vars again or clearing its command cache.
+                mkdir -p "$TMPDIR/next-generation/bin"
+                printf '#!/bin/sh\necho updated-editor\n' > "$TMPDIR/next-generation/bin/nvim"
+                chmod +x "$TMPDIR/next-generation/bin/nvim"
+                ln -sfn "$TMPDIR/next-generation" "$HOME/.nix-profile"
+                test "$(nvim)" = updated-editor
                 test "$(cat ${standalone}/home-files/.config/myeditor/standalone-owner)" = myeditor-standalone-v1
                 test ! -e ${standalone}/home-files/.config/amp/plugins/anthrodiff.ts
                 touch "$out"
@@ -119,7 +129,7 @@
                 nativeBuildInputs = [
                   self.packages.${system}.default
                   pkgs.git
-                  pkgs.python3
+                  (pkgs.python3.withPackages (ps: [ ps.pynvim ]))
                 ];
               }
               ''
@@ -128,6 +138,7 @@
                 myeditor --headless -l ${./tests}/run.lua
                 python3 -B ${./tests/test_harness.py} ${./harness.py}
                 python3 -B ${./tests/test_amp_live.py} ${./amp_live.py}
+                python3 -B ${./tests}/test_ui.py
                 touch "$out"
               '';
         }

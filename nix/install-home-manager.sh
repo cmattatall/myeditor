@@ -72,6 +72,8 @@ if ! grep -Fxq "$session_line" "$shell_rc" 2>/dev/null; then
     fi
     printf '\n# Nix/Home Manager: make the packaged nvim take precedence over Homebrew.\n%s\n' "$session_line" >> "$shell_rc"
 fi
-echo 'Installed. Open a new shell, or run: unset __HM_SESS_VARS_SOURCED; . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"'
+echo 'Installed. On first install or migration from an older installer, refresh this shell once:'
+echo 'unset __HM_SESS_VARS_SOURCED; . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"; hash -r'
+echo 'Later updates only require quitting and reopening Neovim, not a new terminal.'
 echo 'Then run: command -v nvim'
 echo 'Your ~/.config/nvim and Amp plugins were not modified.'

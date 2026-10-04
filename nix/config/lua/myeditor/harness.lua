@@ -12,9 +12,7 @@ end
 local function save(s)
 	feedback.write(s.directory .. "/harness.json", {
 		target = s.target,
-		message = s.message,
 		last = s.last,
-		last_message = s.last_message or false,
 	})
 end
 
@@ -51,19 +49,12 @@ function M.get(root)
 		local directory = feedback.directory(root)
 		local saved = feedback.read(directory .. "/harness.json") or {}
 		local draft = feedback.read(directory .. "/draft.json") or {}
-		local last_message = saved.last_message
-		if last_message == nil then
-			-- Older drafts tracked only the last delivery. Its payload and receipt
-			-- still let compose distinguish a sent message from an unsent draft.
-			last_message = saved.last
-		end
 		sessions[root] = {
 			root = root,
 			directory = directory,
 			target = saved.target or draft.harness or { name = feedback.settings().harness or "none" },
-			message = saved.message or "",
+			message = "", -- Draft text belongs only to this editor process, including legacy saved drafts.
 			last = saved.last,
-			last_message = last_message,
 			epoch = 0,
 		}
 		sessions[root].delivery = delivery_status(sessions[root])
@@ -312,12 +303,19 @@ end
 
 function M.install()
 	assert(not installing, "Plugin installation is already running")
+	local has_session, session = pcall(current)
+	local target = has_session and vim.deepcopy(session.target) or {}
+	local reload = target.name == "amp-live"
 	local directory = assert(vim.env.HOME, "HOME must be set") .. "/.config/amp/plugins/"
 	local legacy = vim.uv.fs_lstat(directory .. "revdiff.ts") ~= nil
 	local prompt = "Install the bundled anthrodiff Amp plugin at "
 		.. directory
 		.. "anthrodiff.ts?\n"
-		.. "This does not install the Amp CLI or reload Amp."
+		.. "This does not install the Amp CLI.\n"
+		.. (
+			reload and ("Ask Amp thread " .. target.session .. " to reload its plugins after installation?")
+			or "No live Amp target selected; reload plugins manually once, then :harness connect amp."
+		)
 	if legacy then
 		prompt = prompt .. "\nThe old revdiff.ts will be moved to ~/.config/amp/plugin-backups/revdiff.ts."
 	end
@@ -331,8 +329,34 @@ function M.install()
 	installing = true
 	local ok, err = pcall(vim.system, argv, { text = true }, function(result)
 		vim.schedule(function()
-			installing = false
-			notify(vim.trim(result.code == 0 and result.stdout or result.stderr), result.code ~= 0 and "failed" or nil)
+			if result.code ~= 0 or not reload then
+				installing = false
+				notify(
+					vim.trim(result.code == 0 and result.stdout or result.stderr),
+					result.code ~= 0 and "failed" or nil
+				)
+				return
+			end
+			notify("Installed anthrodiff; requesting plugin reload from Amp.")
+			local started, reload_err = pcall(vim.system, {
+				"myeditor-amp-live",
+				"reload",
+				target.connection,
+				target.session,
+				session.root,
+			}, { text = true }, function(reply)
+				vim.schedule(function()
+					installing = false
+					notify(
+						vim.trim(reply.code == 0 and reply.stdout or reply.stderr),
+						reply.code ~= 0 and "failed" or nil
+					)
+				end)
+			end)
+			if not started then
+				installing = false
+				notify("Installed, but reload request failed: " .. tostring(reload_err), "failed")
+			end
 		end)
 	end)
 	if not ok then

@@ -25,14 +25,28 @@ function M.entries(root)
 	)
 	local result = {}
 	for _, group in ipairs({ "staged", "unstaged", "untracked" }) do
-		local args = { "diff", "--name-only", "--no-renames", "-z" }
+		local args = { "diff", "--name-status", "--find-renames", "-z" }
 		if group == "staged" then
 			table.insert(args, "--cached")
 		elseif group == "untracked" then
 			args = { "ls-files", "--others", "--exclude-standard", "-z" }
 		end
-		for _, path in ipairs(paths(root, args)) do
-			table.insert(result, { path = path, group = group })
+		local fields = paths(root, args)
+		local i = 1
+		while i <= #fields do
+			if group == "untracked" then
+				table.insert(result, { path = fields[i], group = group, status = "U" })
+				i = i + 1
+			else
+				local status = fields[i]:sub(1, 1)
+				table.insert(result, { path = fields[i + 1], group = group, status = status })
+				i = i + 2
+				if status == "R" then
+					-- Keep per-path snapshots/staging for the two sides of a rename.
+					table.insert(result, { path = fields[i], group = group, status = status })
+					i = i + 1
+				end
+			end
 		end
 	end
 	return result

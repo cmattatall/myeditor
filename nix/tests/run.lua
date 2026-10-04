@@ -113,7 +113,7 @@ local function test()
 	keys("<Tab>")
 	equal(s.new_win, vim.api.nvim_get_current_win(), "Tab returns to diff")
 	keys(" m")
-	equal(true, vim.list_contains(sidebar(), " ✓ auth.lua"), "Reviewed file has a Unicode check")
+	equal(true, vim.list_contains(sidebar(), " ✓ M auth.lua"), "Reviewed file has a Unicode check and status")
 	keys(" u")
 	equal(2, #s.entries, "Unreviewed filter hides reviewed file")
 	local fzf = require("fzf-lua")
@@ -130,7 +130,7 @@ local function test()
 	review.show(1)
 	keys(" m")
 	equal(true, vim.tbl_isempty(s.reviewed), "Mark command toggles back to unreviewed")
-	equal(true, vim.list_contains(sidebar(), " ○ auth.lua"), "Unmarking restores the unreviewed circle")
+	equal(true, vim.list_contains(sidebar(), " ○ M auth.lua"), "Unmarking restores the unreviewed circle")
 	navigation.files()
 	local matched = vim.system({ "fzf", "--filter", "plnmd" }, { stdin = table.concat(items, "\n"), text = true })
 		:wait()
@@ -170,8 +170,9 @@ local function test()
 	vim.fn.writefile(changed, root .. "/auth.lua")
 	vim.notify, fzf.fzf_exec = notify, exec
 	equal(true, vim.list_contains(sidebar(), " STAGED (0)"), "Empty staged section stays visible")
-	equal(true, vim.list_contains(sidebar(), " UNSTAGED (2)"), "Unstaged count excludes untracked")
-	equal(true, vim.list_contains(sidebar(), " UNTRACKED (1)"), "Untracked section has its own count")
+	equal(true, vim.list_contains(sidebar(), " UNSTAGED (3)"), "Unstaged count includes untracked files")
+	equal(false, table.concat(sidebar(), "\n"):find("UNTRACKED", 1, true) ~= nil, "No separate untracked section")
+	equal(true, vim.list_contains(sidebar(), " ○ U plan.md"), "Untracked files have a U badge")
 	local headers = vim.api.nvim_buf_get_extmarks(
 		s.tree_buf,
 		vim.api.nvim_get_namespaces()["myeditor.tree"],
@@ -201,14 +202,18 @@ local function test()
 	equal(1, vim.api.nvim_win_get_cursor(s.new_win)[1], "Deleted file clamps the empty side to line one")
 	equal(1, vim.api.nvim_win_get_cursor(s.old_win)[1], "Deleted file targets removed source lines")
 	keys("]")
-	equal("plan.md", s.current.path, "Next hunk crosses into untracked group")
+	equal("plan.md", s.current.path, "Untracked hunks belong to the unstaged cycle")
 	keys("]")
-	equal("plan.md", s.current.path, "Final hunk does not wrap")
+	equal("auth.lua", s.current.path, "Final unstaged hunk wraps to the first file")
+	equal(5, vim.api.nvim_win_get_cursor(s.new_win)[1], "Forward wrap selects the first hunk")
+	keys("[")
+	equal("plan.md", s.current.path, "Backward wrap selects the final unstaged file")
 	keys("3[")
 	equal("auth.lua", s.current.path, "Counted backwards navigation crosses files")
 	equal(5, vim.api.nvim_win_get_cursor(s.new_win)[1], "Counted navigation returns to first hunk")
 	keys("[")
-	equal(5, vim.api.nvim_win_get_cursor(s.new_win)[1], "First hunk does not wrap")
+	equal("plan.md", s.current.path, "First hunk wraps within the group")
+	keys("]")
 	vim.api.nvim_set_current_win(s.old_win)
 	keys("]")
 	equal(17, vim.api.nvim_win_get_cursor(s.old_win)[1], "Old side navigates original coordinates")
@@ -539,11 +544,16 @@ local function test()
 	equal(expected_index, vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false), "Staged pane shows index not worktree")
 	vim.api.nvim_set_current_win(s.tree_win)
 	keys("]")
-	equal("unstaged", s.current.group, "Hunk jump distinguishes same path in two groups")
+	equal("staged", s.current.group, "A single staged hunk wraps without entering unstaged")
+	keys(":fm<CR>")
+	equal("unstaged", s.current.group, "Focus modified explicitly selects unstaged")
+	equal(s.tree_win, vim.api.nvim_get_current_win(), "Group command retains sidebar focus")
 	equal("auth.lua", s.current.path, "Partially staged file is independently reviewable")
 	equal(17, vim.api.nvim_win_get_cursor(s.new_win)[1], "Unstaged view targets the remaining hunk")
 	keys("[")
-	equal("staged", s.current.group, "Previous hunk crosses back into staged group")
+	equal(false, s.current.group == "staged", "Previous hunk cannot leave unstaged")
+	keys(":fs<CR>")
+	equal("staged", s.current.group, "Focus staged explicitly returns to staged")
 	equal(5, vim.api.nvim_win_get_cursor(s.new_win)[1], "Staged hunk has its own coordinates")
 	review.toggle_reviewed()
 	equal(nil, s.reviewed["unstaged\0auth.lua"], "Staged reviewed mark does not mark worktree comparison")
@@ -594,6 +604,11 @@ local function test()
 		"Sidebar stages selected file, not displayed diff"
 	)
 	equal(s.tree_win, vim.api.nvim_get_current_win(), "File staging preserves sidebar focus")
+	equal(
+		"removed.lua",
+		s.entries[s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]]].path,
+		"Staging last file selects previous unstaged file"
+	)
 	select_tree("plan.md", "staged")
 	vim.cmd("ReviewUnstage file")
 	equal(index_before, run({ "write-tree" }), "Sidebar command unstages whole new file")
@@ -603,6 +618,11 @@ local function test()
 		changed,
 		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
 		"File command stages both hunks"
+	)
+	equal(
+		"removed.lua",
+		s.entries[s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]]].path,
+		"Staging first file selects next unstaged file"
 	)
 	select_tree("auth.lua", "staged")
 	keys(" S")
@@ -647,7 +667,11 @@ local function test()
 	vim.fn.writefile({ "Agent changed this plan" }, root .. "/plan.md")
 	review.refresh()
 	equal(nil, s.reviewed["untracked\0plan.md"], "Agent edit invalidates reviewed mark")
-	equal(true, vim.list_contains(sidebar(), " ○ plan.md"), "Changed reviewed file reappears under unreviewed filter")
+	equal(
+		true,
+		vim.list_contains(sidebar(), " ○ U plan.md"),
+		"Changed reviewed file reappears under unreviewed filter"
+	)
 	review.toggle_unreviewed()
 	for index = 1, #s.entries do
 		review.show(index)

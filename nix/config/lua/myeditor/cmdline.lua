@@ -20,7 +20,7 @@ function M.suffix(line)
 			end
 		end
 		lead, matches = line, vim.fn.getcompletion(line, "command")
-	elseif line:match("^Harness%s+[%a%s]*$") then
+	elseif line:match("^Harness%s+[%a%s]*$") or line:match("^Focus%s+%a*$") then
 		lead, matches = line:match("(%a*)$"), vim.fn.getcompletion(line, "cmdline")
 	else
 		return ""
