@@ -123,6 +123,7 @@ vim.api.nvim_create_autocmd("VimEnter", {
 local review = require("myeditor.review")
 review.setup()
 require("myeditor.harness").setup()
+require("myeditor.worktree").setup()
 require("myeditor.cmdline").setup()
 require("fzf-lua").setup({
 	winopts = { width = 0.85, height = 0.8, preview = { hidden = true } },

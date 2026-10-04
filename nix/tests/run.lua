@@ -86,6 +86,7 @@ local function test()
 	vim.cmd("Neotree close")
 	review.open()
 	local s = review.state
+	equal(s.tree_win, vim.api.nvim_get_current_win(), "Review opens focused on the file tree")
 	for _, win in ipairs({ s.tree_win, s.old_win, s.new_win }) do
 		vim.api.nvim_set_current_win(win)
 		local before = vim.fn.winlayout()
@@ -382,6 +383,7 @@ local function test()
 	review.toggle_reviewed()
 	review.archive()
 	s = review.state
+	keys("<CR>")
 	vim.api.nvim_win_set_cursor(s.new_win, { 16, 0 })
 	keys("VjiPreserve the refresh contract.<Esc>")
 	equal(
@@ -457,6 +459,7 @@ local function test()
 	review.open()
 	s = review.state
 	equal(0, #s.comments, "Leaving Review does not save an unwritten annotation")
+	keys("<CR>")
 	keys("i<Esc>")
 	equal(
 		{ "" },
@@ -531,13 +534,13 @@ local function test()
 	vim.notify = function(message)
 		notice = message
 	end
-	keys("S")
+	vim.cmd("ReviewUnstage hunk")
 	vim.notify = notify
-	equal(true, notice:find("Select a STAGED entry", 1, true) ~= nil, "S rejects unstaged hunks rather than staging")
+	equal(true, notice:find("Select a STAGED entry", 1, true) ~= nil, "Explicit unstage rejects unstaged hunks")
 	equal(
 		expected_index,
 		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
-		"Rejected S leaves index intact"
+		"Rejected unstage leaves index intact"
 	)
 	review.show(1)
 	equal("staged", s.current.group, "Staged entries appear first")
@@ -566,18 +569,18 @@ local function test()
 	vim.notify = function(message)
 		notice = message
 	end
-	keys("s")
+	vim.cmd("ReviewStage hunk")
 	vim.notify = notify
-	equal(true, notice:find("Select an UNSTAGED", 1, true) ~= nil, "s rejects staged hunks rather than unstaging")
+	equal(true, notice:find("Select an UNSTAGED", 1, true) ~= nil, "Explicit stage rejects staged hunks")
 	equal(
 		expected_index,
 		git.lines(git.snapshot(root, { path = "auth.lua", group = "staged" }).new),
-		"Rejected s leaves index intact"
+		"Rejected stage leaves index intact"
 	)
 	equal(nil, s.composer, "s/S never open an annotation in source panes")
 	vim.api.nvim_set_current_win(s.old_win)
 	keys("S")
-	equal(index_before, run({ "write-tree" }), "S from old source pane unstages only the current hunk")
+	equal(index_before, run({ "write-tree" }), "S from old source pane unstages the file")
 	vim.api.nvim_set_current_win(s.new_win)
 	vim.cmd("ReviewStage hunk")
 	review.show(1)
@@ -598,7 +601,7 @@ local function test()
 	fails(function()
 		review.stage(false)
 	end, "Focus a source pane")
-	keys(" S")
+	keys("S")
 	equal(
 		{ "plan.md" },
 		vim.split(vim.trim(run({ "diff", "--cached", "--name-only" })), "\n"),
@@ -626,7 +629,7 @@ local function test()
 		"Staging first file selects next unstaged file"
 	)
 	select_tree("auth.lua", "staged")
-	keys(" S")
+	keys("S")
 	equal(index_before, run({ "write-tree" }), "Sidebar shortcut toggles staged file back to unstaged")
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Stage and unstage preserve source text")
 	local deleted = git.snapshot(root, { path = "removed.lua", group = "unstaged" })

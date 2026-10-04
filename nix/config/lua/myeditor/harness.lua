@@ -12,6 +12,7 @@ end
 local function save(s)
 	feedback.write(s.directory .. "/harness.json", {
 		target = s.target,
+		provider = s.provider,
 		last = s.last,
 	})
 end
@@ -49,10 +50,12 @@ function M.get(root)
 		local directory = feedback.directory(root)
 		local saved = feedback.read(directory .. "/harness.json") or {}
 		local draft = feedback.read(directory .. "/draft.json") or {}
+		local target = saved.target or draft.harness or { name = feedback.settings().harness or "none" }
 		sessions[root] = {
 			root = root,
 			directory = directory,
-			target = saved.target or draft.harness or { name = feedback.settings().harness or "none" },
+			target = target,
+			provider = saved.provider or (target.name == "amp-live" and "amp" or target.name),
 			message = "", -- Draft text belongs only to this editor process, including legacy saved drafts.
 			last = saved.last,
 			epoch = 0,
@@ -112,10 +115,53 @@ function M.select(root, target)
 	for key, value in pairs(target) do
 		s.target[key] = value
 	end
+	if target.name == "amp-live" or target.name == "amp" or target.name == "claude" then
+		s.provider = target.name == "amp-live" and "amp" or target.name
+	end
 	s.epoch = s.epoch + 1
 	s.delivery = delivery_status(s)
 	save(s)
 	notify("Harness: " .. target.name .. (target.session and (" · " .. target.session) or "") .. "; nothing sent")
+end
+
+function M.use(name, root)
+	assert(name == "amp" or name == "claude", "Usage: Harness use amp|claude")
+	local s = root and M.get(root) or current()
+	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before switching harnesses")
+	local bound = s.target.name == "amp-live" and "amp" or s.target.name
+	if bound ~= name then
+		M.select(s.root, { name = "none" })
+	end
+	s.provider = name
+	save(s)
+	notify("Selected " .. name .. " for new worktrees; feedback connection is " .. s.target.name)
+end
+
+function M.launch_command(root)
+	local name = M.get(root).provider
+	assert(name == "amp" or name == "claude", "Select a harness first: :harness use amp|claude")
+	local executable = vim.fn.exepath(name)
+	assert(executable ~= "", "Install/authenticate the " .. name .. " CLI and put it on PATH first")
+	return { executable }
+end
+
+function M.launch(root)
+	local argv = M.launch_command(root)
+	vim.cmd.tabnew()
+	vim.cmd.tcd(root)
+	local job = vim.fn.jobstart(argv, {
+		cwd = root,
+		term = true,
+		on_exit = function(_, code)
+			if code ~= 0 then
+				vim.schedule(function()
+					notify("Harness exited with status " .. code .. " in " .. root .. "; worktree retained", "failed")
+				end)
+			end
+		end,
+	})
+	assert(job > 0, "Could not start harness; worktree retained at " .. root)
+	vim.cmd.startinsert()
 end
 
 function M.deliver(root, id, path, argv, retry, callback)
@@ -129,11 +175,11 @@ function M.deliver(root, id, path, argv, retry, callback)
 		if status.status == "accepted" or status.status == "completed" then
 			clear_sent_message(s, path)
 			require("myeditor.review").clear_sent(root, path)
+		elseif status.status == "failed" then
+			notify("Feedback failed: " .. (status.error or "Inspect :ReviewOutbox before retrying"), "failed")
+		else
+			notify("Feedback kept in local outbox (:ReviewOutbox)")
 		end
-		notify(
-			"Feedback " .. status.status .. ": " .. path .. (status.error and ("\n" .. status.error) or ""),
-			status.status
-		)
 		if callback then
 			callback(status)
 		end
@@ -159,7 +205,9 @@ function M.status()
 	local s = current()
 	local status = s.last and feedback.read(s.directory .. "/" .. s.last.id .. ".status.json")
 	notify(
-		"Harness: "
+		"Selected type: "
+			.. s.provider
+			.. "\nFeedback harness: "
 			.. s.target.name
 			.. (s.target.session and (" · " .. s.target.session) or "")
 			.. "\nLast delivery: "
@@ -371,6 +419,8 @@ function M.setup()
 			local args = opts.fargs
 			if #args == 2 and args[1] == "connect" and args[2] == "amp" then
 				M.connect()
+			elseif #args == 2 and args[1] == "use" then
+				M.use(args[2])
 			elseif #args == 2 and args[1] == "install" and args[2] == "amp" then
 				M.install()
 			elseif #args == 0 or (#args == 1 and args[1] == "status") then
@@ -382,7 +432,7 @@ function M.setup()
 			elseif #args == 1 and args[1] == "disconnect" then
 				M.select(current().root, { name = "none" })
 			else
-				error("Usage: Harness install amp | connect amp | disconnect | send | status | retry")
+				error("Usage: Harness use amp|claude | install amp | connect amp | disconnect | send | status | retry")
 			end
 		end)
 		if not ok then
@@ -393,7 +443,9 @@ function M.setup()
 		complete = function(_, line, pos)
 			local args = vim.split(line:sub(1, pos), "%s+")
 			if #args == 2 then
-				return { "install", "connect", "disconnect", "send", "status", "retry" }
+				return { "install", "connect", "use", "disconnect", "send", "status", "retry" }
+			elseif #args == 3 and args[2] == "use" then
+				return { "amp", "claude" }
 			elseif #args == 3 and (args[2] == "connect" or args[2] == "install") then
 				return { "amp" }
 			end

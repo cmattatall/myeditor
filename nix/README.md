@@ -136,11 +136,13 @@ so changing your system's packages does not silently change this editor.
 
 ## Review workflow
 
-1. Save your ordinary file edits and pause any agent writing to this worktree.
+1. Save ordinary file edits; Review reads saved files and the Git index.
 2. Review opens automatically on startup inside Git. From ordinary editing,
    press **Space r** (`:Review`) to enter it. A separate tab contains the Git
    changes sidebar and protected old/new snapshots. The original editing tab,
    sidebar, buffers, and unsaved edits are retained.
+   Focus starts on the file tree with the first diff previewed. Press **Enter**
+   or **Tab** to focus the diff, then **[ / ]** to select a hunk and **s** to stage it.
 3. Press **i**, **a**, **o**, or **O** on code to compose a comment. Use
    **v**, **V**, or **Ctrl-v**, then **i**, for character/line/block feedback.
 4. Edit the annotation with normal Vim bindings, including operators, counts,
@@ -158,14 +160,28 @@ so changing your system's packages does not silently change this editor.
 6. Accepted/completed delivery removes the sent notes, preserving newer notes
    and edits. Pending, failed, and local-only batches remain in this editor
    process; a fresh launch starts without annotations. Submitted payloads and
-   receipts remain in **:ReviewOutbox**. After reviewing the agent's response,
-   use **Space R** to refresh. **:ReviewArchive** archives any remaining notes.
+   receipts remain in **:ReviewOutbox**. Review refreshes automatically as the
+   agent edits files; **Space R** refreshes immediately. **:ReviewArchive**
+   archives any remaining notes.
+
+While a Review source pane or sidebar is focused in Normal mode, saved file and
+index changes are checked about once a second. Refresh preserves the displayed
+file and pane focus, retaining cursor/scroll positions where possible. It pauses
+while composing annotations/messages, selecting text, using commands/pickers,
+or delivering feedback. Original annotation snapshots are retained, never
+silently re-anchored. Refresh does not save buffers, stage files, or send feedback.
+The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.
+Use **Space R** / **:ReviewRefresh** for these snapshot buffers, not `:bufdo e`.
+Outside Review, native `:checktime` checks ordinary buffers for external changes.
 
 The sidebar separates **STAGED** and **UNSTAGED** with colored header rows and
 counts; empty sections remain visible. Untracked files are included in UNSTAGED.
 Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
 `D` deleted. Staging a file from the sidebar selects the next unstaged file, or
 the previous one at the end. With none left, focus stays on the UNSTAGED header.
+Focused tree navigation highlights a full row instead of a character cursor;
+moving onto a file immediately displays its diff without leaving the tree.
+Enter focuses that diff. Normal cursor styling returns when focus leaves the tree.
 A partially staged file appears in both comparisons. **] / [** jump between changes,
 cycling across visible files within the current STAGED or UNSTAGED group.
 Untracked files belong to the UNSTAGED cycle. They work from
@@ -213,7 +229,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space E | Toggle ordinary Neo-tree while editing; focus-only in Review |
 | Space r / `:Review` | Enter/focus Review |
 | `:view [split\|merged]` / `:View` | Select a diff layout; no argument toggles |
-| Enter in sidebar | Open selected changed file |
+| Enter in sidebar | Focus the selected file's diff; moving between rows previews it automatically |
 | Tab | Toggle tree/diff focus in Review |
 | Space j / Space k | Next/previous changed file |
 | `]` / `[` | Cycle hunks across files within the current Git group; retain pane focus |
@@ -227,9 +243,8 @@ subcommands also have hints; other arguments keep native Tab completion.
 | d in source pane | Delete annotation covering cursor; picker if several overlap |
 | Visual selection, then i or Space c | Comment on exact selection |
 | Space c / `:ReviewComments` | List/remove draft comments |
-| s / S in a source pane | Stage / unstage the Git hunk containing the cursor; reject wrong group |
-| Space s in a source pane | Stage/unstage the Git hunk containing the cursor |
-| Space S in sidebar or source pane | Stage/unstage selected file or entire displayed diff |
+| s in a source pane | Stage/unstage the Git hunk containing the cursor |
+| S in sidebar or source pane | Stage/unstage selected file or entire displayed diff |
 | `:ReviewStage hunk` / `:ReviewStage file` | Explicitly stage; rejects STAGED entries |
 | `:ReviewUnstage hunk` / `:ReviewUnstage file` | Explicitly unstage; requires STAGED entry |
 | Space R / `:ReviewRefresh` | Refresh snapshots and changed-file list |
@@ -244,7 +259,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space q / `:ReviewLeave` (also q in sidebar) | Return to editing, retaining drafts |
 
 Git hunks include Git's context lines and can group nearby edits differently
-from Codediff's highlighted ranges. New/deleted files require **Space S**. Renames
+from Codediff's highlighted ranges. New/deleted files require **S**. Renames
 are shown as deletion/addition pairs. Stage before commenting if possible:
 staging changes the index comparison and can make existing anchors stale.
 
@@ -253,6 +268,41 @@ forward in Normal, Visual, Insert, and command/search input, including annotatio
 and harness messages. Configure the terminal to send Option as Alt/Meta rather
 than special characters; Esc-b/Esc-f word-key sequences are also supported.
 Bare **s/S** retains native substitution inside annotations and ordinary files.
+
+## Worktrees and new harness sessions
+
+```vim
+:harness use amp
+:worktree list
+:worktree switch
+:worktree switch feature-branch
+:worktree new
+:worktree new feature-branch ../myeditor-feature
+```
+
+`list` and `switch` open a chooser showing paths and branches; `switch` also
+accepts a branch or path directly. `new` asks for a branch when omitted, otherwise
+uses `new branch [path]`. Its default directory is `<current-root>-<branch>` beside
+the current checkout (branch slashes become hyphens). It runs `git worktree add -b`
+from the current HEAD, preserving the original index and working files. It never
+forces an existing path/branch, commits, or pushes.
+
+`:harness use amp` or `:harness use claude` persists the launch type per worktree;
+it does not start a process or send feedback. `new` checks that CLI is on PATH,
+creates and switches to the new Review, then starts a fresh interactive `amp` or
+`claude` process in a terminal tab with that worktree as its working directory.
+Install/authenticate the CLI separately. Exit Terminal mode with **Ctrl-\\ Ctrl-N**,
+then **gT** returns to the Review tab. Editor exit stops its terminal processes.
+If a launch fails, the new worktree is retained and an error is reported.
+
+New worktrees inherit only the selected harness type, not a thread ID, feedback
+connection, or drafts. In the new Review, use `:harness connect amp` to select its
+live Amp session; for Claude, use `:ReviewHarness claude SESSION_ID`. Changing
+the selected type clears an incompatible feedback binding; `:harness status`
+shows both. Switching worktrees does not spawn additional agents. Dirty editing
+buffers and saved notes remain with their original checkout; save or close an
+open annotation before switching. Worktrees owned by another editor are refused.
+Scripts use uppercase `:Worktree` / `:Harness`, not the typed abbreviations.
 
 ## Connect an agent: Amp, Claude Code, or a custom harness
 
@@ -340,8 +390,8 @@ Relaunch myeditor using the updated package, then connect in the same checkout:
 
 Connect performs manual discovery for the exact checkout. It directly chooses
 the only live match, or opens a fuzzy session picker. There is no automatic
-discovery or live refresh. Connecting sends nothing. `:Harness send` opens a
-general-message `acwrite` buffer with normal Vim editing: `:w` submits and
+session discovery; Review files refresh independently. Connecting sends nothing.
+`:Harness send` opens a general-message `acwrite` buffer with normal Vim editing: `:w` submits and
 stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
 the draft locally without sending. Hidden message drafts do not block quitting;
 ordinary unsaved files remain protected. An `accepted` ACK means the steering

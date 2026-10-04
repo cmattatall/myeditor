@@ -10,8 +10,8 @@ MODAL EDITING AND AGENT REVIEW
   Space f         Fuzzy files                     :Files
   Space /         Fuzzy project/Review text       :Search
   ] / [           Next/previous hunk across files (also from sidebar)
-  s / S           Stage / unstage hunk under cursor (source pane)
-  Space S         Stage/unstage file (sidebar selection or displayed diff)
+  s               Stage/unstage hunk under cursor (source pane)
+  S               Stage/unstage file (sidebar selection or displayed diff)
   i               Start a fresh annotation on the reviewed line
   d               Delete annotation on the reviewed line
   Esc, :q         Discard unsaved annotation edits; close its editor
@@ -30,6 +30,7 @@ mode backward search; use :?pattern<Enter> or /pattern<Enter> then N instead.
 
   |myeditor-editing|       Navigation, scrolling, files and search
   |myeditor-review|        Review and annotation editing
+  |myeditor-worktrees|     Switch worktrees and start a new harness
   |myeditor-harness|       Amp, Claude Code, and custom receivers
   |myeditor-git|           Staging, reviewed marks and refreshing
   |myeditor-view|          Panes and native view controls
@@ -100,7 +101,20 @@ Review opens automatically on interactive startup inside a Git worktree.
 From ordinary editing, save file edits first, then use Space r or :Review.
 A separate tab shows the Git sidebar and protected old/new snapshots. Space q
 returns to the retained editing tab, file arguments, tree, and buffers.
-Space R refreshes snapshots; startup never submits feedback or stages files.
+Focus starts on the file tree, with the first diff previewed. Enter or Tab
+moves into the diff for hunk navigation ([/]) and staging (s).
+Space R / :ReviewRefresh refreshes snapshots immediately; startup never submits
+feedback or stages files. The bottom Review bar shows the branch, or @short-SHA
+when HEAD is detached. It updates on refresh without running Git on each redraw.
+
+Review checks saved files and index changes about once a second while a source
+pane or sidebar is focused in Normal mode. It preserves the selected file and
+pane focus, and cursor/scroll positions where possible. It pauses during
+annotations, messages, Visual selections, command input, pickers and delivery.
+Notes retain their original snapshots, even when an agent edits their files.
+Use Space R rather than :bufdo e: Review panes are protected snapshots, not
+ordinary file buffers. Outside Review, native :checktime checks loaded files
+for external changes without forcing unsaved edits to be discarded.
 
 In a source pane, editing commands (i/a/I/A/o/O, c with motions, r/R,
 x/X, p/P, u/Ctrl-r, ., ~, >/<, =, J/gJ, gq/gw, gu/gU/g~, gp/gP)
@@ -163,7 +177,8 @@ or UNSTAGED group; untracked files belong to UNSTAGED. :fs and :fm switch groups
 explicitly, retaining pane focus. An empty group leaves selection unchanged.
 A gutter arrow/bar marks the selected change in both panes.
 Small hunks are centered; tall hunks start near the top of the view.
-Space j/k file navigation wraps across groups. Enter opens the selected file.
+Space j/k file navigation wraps across groups. Moving onto a sidebar file row
+displays its diff immediately, retaining tree focus. Enter focuses that diff.
 The Review-only leader bindings above apply in the sidebar and source panes,
 not inside annotation/message text. Global focus/search/help commands remain
 available there; use Esc before invoking Normal-mode shortcuts.
@@ -172,6 +187,34 @@ Reviewed marks are private per worktree and fingerprint changed content,
 independently for staged and unstaged entries. They survive reopen, refresh,
 and context-only shifts, but clear if changed content changes. The unreviewed
 filter also affects Review pickers and navigation.
+
+==============================================================================
+WORKTREES                                                *myeditor-worktrees*
+
+  :worktree list                  Choose a worktree by path and branch
+  :worktree switch [branch|path]  Choose, or switch directly
+  :worktree new [branch [path]]   Create a new branch/worktree and harness
+  :harness use amp|claude         Remember the launch type for this worktree
+
+New asks for a branch if omitted. The default path is <current-root>-<branch>,
+beside this checkout, with branch slashes replaced by hyphens. Explicit relative
+paths are relative to the current worktree root. Git creates from the current
+HEAD; existing paths/branches are never forced. No staging, commits or pushes.
+
+New starts the selected CLI in an interactive terminal tab in that directory.
+The CLI must be installed/authenticated separately; missing executables are
+rejected before creating anything. Exit Terminal mode with Ctrl-\ Ctrl-N and
+use gT to return to Review. Editor exit stops its terminal processes. If launch
+fails, the worktree is retained; inspect the terminal and :messages.
+
+Only the launch type is inherited, not a thread/connection or drafts. Connect
+the new Amp session with :harness connect amp from its Review; Claude uses
+:ReviewHarness claude SESSION_ID. Switching never launches another process.
+Dirty editing buffers and saved notes stay with their original checkout. Save
+or close an open annotation before switching. Another editor's lock is honored.
+Selected types persist across editor restarts. Changing the type disconnects an
+incompatible feedback binding but keeps drafts. :harness status shows both.
+Typed :worktree expands to :Worktree; scripts use uppercase commands.
 
 ==============================================================================
 AGENT HARNESSES                                             *myeditor-harness*
@@ -185,7 +228,8 @@ To steer an already-running Amp process through the anthrodiff plugin:
   :Harness disconnect    Disconnect; retain drafts; do not stop the agent
 
 One exact live match is chosen directly; multiple matches open a fuzzy session
-picker. Discovery and refresh are not automatic. Connecting performs no send.
+picker. Session discovery is manual; Review refresh is automatic. Connecting
+performs no send.
 In the message buffer, normal Vim editing applies; :w submits only, :wq submits
 and closes, and :q (or :q!) closes while retaining the draft locally, without
 sending. Hidden message drafts do not block exit, but all message drafts are
@@ -194,6 +238,7 @@ ordinary unsaved files retain Neovim's write protection. An accepted ACK means
 queued steering, not a completed agent turn.
 After accepted/completed delivery, the sent message clears from the open
 composer and from the next :hs. New text typed while delivery runs is preserved.
+Success updates the status bar quietly, without a receipt-path or Enter prompt.
 Pending, failed/uncertain, and local-only queued messages remain drafts only
 within this process. Submitted payloads and receipts persist for inspection/retry.
 Writing an empty message sends nothing; :wq can close the cleared window.
@@ -252,24 +297,24 @@ STAGED and UNSTAGED have separate colored headers and file counts. UNSTAGED
 includes untracked files. Badges: M modified, U untracked, R Git-detected rename,
 A added, D deleted. After staging from the sidebar, focus advances to the next
 unstaged file (previous at the end), or the empty UNSTAGED header when finished.
+Focused tree navigation highlights the whole row. Normal cursor styling returns
+when focus leaves the tree.
 Empty sections remain visible. Partially staged files appear in both groups:
 STAGED compares HEAD/index; UNSTAGED compares index/worktree.
 
-  s / S (source pane)    Stage / unstage the Git hunk at the cursor
-  Space s (source pane)  Toggle staging for the Git hunk at the cursor
-  Space S                Stage/unstage selected sidebar file or displayed diff
+  s (source pane)        Stage/unstage the Git hunk at the cursor
+  S                     Stage/unstage selected sidebar file or displayed diff
   :ReviewStage hunk|file    Stage the chosen hunk/file
   :ReviewUnstage hunk|file  Unstage the chosen hunk/file
   Space m / :ReviewMark  Toggle reviewed mark on the selected file/comparison
   Space u / :ReviewUnreviewed  Filter to unreviewed entries
   Space R / :ReviewRefresh    Reload snapshots and changed files manually
 
-Bare s stages and S unstages; they reject the wrong group, like the explicit
-commands. Space s/S still toggle according to the selected group:
+Bare s toggles hunk staging; S toggles whole-file staging.
+Both toggles follow the selected group:
 UNSTAGED stages; STAGED unstages. For a hunk, focus either source pane
-and use ]/[ to choose the change, then s or S. From the sidebar, Space S acts
-on the highlighted file even when a different file is displayed; hunk actions
-require source focus.
+and use ]/[ to choose the change, then s. From the sidebar, S acts
+on the highlighted file; hunk actions require source focus.
 
 Staging changes the index, not the source file; marking reviewed changes only
 private review metadata. The explicit stage/unstage shortcuts apply immediately
@@ -340,6 +385,9 @@ In Review, typed :focus, :fs, and :fm expand to :Focus, :Focus staged, and
   :ReviewRefresh            Refresh saved snapshots (Space R)
   :View [split|merged]       Select diff layout; no argument toggles (:view)
   :Focus staged|modified    Select first visible file/hunk in that Git group
+  :Worktree list            Choose a worktree; see |myeditor-worktrees|
+  :Worktree switch [target] Switch by branch/path, or open the chooser
+  :Worktree new [branch [path]] Create worktree and start selected harness
   :ReviewStage hunk|file    Stage selected hunk/file (source pane for hunks)
   :ReviewUnstage hunk|file  Unstage selected hunk/file
   :WriteFeedback            Submit saved review batch (like :w in diff/sidebar)
@@ -348,6 +396,7 @@ In Review, typed :focus, :fs, and :fm expand to :Focus, :Focus staged, and
   :ReviewOutbox             Open persisted payloads and receipts in a new tab
   :ReviewArchive            Archive round and clear drafts after confirmation
   :Harness [status]         Show selected harness/session and last receipt
+  :Harness use amp|claude   Select launch type, without launching or sending
   :Harness install amp     Install anthrodiff bridge after confirmation
   :Harness connect amp     Discover/select live Amp session
   :Harness send (:hs)       Compose a general message, without review comments
@@ -393,8 +442,7 @@ unverifiable snapshots includes a warning, status, and the original reviewed
 text/coordinates. The agent must reconcile these with current files; comments
 are not silently re-anchored. Staging still rejects stale snapshots. Retries
 send the original submission, even if drafts or files have since changed.
-Live refresh and a worktree switcher are planned;
-use Space R for now. Binary files, merge conflicts and files over 2 MiB are
+Binary files, merge conflicts and files over 2 MiB are
 not supported. Existing editing buffers retain normal Neovim behavior.
 
 ==============================================================================
@@ -408,7 +456,7 @@ Different shortcuts are intentional where Neovim owns the editing key:
   ? / :help                       ? / :help overlay
   [ / ]                           [ / ] in Review panes
   h/l, :focus diff (:fd)           Space e/d, :Explorer / :FocusDiff
-  s / S                           s/S in source panes (stage/unstage hunk)
+  s / S                           s/S toggle hunk/file staging
   a / Enter on code               i/a/o/O or source Visual selection then i
   @ / annotation list             Space c / :ReviewComments
   O / :w flush                    :w in diff/sidebar / :WriteFeedback
@@ -418,14 +466,13 @@ Different shortcuts are intentional where Neovim owns the editing key:
   line numbers / wrap              Native :setlocal options, see |myeditor-view|
 
 Not implemented yet (these are NOT commands you can run in myeditor):
-  Navigation: worktree switcher, focus staged/changed section commands.
   Annotations: file/hunk scopes, next/previous annotation jumps, export hooks.
   Harness: inline :hs message argument; live Claude/custom discovery.
   Inspection: LSP setup/install, symbol list/type/definition/references.
   View: blame gutter/commit/PR popup, Markdown TOC, review-info popup,
         collapsed/compact diffs, hide removed lines, word-diff toggle,
         untracked toggle, broader path/status filters, theme picker.
-  Lifecycle: automatic filesystem refresh, automatic anchor remapping,
+  Lifecycle: automatic anchor remapping,
              revdiff keymap configuration / --dump-keys, unsent-feedback quit guard.
 
 Use |myeditor-commands| for available commands and FEATURES.md for planned work.

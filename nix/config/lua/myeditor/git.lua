@@ -14,6 +14,14 @@ function M.root()
 	return vim.trim(M.run(vim.fn.getcwd(), { "rev-parse", "--show-toplevel" }))
 end
 
+function M.reference(root)
+	local branch, code = M.run(root, { "symbolic-ref", "--quiet", "--short", "HEAD" }, nil, true)
+	if code == 0 then
+		return vim.trim(branch)
+	end
+	return "@" .. vim.trim(M.run(root, { "rev-parse", "--short", "HEAD" }))
+end
+
 local function paths(root, args)
 	return vim.split(M.run(root, args), "\0", { plain = true, trimempty = true })
 end
@@ -180,7 +188,7 @@ end
 function M.stage(root, snapshot, side, line, whole_file)
 	M.validate(root, snapshot)
 	if snapshot.group == "untracked" then
-		assert(whole_file, "New files must be staged with Space S (whole file)")
+		assert(whole_file, "New files must be staged with S (whole file)")
 		M.run(root, { "add", "--", snapshot.path })
 		return
 	end
@@ -188,7 +196,7 @@ function M.stage(root, snapshot, side, line, whole_file)
 	if not whole_file then
 		assert(
 			not patch:find("new file mode", 1, true) and not patch:find("deleted file mode", 1, true),
-			"Added/deleted files must be staged or unstaged with Space S"
+			"Added/deleted files must be staged or unstaged with S"
 		)
 		local header, hunks = M.hunks(patch)
 		local chosen

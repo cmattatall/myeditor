@@ -128,6 +128,7 @@ return function(root, equal, fails)
 			}
 			if write then
 				review.toggle_reviewed()
+				vim.api.nvim_set_current_win(s.new_win)
 				review.compose()
 				vim.api.nvim_buf_set_lines(s.composer, 0, -1, false, { "Saved before quitting" })
 				review.save_composer()

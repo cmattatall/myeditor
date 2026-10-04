@@ -47,4 +47,8 @@ Built on [Codediff](https://github.com/esmuellert/codediff.nvim)'s diff renderer
 and [Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim) for ordinary editing.
 
 See the [installation, workflow, and agent integration guide](nix/README.md).
-Planned worktree switching and live refresh are tracked in the [feature list](FEATURES.md).
+Review refreshes automatically; **Space R** refreshes immediately. The bottom
+Review bar shows the branch or detached commit. Use `:harness use amp`, then
+`:worktree new` to create a checkout with its own harness process.
+`:worktree list` / `:worktree switch` navigates existing checkouts. See the
+[feature list](FEATURES.md) for implemented behavior and remaining gaps.

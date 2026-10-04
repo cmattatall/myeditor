@@ -8,6 +8,21 @@ local tree_ns = api.nvim_create_namespace("myeditor.tree")
 local active_ns = api.nvim_create_namespace("myeditor.active-file")
 local hunk_ns = api.nvim_create_namespace("myeditor.hunk")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
+local saved_guicursor
+
+local function tree_focus(focused)
+	local s = M.state
+	if s and s.tree_win and api.nvim_win_is_valid(s.tree_win) then
+		vim.wo[s.tree_win].cursorline = focused
+	end
+	if focused then
+		saved_guicursor = saved_guicursor or vim.o.guicursor
+		vim.o.guicursor = (saved_guicursor ~= "" and saved_guicursor .. "," or "") .. "n:ver1-ReviewTreeCursor-blinkon0"
+	elseif saved_guicursor then
+		vim.o.guicursor = saved_guicursor
+		saved_guicursor = nil
+	end
+end
 
 local function notify(message, level)
 	vim.notify(message, level or vim.log.levels.INFO, { title = "myeditor" })
@@ -44,6 +59,17 @@ end
 
 local function map(buf, mode, key, fn, description)
 	vim.keymap.set(mode, key, guard(fn), { buffer = buf, desc = description })
+end
+
+local function map_staging(buf)
+	if buf ~= state().tree_buf then
+		map(buf, "n", "s", function()
+			M.stage(false)
+		end, "Stage/unstage Git hunk at cursor")
+	end
+	map(buf, "n", "S", function()
+		M.stage(true)
+	end, "Stage/unstage entire file")
 end
 
 local function map_hunks(buf)
@@ -245,6 +271,8 @@ function M.show(index, snapshot)
 	-- Filetype plugins (e.g. Markdown's [[/]]) install these on every switch.
 	map_hunks(s.old_buf)
 	map_hunks(s.new_buf)
+	map_staging(s.old_buf)
+	map_staging(s.new_buf)
 	local renderer = require("codediff.ui.view.render")
 	if s.layout == "merged" then
 		vim.wo[s.new_win].winbar = " MERGED · red: old / green: new · :view split for old-line selections"
@@ -325,10 +353,10 @@ function M.view(layout)
 	api.nvim_set_current_win(api.nvim_win_is_valid(focus) and focus or s.new_win)
 end
 
-function M.refresh(preferred)
-	local s = state()
+local function read_changes(s, preferred)
+	local reference = git.reference(s.root)
 	local entries, reviewed = git.entries(s.root), {}
-	s.entries = {}
+	local visible = {}
 	for _, entry in ipairs(entries) do
 		local key = entry_key(entry)
 		if s.reviewed[key] then
@@ -338,10 +366,36 @@ function M.refresh(preferred)
 			end
 		end
 		if not s.only_unreviewed or not reviewed[key] then
-			table.insert(s.entries, entry)
+			table.insert(visible, entry)
 		end
 	end
-	s.reviewed = reviewed
+	local index = math.min(s.index or 1, #visible)
+	if preferred then
+		for i, entry in ipairs(visible) do
+			if entry_key(entry) == entry_key(preferred) then
+				index = i
+				break
+			end
+		end
+	end
+	local ok, snapshot = true, nil
+	if visible[index] then
+		ok, snapshot = pcall(git.snapshot, s.root, visible[index])
+	end
+	return {
+		entries = visible,
+		reviewed = reviewed,
+		reference = reference,
+		index = index,
+		snapshot = ok and snapshot or nil,
+		error = not ok and snapshot or nil,
+	}
+end
+
+function M.refresh(preferred, changes)
+	local s = state()
+	changes = changes or read_changes(s, preferred)
+	s.entries, s.reviewed, s.reference = changes.entries, changes.reviewed, changes.reference
 	local lines, rows, headings =
 		{ s.only_unreviewed and " REVIEW · Unreviewed only" or " REVIEW · Git changes", "" }, {}, {}
 	for _, group in ipairs({ "staged", "unstaged" }) do
@@ -375,15 +429,15 @@ function M.refresh(preferred)
 	end
 	vim.list_extend(lines, {
 		" ─────────────────────────",
-		" Enter    open file",
+		" Enter    focus diff",
 		" ] / [    next/prev hunk",
 		" Tab      tree/diff focus",
 		" Spc f    fuzzy files",
 		" Spc /    fuzzy text",
 		" Spc m    mark reviewed",
 		" Spc u    unreviewed only",
-		" s/S      (un)stage hunk",
-		" Spc S    (un)stage file",
+		" s        (un)stage hunk",
+		" S        (un)stage file",
 		" Spc R    refresh",
 		" :w       send feedback",
 		" ?/:help  keybindings",
@@ -397,16 +451,10 @@ function M.refresh(preferred)
 		api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 0, { line_hl_group = highlight })
 	end
 	if #s.entries > 0 then
-		local index = math.min(s.index or 1, #s.entries)
-		if preferred then
-			for i, entry in ipairs(s.entries) do
-				if entry_key(entry) == entry_key(preferred) then
-					index = i
-					break
-				end
-			end
+		local ok, err = false, changes.error
+		if not err then
+			ok, err = pcall(M.show, changes.index, changes.snapshot)
 		end
-		local ok, err = pcall(M.show, index)
 		if not ok then
 			s.current = nil
 			s.diff = nil
@@ -423,6 +471,66 @@ function M.refresh(preferred)
 		set_lines(s.new_buf, {})
 	end
 	save()
+end
+
+function M.refresh_live()
+	local s = state()
+	local snapshot, entries = s.current, s.entries
+	-- Git reads yield to input. Do not apply results after the user changed views,
+	-- opened a composer/picker, or left this worktree while the reads were running.
+	local changes = read_changes(s, snapshot)
+	if not require("myeditor.live").ready(s) or s.current ~= snapshot or s.entries ~= entries then
+		return false
+	end
+	local win = api.nvim_get_current_win()
+	local tree_entry = s.entries[s.rows[api.nvim_win_get_cursor(s.tree_win)[1]] or 0]
+	local views = {}
+	for _, pane in ipairs({ s.new_win, s.old_win }) do
+		views[pane] = api.nvim_win_call(pane, vim.fn.winsaveview)
+	end
+	local ok, err = pcall(M.refresh, snapshot, changes)
+	if snapshot and s.current and entry_key(snapshot) == entry_key(s.current) then
+		for pane, view in pairs(views) do
+			api.nvim_win_call(pane, function()
+				vim.fn.winrestview(view)
+			end)
+		end
+		mark_hunk(nil)
+		local side = win == s.old_win and "old" or "new"
+		local buf = side == "old" and s.old_buf or s.new_buf
+		local line = api.nvim_win_get_cursor(side == "old" and s.old_win or s.new_win)[1]
+		for i, change in ipairs(s.diff.changes) do
+			local first, last = hunk_range(change, side, buf)
+			if first <= line and line <= last then
+				mark_hunk(i)
+				break
+			end
+		end
+	end
+	if tree_entry then
+		for row, index in pairs(s.rows) do
+			if entry_key(s.entries[index]) == entry_key(tree_entry) then
+				api.nvim_win_set_cursor(s.tree_win, { row, 0 })
+				break
+			end
+		end
+	end
+	api.nvim_set_current_win(win)
+	assert(ok, err)
+	-- Live edits must not accumulate full unreferenced file snapshots forever.
+	local keep = {}
+	if s.current then
+		keep[s.current.id] = true
+	end
+	for _, comment in ipairs(s.comments) do
+		keep[comment.snapshot_id] = true
+	end
+	for id in pairs(s.snapshots) do
+		if not keep[id] then
+			s.snapshots[id] = nil
+		end
+	end
+	return true
 end
 
 function M.toggle_reviewed()
@@ -543,7 +651,7 @@ function M.stage(whole_file, unstage)
 	local snapshot, side, line = s.current, "new", 1
 	local next_entry, staging_from_tree
 	if win == s.tree_win then
-		assert(whole_file, "Focus a source pane to stage/unstage a hunk; Space S acts on the selected file")
+		assert(whole_file, "Focus a source pane to stage/unstage a hunk; S acts on the selected file")
 		local index = s.rows[api.nvim_win_get_cursor(win)[1]]
 		local entry = assert(s.entries[index], "Select a changed file")
 		snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
@@ -876,6 +984,8 @@ end
 
 function M.leave()
 	local s = state()
+	tree_focus(false)
+	require("myeditor.live").stop(s)
 	if s.composer then
 		release_composer()
 	end
@@ -953,11 +1063,17 @@ function M.open()
 	vim.wo[s.tree_win].number = false
 	vim.wo[s.tree_win].signcolumn = "no"
 	vim.wo[s.tree_win].winfixwidth = true
+	vim.wo[s.tree_win].cursorlineopt = "line"
+	vim.wo[s.tree_win].winhighlight = "CursorLine:ReviewTreeSelection"
 	api.nvim_win_set_width(s.tree_win, math.min(28, math.floor(vim.o.columns / 5)))
 	vim.cmd("wincmd =")
 	map(s.tree_buf, "n", "<CR>", function()
-		M.show(assert(s.rows[api.nvim_win_get_cursor(0)[1]], "Select a changed file"))
-	end, "Open changed file")
+		local index = assert(s.rows[api.nvim_win_get_cursor(0)[1]], "Select a changed file")
+		if index ~= s.index or not s.current then
+			M.show(index)
+		end
+		api.nvim_set_current_win(s.new_win)
+	end, "Focus selected diff")
 	map(s.tree_buf, "n", "q", M.leave, "Leave Review")
 	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
 		for _, key in ipairs({
@@ -999,12 +1115,6 @@ function M.open()
 			end, "Comment instead of editing code")
 		end
 		map(buf, "n", "d", M.delete_comment, "Delete annotation on this line")
-		map(buf, "n", "s", function()
-			M.stage(false, false)
-		end, "Stage Git hunk at cursor")
-		map(buf, "n", "S", function()
-			M.stage(false, true)
-		end, "Unstage Git hunk at cursor")
 		map(buf, "x", "i", function()
 			M.compose(true)
 		end, "Comment on exact selection")
@@ -1014,12 +1124,7 @@ function M.open()
 	end
 	for _, buf in ipairs({ s.tree_buf, s.old_buf, s.new_buf }) do
 		map_hunks(buf)
-		map(buf, "n", "<leader>s", function()
-			M.stage(false)
-		end, "Stage/unstage Git hunk (source pane)")
-		map(buf, "n", "<leader>S", function()
-			M.stage(true)
-		end, "Stage/unstage selected file")
+		map_staging(buf)
 		map(buf, "n", "<leader>R", M.refresh, "Refresh snapshot")
 		map(buf, "n", "<leader>q", M.leave, "Leave Review")
 		map(buf, "n", "<leader>c", M.list_comments, "List/remove draft comments")
@@ -1040,6 +1145,8 @@ function M.open()
 		end, "Previous file")
 	end
 	M.refresh()
+	api.nvim_set_current_win(s.tree_win)
+	require("myeditor.live").start(s)
 	api.nvim_exec_autocmds("User", { pattern = "ReviewEnter" })
 end
 
@@ -1048,6 +1155,8 @@ function M.statusline()
 	if s and api.nvim_get_current_tabpage() == s.tab then
 		local file = s.current and vim.fn.strtrans(s.current.path):gsub("%%", "%%%%") or "No changes"
 		return " REVIEW · "
+			.. vim.fn.strtrans(s.reference or ""):gsub("%%", "%%%%")
+			.. " · "
 			.. harness.statusline(s.root)
 			.. " · "
 			.. (s.current and s.diff_engine or "text")
@@ -1066,14 +1175,64 @@ function M.setup()
 	api.nvim_set_hl(0, "ReviewUnstaged", { fg = palette.gold, bg = palette.surface, bold = true })
 	api.nvim_set_hl(0, "ReviewActiveFile", { bg = palette.highlight_med, bold = true })
 	api.nvim_set_hl(0, "ReviewHunk", { fg = palette.gold, bold = true })
+	local function tree_highlights()
+		api.nvim_set_hl(0, "ReviewTreeSelection", { fg = palette.text, bg = palette.highlight_high, bold = true })
+		api.nvim_set_hl(
+			0,
+			"ReviewTreeCursor",
+			{ fg = palette.highlight_high, bg = palette.highlight_high, blend = 100 }
+		)
+	end
+	tree_highlights()
+	api.nvim_create_autocmd("ColorScheme", { callback = tree_highlights })
+	api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
+		callback = function()
+			local s = M.state
+			tree_focus(
+				s ~= nil and api.nvim_get_current_win() == s.tree_win and api.nvim_get_current_buf() == s.tree_buf
+			)
+		end,
+	})
+	api.nvim_create_autocmd({ "WinLeave", "BufLeave" }, {
+		callback = function()
+			tree_focus(false)
+		end,
+	})
 	api.nvim_create_autocmd("CursorMoved", {
 		callback = function()
 			local s = M.state
-			if not s or not s.diff then
+			if not s then
 				return
 			end
 			local buf = api.nvim_get_current_buf()
-			if buf ~= s.old_buf and buf ~= s.new_buf then
+			if buf == s.tree_buf then
+				local cursor = api.nvim_win_get_cursor(0)
+				if cursor[2] ~= 0 then
+					api.nvim_win_set_cursor(0, { cursor[1], 0 })
+				end
+				local index = s.rows[cursor[1]]
+				if index and (index ~= s.index or not s.current) then
+					local entry = s.entries[index]
+					local ok, snapshot = pcall(git.snapshot, s.root, entry)
+					-- Git reads yield to input; do not reopen a row the user has left.
+					if
+						M.active() ~= s
+						or api.nvim_get_current_win() ~= s.tree_win
+						or s.entries[index] ~= entry
+						or s.rows[api.nvim_win_get_cursor(s.tree_win)[1]] ~= index
+					then
+						return
+					end
+					if not ok then
+						notify(tostring(snapshot), vim.log.levels.ERROR)
+						return
+					end
+					guard(M.show)(index, snapshot)
+					api.nvim_set_current_win(s.tree_win)
+				end
+				return
+			end
+			if not s.diff or (buf ~= s.old_buf and buf ~= s.new_buf) then
 				return
 			end
 			local side = buf == s.old_buf and "old" or "new"
@@ -1194,6 +1353,7 @@ function M.setup()
 	api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			if M.state then
+				require("myeditor.live").stop(M.state)
 				M.state.draft = nil
 				save()
 				vim.uv.fs_unlink(M.state.directory .. "/editor.lock")
@@ -1229,7 +1389,15 @@ function M.setup()
 	})
 	api.nvim_create_autocmd("VimResized", {
 		callback = function()
-			if M.state then
+			local s = M.state
+			if s then
+				if api.nvim_win_is_valid(s.tree_win) then
+					api.nvim_win_set_width(s.tree_win, math.min(28, math.floor(vim.o.columns / 5)))
+				end
+				if s.old_win and api.nvim_win_is_valid(s.old_win) and api.nvim_win_is_valid(s.new_win) then
+					local width = api.nvim_win_get_width(s.old_win) + api.nvim_win_get_width(s.new_win)
+					api.nvim_win_set_width(s.old_win, math.floor(width / 2))
+				end
 				render_comments()
 			end
 		end,
