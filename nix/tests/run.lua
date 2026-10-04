@@ -72,11 +72,7 @@ local function test()
 	end
 	for _, tag in ipairs({ "rediff", "rediff-commands" }) do
 		vim.cmd("help " .. tag)
-		equal(
-			"rediff.txt",
-			vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"),
-			"Branded help resolves: " .. tag
-		)
+		equal("rediff.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Branded help resolves: " .. tag)
 	end
 	vim.cmd("help motion")
 	equal(1, vim.api.nvim_buf_get_name(0):find(vim.env.VIMRUNTIME, 1, true), "Native help topics remain available")

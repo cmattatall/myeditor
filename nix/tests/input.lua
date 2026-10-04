@@ -208,11 +208,7 @@ return function(equal)
 			end, 10),
 			"Typed ft focuses Review tree from an annotation"
 		)
-		equal(
-			0,
-			lua([[return #require("rediff.review").state.comments]]),
-			"ft neither saves nor submits an annotation"
-		)
+		equal(0, lua([[return #require("rediff.review").state.comments]]), "ft neither saves nor submits an annotation")
 		lua([[require("rediff.review").leave(); vim.cmd("edit plan.md")]])
 		equal("", lua([[return vim.fn.maparg("[", "n")]]), "Ordinary Markdown has no bare Review mapping")
 		equal(
