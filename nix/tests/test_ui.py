@@ -265,7 +265,8 @@ class EditorUI(unittest.TestCase):
         position("staged", "removed.lua", 1, "old_win")
         self.keys(editor, ":focus modified<CR>")
         position("unstaged", "auth.lua", 1, "old_win")
-        self.assertEqual(["staged"], editor.funcs.getcompletion("Focus st", "cmdline"))
+        self.keys(editor, ":focus st<Tab><CR>")
+        position("staged", "auth.lua", 1, "old_win")
 
         # Hide every tracked entry: modified now means the single untracked file.
         self.lua(
