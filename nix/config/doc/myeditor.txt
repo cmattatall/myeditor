@@ -146,7 +146,9 @@ editor launch starts without them. Submitted payloads/receipts stay in the outbo
   Space E                Toggle Neo-tree; focus-only in Review
   Tab                    Toggle tree/diff focus
   Space j / Space k      Next/previous changed file
-  ] / [                  Next/previous hunk across files and Git groups
+  ] / [                  Cycle hunks across files within the current Git group
+  :fs / :focus staged    Select first visible STAGED file/hunk
+  :fm / :focus modified  Select first visible UNSTAGED file/hunk
   Space f / :Files       Fuzzy visible entries (staged/unstaged distinct)
   Space / / :Search      Fuzzy old+new lines, including deletions
   Space m / :ReviewMark Toggle reviewed ✓ / unreviewed ○ on selected entry
@@ -156,10 +158,12 @@ editor launch starts without them. Submitted payloads/receipts stay in the outbo
   q (sidebar only)       Return to editing
 
 Hunk jumps work from either source pane or the sidebar without changing focus.
-Counts work (3] skips three hunks). Navigation stops at the first/last hunk;
-it does not wrap. A gutter arrow/bar marks the selected change in both panes.
+Counts work (3] skips three hunks). Navigation wraps within the current STAGED
+or UNSTAGED group; untracked files belong to UNSTAGED. :fs and :fm switch groups
+explicitly, retaining pane focus. An empty group leaves selection unchanged.
+A gutter arrow/bar marks the selected change in both panes.
 Small hunks are centered; tall hunks start near the top of the view.
-Space j/k file navigation wraps. Enter in the sidebar opens the selected file.
+Space j/k file navigation wraps across groups. Enter opens the selected file.
 The Review-only leader bindings above apply in the sidebar and source panes,
 not inside annotation/message text. Global focus/search/help commands remain
 available there; use Esc before invoking Normal-mode shortcuts.
@@ -323,6 +327,8 @@ All myeditor commands are listed here. Capitalization matters in scripts;
 typed :harness, :hs, and :ft are abbreviations, not additional Ex commands.
 :ft expands to :Explorer, focusing the Git sidebar in Review or the ordinary
 file tree while editing. Scripts should call :Explorer directly.
+In Review, typed :focus, :fs, and :fm expand to :Focus, :Focus staged, and
+:Focus modified. Scripts must use the uppercase command.
 
   :Review                   Enter/focus Review (Space r)
   :ReviewLeave              Leave Review, retaining drafts (Space q)
@@ -333,6 +339,7 @@ file tree while editing. Scripts should call :Explorer directly.
   :ReviewUnreviewed         Toggle unreviewed filter (Space u)
   :ReviewRefresh            Refresh saved snapshots (Space R)
   :View [split|merged]       Select diff layout; no argument toggles (:view)
+  :Focus staged|modified    Select first visible file/hunk in that Git group
   :ReviewStage hunk|file    Stage selected hunk/file (source pane for hunks)
   :ReviewUnstage hunk|file  Unstage selected hunk/file
   :WriteFeedback            Submit saved review batch (like :w in diff/sidebar)

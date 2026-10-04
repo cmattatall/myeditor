@@ -159,6 +159,11 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "3]")
         self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
         self.keys(editor, "]")
+        self.assertEqual(
+            ["auth.lua", 1],
+            self.lua(editor, "return {s.current.path, s.selected_hunk}"),
+        )
+        self.keys(editor, "[")
         self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
         self.keys(editor, "[")
         self.assertEqual("removed.lua", self.lua(editor, "return s.current.path"))
@@ -216,12 +221,94 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
 
+    def test_hunks_stay_in_git_group(self):
+        # Only the disposable fixture is staged; auth has two hunks, removed one.
+        subprocess.run(
+            ["git", "-C", self.root, "add", "auth.lua", "removed.lua"], check=True
+        )
+        path = Path(self.root, "auth.lua")
+        path.write_text(path.read_text().replace("M.timeout = 30", "M.timeout = 60"))
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        editor = self.launch(self.root)
+
+        def position(group, path, hunk, pane="tree_win"):
+            self.assertEqual(
+                [group, path, hunk, True],
+                self.lua(
+                    editor,
+                    "return {s.current.group, s.current.path, s.selected_hunk, "
+                    f"vim.api.nvim_get_current_win() == s.{pane}}}",
+                ),
+            )
+
+        self.keys(editor, " e:fs<CR>")
+        position("staged", "auth.lua", 1)
+        self.keys(editor, "[")
+        position("staged", "removed.lua", 1)
+        self.keys(editor, "]")
+        position("staged", "auth.lua", 1)
+        self.keys(editor, "4]")
+        position("staged", "auth.lua", 2)
+        self.keys(editor, "5[")
+        position("staged", "removed.lua", 1)
+        self.keys(editor, ":fm<CR>")
+        position("unstaged", "auth.lua", 1)
+        self.keys(editor, "[")
+        position("untracked", "plan.md", 1)
+        self.keys(editor, "3]")
+        position("unstaged", "auth.lua", 1)
+
+        self.lua(editor, "vim.api.nvim_set_current_win(s.old_win)")
+        self.keys(editor, ":focus staged<CR>")
+        position("staged", "auth.lua", 1, "old_win")
+        self.keys(editor, "[")
+        position("staged", "removed.lua", 1, "old_win")
+        self.keys(editor, ":focus modified<CR>")
+        position("unstaged", "auth.lua", 1, "old_win")
+        self.assertEqual(["staged"], editor.funcs.getcompletion("Focus st", "cmdline"))
+
+        # Hide every tracked entry: modified now means the single untracked file.
+        self.lua(
+            editor,
+            "for i, entry in ipairs(s.entries) do "
+            "if entry.group ~= 'untracked' then r.show(i); r.toggle_reviewed() end end; "
+            "r.toggle_unreviewed(); vim.api.nvim_set_current_win(s.tree_win)",
+        )
+        self.keys(editor, ":fm<CR>4]3[")
+        position("untracked", "plan.md", 1)
+        self.keys(editor, ":fs<CR>")
+        position("untracked", "plan.md", 1)
+        self.assertEqual(
+            "No visible STAGED files", self.lua(editor, "return vim.g.startup_notice")
+        )
+        self.keys(editor, ":view merged<CR>2]2[")
+        position("untracked", "plan.md", 1)
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_empty_review_layouts(self):
         root = Path(self.directory.name, "empty")
         subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
         editor = self.launch(str(root))
         self.assertTrue(
             self.lua(editor, "return r.active() ~= nil and #s.entries == 0")
+        )
+        self.keys(editor, ":fs<CR>")
+        self.assertEqual(
+            "No visible STAGED files", self.lua(editor, "return vim.g.startup_notice")
+        )
+        self.keys(editor, ":focus modified<CR>")
+        self.assertEqual(
+            "No visible UNSTAGED files", self.lua(editor, "return vim.g.startup_notice")
+        )
+        self.keys(editor, " e][")
+        self.assertEqual(
+            "No hunks in this Git group",
+            self.lua(editor, "return vim.g.startup_notice"),
+        )
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
         )
         self.keys(editor, ":view merged<CR>")
         self.assertEqual(
@@ -270,11 +357,20 @@ class EditorUI(unittest.TestCase):
                 ("CodeDiffCharDelete", 0xFF5252, 0x101010),
             ):
                 highlight = editor.api.get_hl(0, {"name": name})
-                self.assertEqual((background, foreground), (highlight["bg"], highlight["fg"]))
+                self.assertEqual(
+                    (background, foreground), (highlight["bg"], highlight["fg"])
+                )
                 self.assertTrue(highlight["nocombine"])
         self.keys(editor, ":view merged<CR>")
-        self.assertTrue(self.lua(editor, 'return vim.wait(5000, function() return s.diff_engine=="difftastic" end)'))
-        deleted_groups = self.lua(editor, '''
+        self.assertTrue(
+            self.lua(
+                editor,
+                'return vim.wait(5000, function() return s.diff_engine=="difftastic" end)',
+            )
+        )
+        deleted_groups = self.lua(
+            editor,
+            """
             local groups = {}
             for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(s.new_buf,
                 vim.api.nvim_get_namespaces()["codediff-inline"], 0, -1, {details=true})) do
@@ -283,8 +379,11 @@ class EditorUI(unittest.TestCase):
                 end
             end
             return vim.tbl_keys(groups)
-        ''')
-        self.assertEqual({"CodeDiffLineDelete", "CodeDiffCharDelete"}, set(deleted_groups))
+        """,
+        )
+        self.assertEqual(
+            {"CodeDiffLineDelete", "CodeDiffCharDelete"}, set(deleted_groups)
+        )
 
     def test_git_detected_renames_keep_both_snapshot_paths(self):
         original = subprocess.check_output(

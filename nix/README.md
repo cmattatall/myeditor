@@ -167,9 +167,15 @@ Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
 `D` deleted. Staging a file from the sidebar selects the next unstaged file, or
 the previous one at the end. With none left, focus stays on the UNSTAGED header.
 A partially staged file appears in both comparisons. **] / [** jump between changes,
-crossing files and groups in sidebar order without wrapping. They work from
+cycling across visible files within the current STAGED or UNSTAGED group.
+Untracked files belong to the UNSTAGED cycle. They work from
 either source pane or the sidebar, retain focus, and accept counts (e.g.
 **3]**). A gutter arrow/bar marks the selected hunk in both source panes.
+
+Use **:fs** / **:focus staged** or **:fm** / **:focus modified** to select the
+first visible file/hunk in that group without changing pane focus. If the group
+is empty, selection stays unchanged. Scripts use `:Focus staged` or
+`:Focus modified`; lowercase aliases expand only while in Review.
 
 Use **:view split** for side-by-side panes, **:view merged** for a unified view,
 or **:view** to toggle. The selected file/hunk and saved notes survive switching.
@@ -210,7 +216,9 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Enter in sidebar | Open selected changed file |
 | Tab | Toggle tree/diff focus in Review |
 | Space j / Space k | Next/previous changed file |
-| `]` / `[` | Next/previous hunk across files/groups; retain pane focus |
+| `]` / `[` | Cycle hunks across files within the current Git group; retain pane focus |
+| `:fs` / `:focus staged` | Select first visible STAGED file/hunk |
+| `:fm` / `:focus modified` | Select first visible UNSTAGED file/hunk, including untracked |
 | Space f / `:Files` | Fuzzy project files, or visible Review entries |
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
 | Space m / `:ReviewMark` | Toggle reviewed mark |

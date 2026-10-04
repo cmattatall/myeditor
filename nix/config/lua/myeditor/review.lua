@@ -1103,19 +1103,29 @@ function M.setup()
 	vim.cmd(
 		[[cnoreabbrev <expr> view getcmdtype() == ':' && getcmdline() == 'view' && getcmdpos() == 5 && luaeval("require('myeditor.review').active() ~= nil") ? 'View' : 'view']]
 	)
-	api.nvim_create_user_command("Focus", guard(function(opts)
-		M.focus(opts.args)
-	end), {
-		nargs = 1,
-		complete = function()
-			return { "staged", "modified" }
-		end,
-	})
+	api.nvim_create_user_command(
+		"Focus",
+		guard(function(opts)
+			M.focus(opts.args)
+		end),
+		{
+			nargs = 1,
+			complete = function()
+				return { "staged", "modified" }
+			end,
+		}
+	)
 	for alias, command in pairs({ focus = "Focus", fs = "Focus staged", fm = "Focus modified" }) do
-		vim.cmd(string.format(
-			[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('myeditor.review').active() ~= nil") ? '%s' : '%s']],
-			alias, alias, #alias + 1, command, alias
-		))
+		vim.cmd(
+			string.format(
+				[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('myeditor.review').active() ~= nil") ? '%s' : '%s']],
+				alias,
+				alias,
+				#alias + 1,
+				command,
+				alias
+			)
+		)
 	end
 	api.nvim_create_user_command(
 		"ReviewHarness",
