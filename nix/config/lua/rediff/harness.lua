@@ -227,10 +227,12 @@ function M.connect()
 				end
 				assert(result.code == 0, result.stderr)
 				local matches = vim.json.decode(result.stdout)
-				assert(
-					#matches > 0,
-					"No live Amp session for this checkout; install/enable the rediff Amp plugin and try again"
-				)
+				if #matches == 0 then
+					notify(
+						"No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp."
+					)
+					return
+				end
 				local function choose(index)
 					if s.epoch ~= epoch or current() ~= s then
 						return
@@ -417,6 +419,9 @@ function M.setup()
 				M.connect()
 			elseif #args == 2 and args[1] == "use" then
 				M.use(args[2])
+				if args[2] == "amp" then
+					M.connect()
+				end
 			elseif #args == 2 and args[1] == "install" and args[2] == "amp" then
 				M.install()
 			elseif #args == 0 or (#args == 1 and args[1] == "status") then

@@ -300,7 +300,11 @@ from the current HEAD, preserving the original index and working files. It never
 forces an existing path/branch, commits, or pushes.
 
 `:harness use amp` or `:harness use claude` persists the launch type per worktree;
-it does not start a process or send feedback. `new` checks that CLI is on PATH,
+it does not start a process or send feedback. `use amp` also discovers live
+sessions in the current checkout, connecting to one match or opening a picker
+for several. No matches or cancelling keeps any compatible binding. Claude has
+no live discovery adapter; use `:ReviewHarness claude SESSION_ID` for feedback.
+`new` checks that CLI is on PATH,
 creates and switches to the new Review, then starts a fresh interactive `amp` or
 `claude` process in a terminal tab with that worktree as its working directory.
 Install/authenticate the CLI separately. Exit Terminal mode with **Ctrl-\\ Ctrl-N**,
@@ -406,9 +410,9 @@ Relaunch rediff using the updated package, then connect in the same checkout:
 :Harness disconnect
 ```
 
-Connect performs manual discovery for the exact checkout. It directly chooses
-the only live match, or opens a fuzzy session picker. There is no automatic
-session discovery; Review files refresh independently. Connecting sends nothing.
+`connect amp` and `use amp` discover sessions for the exact checkout. They choose
+the only live match or open a fuzzy session picker for multiple matches.
+Discovery runs only when requested, not in the background. Connecting sends nothing.
 `:Harness send` opens a general-message `acwrite` buffer with normal Vim editing: `:w` submits and
 stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
 the draft locally without sending. Hidden message drafts do not block quitting;

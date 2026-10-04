@@ -138,9 +138,11 @@ Without a live target, reload manually once and use `:harness connect amp`.
 It preserves Home Manager symlinks, does not install the Amp CLI, and never
 sends annotations or composer text as part of installation.
 
-`:Harness connect amp` manually discovers live rediff-plugin registrations
-for this exact checkout: one live match is selected directly, otherwise a
-fuzzy session picker is shown. `:Harness send` opens a normal Vim message
+`:Harness use amp` selects Amp and discovers live sessions for this checkout,
+just like `:Harness connect amp`: one match connects directly, multiple matches
+open a fuzzy picker. No matches or cancelling preserves any compatible binding.
+Claude has no live discovery adapter; use `:ReviewHarness claude SESSION_ID`.
+Neither command launches an agent or sends feedback. `:Harness send` opens a normal Vim message
 buffer (`:w` submits only, `:wq` submits and closes, `:q!` closes while
 retaining the draft). `:Harness status`, `:Harness retry`, and
 `:Harness disconnect` are supported; disconnect retains drafts and does not

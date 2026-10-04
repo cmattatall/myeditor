@@ -109,6 +109,41 @@ class EditorUI(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
 
+    def test_harness_use_discovers_and_picks_live_session(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            local system = vim.system
+            vim.system = function(argv, opts, callback)
+                if argv[1] ~= 'rediff-amp-live' then return system(argv, opts, callback) end
+                assert(argv[2] == 'discover' and argv[3] == s.root and opts.cwd == s.root)
+                callback({code=0, stdout=vim.json.encode({
+                    {session='T-first', title='Alpha', connection='/fake/first.json'},
+                    {session='T-second', title='Beta', connection='/fake/second.json'},
+                })})
+            end
+        """,
+        )
+        for choose in (False, True):
+            self.keys(editor, ":harness use amp<CR>")
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+            if choose:
+                self.keys(editor, "Beta")
+                self.keys(editor, "<CR>")
+            else:
+                self.keys(editor, "<Esc>")
+            self.wait_for(editor, 'vim.bo.filetype ~= "fzf"')
+            self.assertEqual(
+                "amp-live" if choose else "none",
+                self.lua(editor, "return s.harness.name"),
+            )
+        self.assertEqual("T-second", self.lua(editor, "return s.harness.session"))
+        self.assertIsNone(
+            self.lua(editor, 'return require("rediff.harness").get(s.root).last')
+        )
+
     def test_command_picker(self):
         editor = self.launch(self.root)
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])

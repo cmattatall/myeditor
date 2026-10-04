@@ -89,7 +89,7 @@ Outside Review, :checktime checks loaded files for external changes.
 AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
-Discovery is manual and checkout-specific; multiple matches open a picker.
+Use :harness use amp to select Amp and connect too. Multiple matches open a picker.
 Connecting sends nothing. :hs opens a general-message buffer:
   :w          Send; keep panel open
   :wq         Send and close
@@ -200,7 +200,7 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :ReviewOutbox               Browse payloads and receipts
   :ReviewArchive              Clear round/drafts after confirmation
   :Harness status             Show connection and delivery receipt
-  :Harness use amp|claude     Select worktree launch type
+  :Harness use amp|claude     Select type; Amp also discovers live sessions
   :Harness install amp        Install bridge and request reload
   :Harness connect amp        Discover/select live session
   :Harness send               Compose a general message

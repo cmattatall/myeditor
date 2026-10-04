@@ -115,9 +115,10 @@ return function(root, equal, fails, keys)
 		discover({ code = 0, stderr = "", stdout = vim.json.encode(value) })
 		vim.wait(10)
 	end
-	keys(":harness connect amp<CR>")
+	keys(":harness use amp<CR>")
 	respond(matches)
-	equal("amp-live", s.harness.name, "Lowercase connect binds Review and messages together")
+	equal("amp", session.provider, "Use persists the worktree launch type")
+	equal("amp-live", s.harness.name, "Lowercase use connects Review and messages to the only live session")
 	equal(
 		"harness: amp-live · …44444444 · idle",
 		harness.statusline(root),
@@ -133,16 +134,51 @@ return function(root, equal, fails, keys)
 	vim.cmd("Harness disconnect")
 	respond(matches)
 	equal("none", s.harness.name, "Late discovery cannot undo disconnect")
-	vim.cmd("Harness connect amp")
+	vim.cmd("Harness use amp")
 	matches[2] = { session = "T-second", connection = "/fake/session-two/connection.json", title = "two" }
 	respond(matches)
 	equal(2, #picker.items, "Multiple sessions require a picker")
 	equal("none", s.harness.name, "Opening picker does not bind or send")
 	picker.opts.actions.enter({ picker.items[2] })
 	equal("T-second", s.harness.session, "Session picker selects by ID")
-	vim.cmd("Harness connect amp")
+	vim.cmd("Harness use amp")
 	respond({})
 	equal("T-second", s.harness.session, "No match preserves the existing binding")
+	vim.cmd("Harness use amp")
+	respond(matches)
+	picker.opts.actions.enter({})
+	equal("T-second", s.harness.session, "Dismissing selection preserves the existing binding")
+	discover = nil
+	vim.cmd("Harness use claude")
+	equal(nil, discover, "Claude has no live discovery adapter")
+	picker.opts.actions.enter({ picker.items[1] })
+	equal("none", s.harness.name, "Old picker cannot rebind after switching providers")
+	vim.cmd("Harness use amp")
+	vim.cmd("Harness use claude")
+	respond(matches)
+	equal("claude", session.provider, "Late Amp discovery cannot change the selected provider")
+	equal("none", s.harness.name, "Late Amp discovery cannot reconnect after switching providers")
+	local no_match, no_match_level
+	vim.notify = function(message, level)
+		no_match, no_match_level = message, level
+	end
+	vim.cmd("Harness use amp")
+	respond({})
+	vim.notify = notify
+	equal(vim.log.levels.INFO, no_match_level, "No matches is guidance, not a Lua error")
+	equal(
+		"No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp.",
+		no_match,
+		"No matches explains recovery"
+	)
+	equal("amp", session.provider, "No matches still selects Amp for new worktrees")
+	equal("none", s.harness.name, "No matches does not invent a feedback connection")
+	discover = nil
+	harness.use("amp", root)
+	equal(nil, discover, "Inheriting a launch type does not discover sessions for a new worktree")
+	vim.cmd("Harness connect amp")
+	respond(matches)
+	picker.opts.actions.enter({ picker.items[2] })
 	vim.system, fzf.fzf_exec = system, fzf_exec
 	vim.api.nvim_set_current_tabpage(s.previous_tab)
 	equal(
