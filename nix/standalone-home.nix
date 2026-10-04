@@ -15,7 +15,7 @@
         stateVersion = "26.05";
         file.".config/myeditor/standalone-owner".text = "myeditor-standalone-v1\n";
       };
-      programs.myeditor = {
+      programs.rediff = {
         enable = true;
         nvimAlias = true;
         # Installing the editor must not replace/reload an existing Amp plugin.

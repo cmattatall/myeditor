@@ -122,45 +122,6 @@ function M.validate(root, snapshot)
 	)
 end
 
--- Like revdiff, identify the changed text rather than hunk positions/context.
--- Ordered arrays give deterministic framing, even with control bytes in paths.
-function M.review_fingerprint(snapshot)
-	local old, new = M.lines(snapshot.old), M.lines(snapshot.new)
-	local changes, metadata = {}, {}
-	for _, hunk in ipairs(vim.diff(snapshot.old, snapshot.new, { result_type = "indices" })) do
-		local removed, added = {}, {}
-		for line = hunk[1], hunk[1] + hunk[2] - 1 do
-			table.insert(removed, old[line])
-		end
-		for line = hunk[3], hunk[3] + hunk[4] - 1 do
-			table.insert(added, new[line])
-		end
-		table.insert(changes, { removed, added })
-	end
-	for line in snapshot.patch:gmatch("[^\n]+") do
-		if
-			line:match("^old mode ")
-			or line:match("^new mode ")
-			or line:match("^new file mode ")
-			or line:match("^deleted file mode ")
-		then
-			table.insert(metadata, line)
-		end
-	end
-	if #changes == 0 then
-		changes = { { old, new } }
-	end
-	return vim.fn.sha256(vim.json.encode({
-		"reviewed-v1",
-		snapshot.group,
-		snapshot.path,
-		metadata,
-		changes,
-		snapshot.old:sub(-1) == "\n",
-		snapshot.new:sub(-1) == "\n",
-	}))
-end
-
 -- Use Git's own patch, preserving path quoting, context and missing-newline markers.
 function M.hunks(patch)
 	local header, hunks = {}, {}

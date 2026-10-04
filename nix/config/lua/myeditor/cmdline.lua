@@ -14,13 +14,18 @@ end
 function M.suffix(line)
 	local lead, matches
 	if line:match("^%a+$") then
-		for _, preferred in ipairs({ "help", "harness", "worktree" }) do
+		for _, preferred in ipairs({ "help", "harness", "worktree", "annotations" }) do
 			if vim.startswith(preferred, line) then
 				return preferred:sub(#line + 1)
 			end
 		end
 		lead, matches = line, vim.fn.getcompletion(line, "command")
-	elseif line:match("^Harness%s+[%a%s]*$") or line:match("^Focus%s+%a*$") or line:match("^Worktree%s+%a*$") then
+	elseif
+		line:match("^Harness%s+[%a%s]*$")
+		or line:match("^Focus%s+%a*$")
+		or line:match("^Worktree%s+%a*$")
+		or line:match("^Annotations%s+%a*$")
+	then
 		lead, matches = line:match("(%a*)$"), vim.fn.getcompletion(line, "cmdline")
 	else
 		return ""

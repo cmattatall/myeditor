@@ -6,20 +6,51 @@
   ...
 }:
 let
-  cfg = config.programs.myeditor;
-  nvim = pkgs.runCommand "myeditor-nvim" { } ''
+  cfg = config.programs.rediff;
+  nvim = pkgs.runCommand "rediff-nvim" { } ''
     mkdir -p "$out/bin"
-    ln -s ${cfg.package}/bin/myeditor "$out/bin/nvim"
+    ln -s ${cfg.package}/bin/rediff "$out/bin/nvim"
   '';
 in
 {
-  options.programs.myeditor = {
-    enable = lib.mkEnableOption "the isolated myeditor Neovim profile";
-    nvimAlias = lib.mkEnableOption "installing myeditor as nvim ahead of other editors on PATH";
+  imports =
+    map
+      (
+        path:
+        lib.mkRenamedOptionModule
+          (
+            [
+              "programs"
+              "myeditor"
+            ]
+            ++ path
+          )
+          (
+            [
+              "programs"
+              "rediff"
+            ]
+            ++ path
+          )
+      )
+      [
+        [ "enable" ]
+        [ "nvimAlias" ]
+        [ "package" ]
+        [
+          "ampPlugin"
+          "enable"
+        ]
+        [ "harness" ]
+        [ "feedbackCommand" ]
+      ];
+  options.programs.rediff = {
+    enable = lib.mkEnableOption "the isolated rediff Neovim profile";
+    nvimAlias = lib.mkEnableOption "installing rediff as nvim ahead of other editors on PATH";
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-      description = "The myeditor package to install.";
+      description = "The rediff package to install.";
     };
     ampPlugin.enable = lib.mkOption {
       type = lib.types.bool;

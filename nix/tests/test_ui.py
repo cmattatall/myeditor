@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pynvim
 
-EDITOR = shutil.which("myeditor")
+EDITOR = shutil.which("rediff")
 FIXTURE = str(Path(__file__).with_name("fixture.lua"))
 STATE = 'local r = require("myeditor.review"); local s = r.state; '
 
@@ -114,13 +114,17 @@ class EditorUI(unittest.TestCase):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         editor.exec_lua(
             'vim.api.nvim_create_user_command("PaletteProbe", function() '
-            'vim.g.palette_window = vim.api.nvim_get_current_win() end, {})'
+            "vim.g.palette_window = vim.api.nvim_get_current_win() end, {})"
         )
         for pane in ("tree_win", "old_win", "new_win"):
             self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane})")
             original = editor.current.window.handle
+            self.keys(editor, "?")
+            self.assertEqual("help", editor.current.buffer.options["filetype"])
+            help_window = editor.current.window.handle
             self.keys(editor, " p")
             self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.assertFalse(editor.api.win_is_valid(help_window))
             self.keys(editor, "PaletteProbe")
             self.keys(editor, "<Esc>")
             self.wait_for(editor, f"vim.api.nvim_get_current_win() == {original}")
@@ -131,11 +135,137 @@ class EditorUI(unittest.TestCase):
             self.wait_for(editor, 'vim.bo.filetype == "fzf"')
             self.keys(editor, "PaletteProbe")
             self.keys(editor, "<CR>")
+            self.wait_for(editor, 'vim.fn.getcmdline() == "PaletteProbe"')
+            self.assertIsNone(editor.vars.get("palette_window"))
+            self.keys(editor, "<CR>")
             self.wait_for(editor, f"vim.g.palette_window == {original}")
             editor.vars["palette_window"] = None
-            self.keys(editor, " q")
+            if self.lua(editor, "return r.active() ~= nil"):
+                self.keys(editor, " q")
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
+    def test_annotation_picker_jump_edit_and_saved_snapshots(self):
+        editor = self.launch(self.root)
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        original = Path(self.root, "auth.lua").read_bytes()
+        notes = self.lua(
+            editor,
+            r"""
+            local selection = require('myeditor.selection')
+            local function note(side, line, text)
+                local buf = side == 'old' and s.old_buf or s.new_buf
+                return r.add_comment({file=s.current.path, side=side,
+                    snapshot_id=s.current.id, selection=selection.line(buf,line)},text)
+            end
+            note('new',5,'Authentication boundary\nCheck lease timeout')
+            note('new',5,'Overlapping candidate')
+            note('old',17,'Old refresh contract')
+            for i,entry in ipairs(s.entries) do
+                if entry.path == 'plan.md' then r.show(i); break end
+            end
+            note('new',2,'Plan details')
+            return s.comments
+            """,
+        )
+
+        def choose(opening, query):
+            self.keys(editor, opening)
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.keys(editor, query)
+            self.keys(editor, "<CR>")
+            self.wait_for(editor, 'vim.bo.filetype ~= "fzf"')
+
+        choose(":al<CR>", "lease timeout")
+        self.assertEqual(
+            ["auth.lua", "new", 5, notes[0]["id"]],
+            self.lua(
+                editor,
+                "return {s.current.path, vim.api.nvim_get_current_win()==s.new_win and 'new' or 'old', "
+                "vim.api.nvim_win_get_cursor(0)[1], s.annotation_id}",
+            ),
+        )
+        self.keys(editor, "i<Esc>")
+        self.assertEqual(
+            ["Authentication boundary", "Check lease timeout"],
+            list(editor.current.buffer[:]),
+        )
+        self.assertTrue(
+            self.lua(
+                editor,
+                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == ""',
+            )
+        )
+        self.keys(editor, "gg0CUpdated boundary<Esc>:w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        edited = self.lua(editor, "return s.comments")
+        expected = [dict(note) for note in notes]
+        expected[0]["text"] = "Updated boundary\nCheck lease timeout"
+        self.assertEqual(expected, edited)
+        self.keys(editor, "iDiscard this edit<Esc>:q!<CR>")
+        self.assertEqual(expected, self.lua(editor, "return s.comments"))
+
+        # Direct i on overlapping anchors asks which note, rather than overwriting one.
+        self.keys(editor, " R")
+        choose("i", "candidate")
+        self.assertEqual("Overlapping candidate", editor.current.buffer[0])
+        self.keys(editor, "<Esc>:q<CR>")
+        self.keys(editor, ":view merged<CR>}")
+        self.assertEqual(
+            ["split", True, 17, notes[2]["id"]],
+            self.lua(
+                editor,
+                "return {s.layout, vim.api.nvim_get_current_win()==s.old_win, "
+                "vim.api.nvim_win_get_cursor(0)[1], s.annotation_id}",
+            ),
+        )
+        self.keys(editor, "2{")
+        self.assertEqual(notes[0]["id"], self.lua(editor, "return s.annotation_id"))
+        self.keys(editor, ":annotations prev<CR>")
+        self.assertEqual(notes[3]["id"], self.lua(editor, "return s.annotation_id"))
+        self.keys(editor, ":annotations next<CR>")
+        self.assertEqual(notes[0]["id"], self.lua(editor, "return s.annotation_id"))
+        self.keys(editor, " e{")
+        self.assertEqual(notes[3]["id"], self.lua(editor, "return s.annotation_id"))
+        self.keys(editor, " e}")
+        self.assertEqual(notes[0]["id"], self.lua(editor, "return s.annotation_id"))
+        choose(":annotations list<CR>", "Old refresh")
+        self.assertEqual(notes[2]["id"], self.lua(editor, "return s.annotation_id"))
+        choose(" c", "Plan details")
+        self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
+        self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
+
+        # The file can disappear from Git's changed-file list; notes keep exact snapshots.
+        baseline = subprocess.check_output(
+            ["git", "-C", self.root, "show", "HEAD:auth.lua"]
+        )
+        Path(self.root, "auth.lua").write_bytes(baseline)
+        self.keys(editor, " R")
+        choose(":al<CR>", "lease timeout")
+        self.assertTrue(self.lua(editor, "return s.index == nil"))
+        self.assertEqual(original.decode(), self.lua(editor, "return s.current.new"))
+        self.assertFalse(self.lua(editor, "return r.refresh_live()"))
+        self.keys(editor, "s")
+        self.assertIn("Space R", self.lua(editor, "return vim.g.startup_notice"))
+        self.keys(editor, "i<Esc>")
+        self.assertEqual(
+            ["Updated boundary", "Check lease timeout"], list(editor.current.buffer[:])
+        )
+        self.keys(editor, ":q<CR> R")
+        self.assertTrue(self.lua(editor, "return s.annotation_id == nil"))
+        self.assertEqual(expected, self.lua(editor, "return s.comments"))
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        self.assertEqual(baseline, Path(self.root, "auth.lua").read_bytes())
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+        self.keys(editor, " q")
+        self.assertTrue(
+            self.lua(
+                editor,
+                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == ""',
+            )
         )
 
     def test_startup_and_lock(self):
@@ -300,9 +430,9 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(
             self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
         )
-        # Headings are not files, and must not trigger a snapshot read or an error.
+        # Absolute motions skip headings and select a file too.
         self.keys(editor, "gg")
-        self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
+        self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
         self.keys(editor, f"{row}G")
         self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
         self.keys(editor, ":view split<CR>")
@@ -320,6 +450,43 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, " q")
         self.assertEqual("", editor.options["guicursor"])
         self.assertTrue(self.lua(editor, "return s == nil"))
+
+    def test_tree_navigation_skips_non_file_rows(self):
+        subprocess.run(["git", "-C", self.root, "add", "auth.lua"], check=True)
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        editor = self.launch(self.root)
+        for keys, path in (
+            ("k", "auth.lua"),
+            ("<Up>", "auth.lua"),
+            ("j", "removed.lua"),
+            ("h", "removed.lua"),
+            ("l", "removed.lua"),
+            ("<Left>", "removed.lua"),
+            ("<Right>", "removed.lua"),
+            ("<Up>", "auth.lua"),
+            ("<Down>", "removed.lua"),
+            ("<Down>", "plan.md"),
+            ("j", "plan.md"),
+            ("<Down>", "plan.md"),
+            ("gg", "auth.lua"),
+            ("G", "plan.md"),
+            ("k", "removed.lua"),
+            ("k", "auth.lua"),
+        ):
+            with self.subTest(keys=keys, path=path):
+                self.keys(editor, keys)
+                self.assertEqual(path, self.lua(editor, "return s.current.path"))
+                self.assertTrue(
+                    self.lua(
+                        editor,
+                        "local cursor = vim.api.nvim_win_get_cursor(s.tree_win); "
+                        "return vim.api.nvim_get_current_win() == s.tree_win "
+                        "and s.rows[cursor[1]] == s.index and cursor[2] == 0",
+                    )
+                )
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
 
     def test_tab_focuses_diff_for_hunk_staging(self):
         editor = self.launch(self.root)
@@ -1065,20 +1232,9 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "[")
         position("staged", "auth.lua", 2, "new_win")
 
-        # Hide every tracked entry: modified now means the single untracked file.
-        self.lua(
-            editor,
-            "for i, entry in ipairs(s.entries) do "
-            "if entry.group ~= 'untracked' then r.show(i); r.toggle_reviewed() end end; "
-            "r.toggle_unreviewed(); vim.api.nvim_set_current_win(s.tree_win)",
-        )
-        self.keys(editor, ":fm<CR>4]3[")
+        self.lua(editor, "vim.api.nvim_set_current_win(s.tree_win)")
+        self.keys(editor, ":fm<CR>[")
         position("untracked", "plan.md", 1)
-        self.keys(editor, ":fs<CR>")
-        position("untracked", "plan.md", 1)
-        self.assertEqual(
-            "No visible STAGED files", self.lua(editor, "return vim.g.startup_notice")
-        )
         self.keys(editor, ":view merged<CR>2]2[")
         position("untracked", "plan.md", 1)
         self.assertEqual(
@@ -1119,6 +1275,7 @@ class EditorUI(unittest.TestCase):
 
     def test_tree_staging_advances_and_combines_untracked(self):
         editor = self.launch(self.root)
+        initial_index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         self.keys(editor, " e")
         for expected in ("removed.lua", "plan.md"):
             self.keys(editor, "S")
@@ -1132,9 +1289,45 @@ class EditorUI(unittest.TestCase):
             self.assertTrue(
                 self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
             )
+            self.assertEqual(expected, self.lua(editor, "return s.current.path"))
+        self.keys(editor, "S")
+
+        def exhausted(group):
+            index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+            # Both polling and manual refresh must preserve the empty group,
+            # not select the file that just moved to the other group.
+            self.lua(editor, "r.refresh_live()")
+            self.keys(editor, " R")
+            self.assertEqual(
+                f" {group} (0)",
+                self.lua(editor, "return vim.api.nvim_get_current_line()"),
+            )
+            self.assertTrue(
+                self.lua(editor, "return s.current == nil and s.index == nil")
+            )
+            self.keys(editor, "SS")
+            self.assertEqual(
+                index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+            )
+
+        exhausted("UNSTAGED")
+        # Unstaging the final row selects the preceding STAGED file, never the
+        # same path's new UNSTAGED row. Subsequent S presses drain that group.
+        self.keys(editor, ":fs<CR>jjS")
+        self.assertEqual(
+            ["plan.md", "staged"],
+            self.lua(editor, "return {s.current.path, s.current.group}"),
+        )
         self.keys(editor, "S")
         self.assertEqual(
-            " UNSTAGED (0)", self.lua(editor, "return vim.api.nvim_get_current_line()")
+            ["auth.lua", "staged"],
+            self.lua(editor, "return {s.current.path, s.current.group}"),
+        )
+        self.keys(editor, "S")
+        exhausted("STAGED")
+        self.assertEqual(
+            initial_index,
+            subprocess.check_output(["git", "-C", self.root, "write-tree"]),
         )
         self.assertTrue(
             self.lua(

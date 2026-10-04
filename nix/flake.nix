@@ -1,5 +1,5 @@
 {
-  description = "An isolated Neovim editor with an agent review workspace";
+  description = "rediff: read agent diffs in a Nix-packaged Neovim workspace";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -36,14 +36,15 @@
         in
         {
           default = editor;
+          rediff = editor;
           myeditor = editor;
         }
       );
       apps = eachSystem (system: {
         default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/myeditor";
-          meta.description = "Launch myeditor";
+          program = "${self.packages.${system}.default}/bin/rediff";
+          meta.description = "Launch rediff";
         };
       });
       checks = eachSystem (
@@ -94,7 +95,8 @@
                 unset __HM_SESS_VARS_SOURCED
                 . "$TMPDIR/session-vars.sh"
                 test "$(command -v nvim)" = "$HOME/.nix-profile/bin/nvim"
-                test "$(realpath "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/myeditor"
+                test "$(realpath "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/rediff"
+                test "$(realpath "$(command -v myeditor)")" = "$(realpath "$(command -v rediff)")"
                 nvim --headless -i NONE -c 'lua if vim.env.NVIM_APPNAME ~= "myeditor" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' -c 'qa!'
                 # A profile switch must update nvim in this same shell, without
                 # sourcing session vars again or clearing its command cache.

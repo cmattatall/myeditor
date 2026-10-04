@@ -47,7 +47,7 @@ let
   runtime = lib.concatMapStringsSep "," toString plugins;
 in
 stdenv.mkDerivation {
-  pname = "myeditor";
+  pname = "rediff";
   version = "0.1.0";
   src = ./config;
   nativeBuildInputs = [ makeWrapper ];
@@ -57,7 +57,7 @@ stdenv.mkDerivation {
     cp -R . "$out/share/myeditor/"
     ${neovim}/bin/nvim --headless -u NONE -i NONE -n \
       -c "helptags $out/share/myeditor/doc" -c 'qa!'
-    makeWrapper ${neovim}/bin/nvim "$out/bin/myeditor" \
+    makeWrapper ${neovim}/bin/nvim "$out/bin/rediff" \
       --set NVIM_APPNAME myeditor \
       --set MYEDITOR_RUNTIME "$out/share/myeditor" \
       --set MYEDITOR_PLUGINS '${runtime}' \
@@ -72,6 +72,7 @@ stdenv.mkDerivation {
       } \
       --prefix PATH : "$out/bin" \
       --add-flags '-u' --add-flags "$out/share/myeditor/init.lua"
+    ln -s rediff "$out/bin/myeditor"
     cp ${./harness.py} "$out/share/myeditor/harness.py"
     makeWrapper ${python3}/bin/python3 "$out/bin/myeditor-harness" \
       --add-flags "$out/share/myeditor/harness.py"
@@ -86,8 +87,8 @@ stdenv.mkDerivation {
       --add-flags "$out/share/myeditor/amp/install.sh"
   '';
   meta = {
-    description = "Portable modal editor with snapshot-based agent review";
-    mainProgram = "myeditor";
+    description = "Read agent diffs with a portable modal review editor";
+    mainProgram = "rediff";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }

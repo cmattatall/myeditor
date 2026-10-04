@@ -1,4 +1,4 @@
-vim.opt.runtimepath:prepend(assert(vim.env.MYEDITOR_RUNTIME, "Use the myeditor launcher"))
+vim.opt.runtimepath:prepend(assert(vim.env.MYEDITOR_RUNTIME, "Use the rediff launcher"))
 for path in (vim.env.MYEDITOR_PLUGINS or ""):gmatch("[^,]+") do
 	vim.opt.runtimepath:append(path)
 end
@@ -66,7 +66,7 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 		end
 	end,
 })
-vim.keymap.set("n", "?", "<Cmd>help myeditor<CR>", { desc = "Editor help overlay" })
+vim.keymap.set("n", "?", "<Cmd>help rediff<CR>", { desc = "Editor help overlay" })
 
 require("codediff").setup({
 	diff = { compute_moves = false, highlight_priority = 150 },
@@ -99,7 +99,7 @@ require("neo-tree").setup({
 		width = 28,
 		mappings = {
 			["?"] = function()
-				vim.cmd("help myeditor")
+				vim.cmd("help rediff")
 			end,
 		},
 	},
@@ -141,6 +141,9 @@ for _, binding in ipairs({
 		"<leader>p",
 		"Commands",
 		function()
+			if vim.bo.filetype == "help" and vim.api.nvim_win_get_config(0).relative ~= "" then
+				vim.cmd.close()
+			end
 			require("fzf-lua").commands()
 		end,
 		"Find commands",

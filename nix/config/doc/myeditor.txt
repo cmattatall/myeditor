@@ -1,44 +1,52 @@
-*myeditor.txt*                 myeditor help                         *myeditor*
-                                                                  *help.txt*
+*myeditor.txt*                  rediff help                          *rediff*
+                                                     *myeditor*   *help.txt*
 
-MODAL EDITING AND AGENT REVIEW
+HELP AND COMMAND DISCOVERY
 
+  ? / :help (:h)  Open this guide; ?, Esc or q closes it
   Space p         Search available commands       :Commands
+  /pattern        Search this guide; n/N next/previous match
+
+  |myeditor-commands|      Commands, arguments and their meanings
+  |myeditor-review|        Review and annotations
+  |myeditor-git|           Staging and refreshing
+  |myeditor-harness|       Connect an agent and send messages
+  |myeditor-worktrees|     Switch worktrees and start a new harness
+  |myeditor-view|          Split/merged diffs and pane navigation
+  |myeditor-editing|       Ordinary editing, files and search
+  |myeditor-drafts|        Drafts, retries, and limitations
+  |myeditor-parity|        Revdiff equivalents and unimplemented features
+  |helphelp|               Neovim's help system
+
+Follow a |link| with Ctrl-]; return with Ctrl-t. Scroll with j/k, Ctrl-d/u,
+Ctrl-f/b or gg/G. Space p closes this panel and opens command discovery for
+the underlying editor pane. Space means the leader, not a simultaneous chord.
+
+QUICK REFERENCE
+
   Space r         Enter Review                  :Review
   Space e / :ft   Focus tree/sidebar             :Explorer
   Space d         Focus editor/diff               :FocusDiff
+  Tab             Toggle tree/diff focus in Review
   Cmd-w h/j/k/l   Focus left/below/above/right window (macOS)
   Space f         Fuzzy files                     :Files
   Space /         Fuzzy project/Review text       :Search
   ] / [           Next/previous hunk across files (also from sidebar)
   s               Stage/unstage hunk under cursor (source pane)
   S               Stage/unstage file (sidebar selection or displayed diff)
-  i               Start a fresh annotation on the reviewed line
+  i               Edit annotation here, or create one if none exists
+  Space c / :al   Search annotations and jump to a note
+  } / {           Next/previous annotation       :Annotations next / prev
   d               Delete annotation on the reviewed line
   Esc, :q         Discard unsaved annotation edits; close its editor
   Esc, :w         Save annotation locally and close its editor
   Esc, :wq        Save annotation locally and close its editor
   :w in diff/tree Send the saved annotation batch to the harness
   Space q         Leave Review from a source pane
-  ? / :help (:h)  Open this guide as an overlay (Normal mode)
 
-Follow a |link| with Ctrl-]; return with Ctrl-t. Close help with ?, Esc, q, or :q.
-Scroll with j/k, Ctrl-d/u (half page), Ctrl-f/b (page), gg/G (top/bottom).
-Use / then n/N to search help. Space means the leader, not a simultaneous chord.
 ? opens help in Normal mode in files, both trees, diffs, annotations, and
 harness messages. In Insert mode it types a literal ?. This replaces Normal
 mode backward search; use :?pattern<Enter> or /pattern<Enter> then N instead.
-
-  |myeditor-editing|       Navigation, scrolling, files and search
-  |myeditor-review|        Review and annotation editing
-  |myeditor-worktrees|     Switch worktrees and start a new harness
-  |myeditor-harness|       Amp, Claude Code, and custom receivers
-  |myeditor-git|           Staging, reviewed marks and refreshing
-  |myeditor-view|          Panes and native view controls
-  |myeditor-commands|      Complete editor command index
-  |myeditor-drafts|        Drafts, retries, and limitations
-  |myeditor-parity|        Revdiff equivalents and unimplemented features
-  |helphelp|              Neovim's help system
 
 ==============================================================================
 NAVIGATION AND ORDINARY EDITING                             *myeditor-editing*
@@ -119,9 +127,12 @@ for external changes without forcing unsaved edits to be discarded.
 
 In a source pane, editing commands (i/a/I/A/o/O, c with motions, r/R,
 x/X, p/P, u/Ctrl-r, ., ~, >/<, =, J/gJ, gq/gw, gu/gU/g~, gp/gP)
-open a fresh annotation at that line instead of altering code. Write it with
-:w to save it in the review batch; starting another opens an empty panel,
-even on the same line/hunk. An already-open panel retains its in-progress text.
+open an annotation instead of altering code. i edits an existing note whose
+range covers the cursor, with a fuzzy chooser if notes overlap. After jumping
+from the annotation list, i edits that selected note. With no note, i creates
+one. :annotations new always starts a separate note, even on the same line.
+Other source editing commands still start fresh notes. An already-open panel
+retains its in-progress text. :w saves locally; it never sends feedback.
 The command, count, and register apply to annotation text, not source text.
 Source motions such as e remain motions. To annotate a range, use v/V/Ctrl-v
 on source, then i or Space c. The exact selection is attached to the comment.
@@ -138,11 +149,24 @@ The annotation is a normal editable buffer, with no custom editing mappings:
   :wq            Save locally and close only the annotation window
   :q / :q!       Discard edits since the last write and close; do not send
 
-Saved annotations remain visible on the diff and in :ReviewComments. Closing
+Space c / :annotations list / :al opens a fuzzy annotation picker. Search
+filenames or any part of the note text; Enter jumps, Esc cancels. :ReviewComments
+opens the same picker. } / { or :annotations next / prev cycle through saved
+notes in creation order, wrapping across files and old/new sides. The keys work
+in tree/diff panes and accept counts (3}); ordinary files and annotation text
+keep native paragraph motions. Old-side notes switch merged view to split.
+Scripts must use :Annotations with an uppercase A.
+
+Jumps show the note's original snapshot, even if its file is no longer changed.
+Auto-refresh pauses while viewing that snapshot; Space R returns to current
+files and re-enables staging. Editing preserves the note's ID and exact anchor;
+:q discards edits without removing the saved note, and :w updates it in place.
+
+Saved annotations remain visible on the diff and in the picker. Closing
 an unwritten panel adds nothing. In a source pane, d deletes the annotation
 whose range covers the cursor; overlapping notes open a selection picker.
-Only the displayed snapshot and side are affected. :ReviewComments can remove
-other notes. Deletion does not retract feedback already sent to the harness.
+Only the displayed snapshot and side are affected. Jump to another note to
+delete it there. Deletion does not retract feedback already sent to the harness.
 
 :w in a diff pane or the Git sidebar sends the saved batch; :WriteFeedback
 also sends only saved notes, never unsaved composer text. Annotation :w/:wq
@@ -166,9 +190,8 @@ editor launch starts without them. Submitted payloads/receipts stay in the outbo
   :fm / :focus modified  Select first visible UNSTAGED file/hunk
   Space f / :Files       Fuzzy visible entries (staged/unstaged distinct)
   Space / / :Search      Fuzzy old+new lines, including deletions
-  Space m / :ReviewMark Toggle reviewed ✓ / unreviewed ○ on selected entry
-  Space u / :ReviewUnreviewed  Toggle unreviewed-only filtering
-  Space c / :ReviewComments   List/remove draft comments (Normal mode)
+  Space c / :al          Search/jump to annotations (Normal mode)
+  } / {                 Next/previous annotation, accepting counts
   Space q / :ReviewLeave Return to editing, retaining drafts
   q (sidebar only)       Return to editing
 
@@ -183,11 +206,6 @@ displays its diff immediately, retaining tree focus. Tab focuses that diff.
 The Review-only leader bindings above apply in the sidebar and source panes,
 not inside annotation/message text. Global focus/search/help commands remain
 available there; use Esc before invoking Normal-mode shortcuts.
-
-Reviewed marks are private per worktree and fingerprint changed content,
-independently for staged and unstaged entries. They survive reopen, refresh,
-and context-only shifts, but clear if changed content changes. The unreviewed
-filter also affects Review pickers and navigation.
 
 ==============================================================================
 WORKTREES                                                *myeditor-worktrees*
@@ -248,7 +266,7 @@ Writing an empty message sends nothing; :wq can close the cleared window.
 Review annotations are not cleared by a successful general-message send.
 
 This repository ships the plugin and installer under nix/amp/. Home Manager's
-programs.myeditor.ampPlugin.enable installs it (also enabled by harness = "amp").
+programs.rediff.ampPlugin.enable installs it (also enabled by harness = "amp").
 Alternatively use :harness install amp, which defaults to Cancel and explicitly
 confirms replacement of an existing revdiff.ts. It installs the bridge plugin,
 not the Amp CLI. With a selected live Amp target, confirmation also authorizes
@@ -289,7 +307,7 @@ agent CLI separately. Amp uses an explicit existing local CLI thread; this edito
 does not synchronize orb or remote-runner workspaces. Stop any other process
 driving the same session first. Agent permissions are not bypassed.
 
-The custom receiver is configured through programs.myeditor.feedbackCommand
+The custom receiver is configured through programs.rediff.feedbackCommand
 in Home Manager (harness = "custom"), or feedback_command in settings.json.
 It receives a JSON file path and must acknowledge the submission ID.
 
@@ -298,10 +316,13 @@ GIT ACTIONS                                                     *myeditor-git*
 
 STAGED and UNSTAGED have separate colored headers and file counts. UNSTAGED
 includes untracked files. Badges: M modified, U untracked, R Git-detected rename,
-A added, D deleted. After staging from the sidebar, focus advances to the next
-unstaged file (previous at the end), or the empty UNSTAGED header when finished.
+A added, D deleted. After staging/unstaging from the sidebar, focus advances to
+the next file in the same group (previous at the end), or that group's empty
+header when finished. Refresh preserves this; further S presses change nothing.
 Focused tree navigation highlights the whole row. Normal cursor styling returns
-when focus leaves the tree.
+when focus leaves the tree. Motions skip headers and blank rows, clamping to the
+first/last file; gg/G selects the first/last file. Horizontal motion stays at
+column zero. With no files, there is no file selection to move to.
 Empty sections remain visible. Partially staged files appear in both groups:
 STAGED compares HEAD/index; UNSTAGED compares index/worktree.
 
@@ -309,8 +330,6 @@ STAGED compares HEAD/index; UNSTAGED compares index/worktree.
   S                     Stage/unstage selected sidebar file or displayed diff
   :ReviewStage hunk|file    Stage the chosen hunk/file
   :ReviewUnstage hunk|file  Unstage the chosen hunk/file
-  Space m / :ReviewMark  Toggle reviewed mark on the selected file/comparison
-  Space u / :ReviewUnreviewed  Filter to unreviewed entries
   Space R / :ReviewRefresh    Reload snapshots and changed files manually
 
 Bare s toggles hunk staging; S toggles whole-file staging.
@@ -324,9 +343,8 @@ across files. Git may group several nearby highlighted edits into one staged
 hunk. When no hunks remain, focus rests on UNSTAGED rather than following the
 file into STAGED; :fs explicitly switches to staged changes.
 
-Staging changes the index, not the source file; marking reviewed changes only
-private review metadata. The explicit stage/unstage shortcuts apply immediately
-without a second confirmation. Reviewed marks and staging both reject stale
+Staging changes the index, not the source file. The explicit stage/unstage
+shortcuts apply immediately without a second confirmation and reject stale
 snapshots. Refresh does not send feedback.
 Inside annotations and ordinary files, s/S retain native substitution behavior.
 In source panes, R still opens an annotation; Space R refreshes the Review.
@@ -375,14 +393,17 @@ Neo-tree's additional file operations are documented at |neo-tree-mappings|.
 
 ==============================================================================
 COMMAND INDEX                                              *myeditor-commands*
+                                                            *rediff-commands*
 
 Space p / :Commands opens a fuzzy picker for native and plugin commands.
-Type to filter; Esc cancels. Use this index for command arguments and meanings.
+Type to filter; Enter puts the selection on the command line without running
+it. Add arguments if needed, then Enter to execute; Esc cancels. Use this index
+for command arguments and meanings.
 For native command-line discovery, type :Review then Ctrl-d to list matches,
 or Tab to complete. :command lists user/plugin commands; :help :write explains
 a native command. Our Tab hints accept a suggestion without executing it.
 
-All myeditor commands are listed here. Capitalization matters in scripts;
+All rediff commands are listed here. Capitalization matters in scripts;
 typed :harness, :hs, and :ft are abbreviations, not additional Ex commands.
 :ft expands to :Explorer, focusing the Git sidebar in Review or the ordinary
 file tree while editing. Scripts should call :Explorer directly.
@@ -394,9 +415,10 @@ In Review, typed :focus, :fs, and :fm expand to :Focus, :Focus staged, and
   :Explorer / :FocusDiff     Focus tree or editor/diff (Space e/d)
   :Files / :Search           Fuzzy files or text (Space f / Space /)
   :Commands                 Search available commands (Space p)
-  :ReviewComments           List/remove draft comments (Space c)
-  :ReviewMark               Toggle reviewed mark (Space m)
-  :ReviewUnreviewed         Toggle unreviewed filter (Space u)
+  :ReviewComments           Search/jump to annotations (Space c)
+  :Annotations list        Fuzzy annotation list (:annotations list / :al)
+  :Annotations next|prev   Jump between saved notes, wrapping across files
+  :Annotations new         Create a separate annotation at the source cursor
   :ReviewRefresh            Refresh saved snapshots (Space R)
   :View [split|merged]       Select diff layout; no argument toggles (:view)
   :Focus staged|modified    Select first visible file/hunk in that Git group
@@ -467,7 +489,7 @@ This guide covers implemented behavior, not a promise of complete revdiff parity
 The fork's Navigation, Annotations and Harness categories appear first here too.
 Different shortcuts are intentional where Neovim owns the editing key:
 
-  revdiff                         myeditor equivalent
+  revdiff                         rediff equivalent
   ? / :help                       ? / :help overlay
   [ / ]                           [ / ] in Review panes
   h/l, :focus diff (:fd)           Space e/d, :Explorer / :FocusDiff
@@ -475,13 +497,12 @@ Different shortcuts are intentional where Neovim owns the editing key:
   a / Enter on code               i/a/o/O or source Visual selection then i
   @ / annotation list             Space c / :ReviewComments
   O / :w flush                    :w in diff/sidebar / :WriteFeedback
-  Space mark reviewed / F          Space m / Space u
   R / :reload                     Space R / :ReviewRefresh
   :harness send (:hs)              :harness send / :hs, then compose and :w
   line numbers / wrap              Native :setlocal options, see |myeditor-view|
 
-Not implemented yet (these are NOT commands you can run in myeditor):
-  Annotations: file/hunk scopes, next/previous annotation jumps, export hooks.
+Not implemented yet (these are NOT commands you can run in rediff):
+  Annotations: file/hunk scopes, export hooks.
   Harness: inline :hs message argument; live Claude/custom discovery.
   Inspection: LSP setup/install, symbol list/type/definition/references.
   View: blame gutter/commit/PR popup, Markdown TOC, review-info popup,

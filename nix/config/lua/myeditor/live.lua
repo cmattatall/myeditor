@@ -6,6 +6,7 @@ function M.ready(s)
 	local win = api.nvim_get_current_win()
 	return require("myeditor.review").active() == s
 		and not s.composer
+		and not s.annotation_id
 		and vim.fn.mode() == "n"
 		and (win == s.tree_win or win == s.old_win or win == s.new_win)
 		and not require("myeditor.feedback").busy(s.root)

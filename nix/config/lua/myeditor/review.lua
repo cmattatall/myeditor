@@ -25,7 +25,7 @@ local function tree_focus(focused)
 end
 
 local function notify(message, level)
-	vim.notify(message, level or vim.log.levels.INFO, { title = "myeditor" })
+	vim.notify(message, level or vim.log.levels.INFO, { title = "rediff" })
 end
 
 local function guard(fn)
@@ -53,7 +53,6 @@ local function save()
 	local s = state()
 	feedback.write(s.directory .. "/draft.json", {
 		harness = s.harness,
-		reviewed = s.reviewed,
 	})
 end
 
@@ -253,10 +252,10 @@ end
 
 function M.show(index, snapshot)
 	local s = state()
-	local entry = assert(s.entries[index], "No changed file selected")
-	snapshot = snapshot or git.snapshot(s.root, entry)
+	snapshot = snapshot or git.snapshot(s.root, assert(s.entries[index], "No changed file selected"))
 	s.index, s.current = index, snapshot
-	s.unstaged_exhausted = nil
+	s.annotation_id = nil
+	s.exhausted_group = nil
 	s.snapshots[snapshot.id] = snapshot
 	local old_lines, new_lines = git.lines(snapshot.old), git.lines(snapshot.new)
 	set_lines(s.old_buf, old_lines)
@@ -265,7 +264,7 @@ function M.show(index, snapshot)
 	-- Zero-element arrays silently produce no hunks for added/deleted files.
 	old_lines = api.nvim_buf_get_lines(s.old_buf, 0, -1, false)
 	new_lines = api.nvim_buf_get_lines(s.new_buf, 0, -1, false)
-	local ft = vim.filetype.match({ filename = entry.path }) or ""
+	local ft = vim.filetype.match({ filename = snapshot.path }) or ""
 	vim.bo[s.old_buf].filetype = ft
 	vim.bo[s.new_buf].filetype = ft
 	-- <nowait> only wins when defined after competing buffer-local prefixes.
@@ -283,8 +282,8 @@ function M.show(index, snapshot)
 		-- Deleted virtual lines use the diff's readable foreground, not syntax colors.
 		require("codediff.ui.inline").render_inline_diff(s.new_buf, s.diff, old_lines, new_lines, { filetype = "" })
 	else
-		vim.wo[s.old_win].winbar = " OLD · " .. (entry.group == "staged" and "HEAD" or "INDEX")
-		vim.wo[s.new_win].winbar = " NEW · " .. (entry.group == "staged" and "INDEX" or "WORKTREE")
+		vim.wo[s.old_win].winbar = " OLD · " .. (snapshot.group == "staged" and "HEAD" or "INDEX")
+		vim.wo[s.new_win].winbar = " NEW · " .. (snapshot.group == "staged" and "INDEX" or "WORKTREE")
 		s.diff = renderer.compute_and_render(
 			s.old_buf,
 			s.new_buf,
@@ -324,7 +323,7 @@ function M.view(layout)
 	if layout == s.layout then
 		return
 	end
-	local selected = s.selected_hunk
+	local selected, annotation_id = s.selected_hunk, s.annotation_id
 	local source_line = api.nvim_win_get_cursor(s.new_win)
 	local focus = api.nvim_get_current_win()
 	s.layout = layout
@@ -351,37 +350,25 @@ function M.view(layout)
 			api.nvim_win_set_cursor(s.new_win, source_line)
 		end
 	end
+	s.annotation_id = annotation_id
 	api.nvim_set_current_win(api.nvim_win_is_valid(focus) and focus or s.new_win)
 end
 
 local function read_changes(s, preferred)
 	local reference = git.reference(s.root)
-	local entries, reviewed = git.entries(s.root), {}
-	local visible = {}
-	for _, entry in ipairs(entries) do
-		local key = entry_key(entry)
-		if s.reviewed[key] then
-			local ok, snapshot = pcall(git.snapshot, s.root, entry)
-			if ok and git.review_fingerprint(snapshot) == s.reviewed[key] then
-				reviewed[key] = s.reviewed[key]
-			end
-		end
-		if not s.only_unreviewed or not reviewed[key] then
-			table.insert(visible, entry)
-		end
-	end
-	local index = math.min(s.index or 1, #visible)
-	if s.unstaged_exhausted and not preferred then
+	local entries = git.entries(s.root)
+	local index = math.min(s.index or 1, #entries)
+	if s.exhausted_group then
 		index = nil
-		for i, entry in ipairs(visible) do
-			if entry.group ~= "staged" then
+		for i, entry in ipairs(entries) do
+			if (entry.group == "staged") == (s.exhausted_group == "staged") then
 				index = i
 				break
 			end
 		end
 	end
 	if preferred then
-		for i, entry in ipairs(visible) do
+		for i, entry in ipairs(entries) do
 			if entry_key(entry) == entry_key(preferred) then
 				index = i
 				break
@@ -389,12 +376,11 @@ local function read_changes(s, preferred)
 		end
 	end
 	local ok, snapshot = true, nil
-	if visible[index] then
-		ok, snapshot = pcall(git.snapshot, s.root, visible[index])
+	if entries[index] then
+		ok, snapshot = pcall(git.snapshot, s.root, entries[index])
 	end
 	return {
-		entries = visible,
-		reviewed = reviewed,
+		entries = entries,
 		reference = reference,
 		index = index,
 		snapshot = ok and snapshot or nil,
@@ -405,9 +391,10 @@ end
 function M.refresh(preferred, changes)
 	local s = state()
 	changes = changes or read_changes(s, preferred)
-	s.entries, s.reviewed, s.reference = changes.entries, changes.reviewed, changes.reference
-	local lines, rows, headings =
-		{ s.only_unreviewed and " REVIEW · Unreviewed only" or " REVIEW · Git changes", "" }, {}, {}
+	s.annotation_id = nil
+	s.entries, s.reference = changes.entries, changes.reference
+	local lines, rows, headings = { " REVIEW · Git changes", "" }, {}, {}
+	s.group_rows = {}
 	for _, group in ipairs({ "staged", "unstaged" }) do
 		local count = 0
 		for _, entry in ipairs(s.entries) do
@@ -417,18 +404,10 @@ function M.refresh(preferred, changes)
 		end
 		table.insert(lines, string.format(" %s (%d)", group:upper(), count))
 		headings[#lines] = group == "staged" and "ReviewStaged" or "ReviewUnstaged"
-		if group == "unstaged" then
-			s.unstaged_row = #lines
-		end
+		s.group_rows[group] = #lines
 		for i, entry in ipairs(s.entries) do
 			if (entry.group == "staged") == (group == "staged") then
-				table.insert(
-					lines,
-					(s.reviewed[entry_key(entry)] and " ✓ " or " ○ ")
-						.. entry.status
-						.. " "
-						.. vim.fn.strtrans(entry.path)
-				)
+				table.insert(lines, " " .. entry.status .. " " .. vim.fn.strtrans(entry.path))
 				rows[#lines] = i
 			end
 		end
@@ -437,21 +416,6 @@ function M.refresh(preferred, changes)
 		end
 		table.insert(lines, "")
 	end
-	vim.list_extend(lines, {
-		" ─────────────────────────",
-		" ] / [    next/prev hunk",
-		" Tab      tree/diff focus",
-		" Spc f    fuzzy files",
-		" Spc /    fuzzy text",
-		" Spc m    mark reviewed",
-		" Spc u    unreviewed only",
-		" s        (un)stage hunk",
-		" S        (un)stage file",
-		" Spc R    refresh",
-		" :w       send feedback",
-		" ?/:help  keybindings",
-		" Spc q    return to editor",
-	})
 	s.rows = rows
 	set_lines(s.tree_buf, lines)
 	api.nvim_buf_clear_namespace(s.tree_buf, tree_ns, 0, -1)
@@ -481,9 +445,11 @@ function M.refresh(preferred, changes)
 		for _, buf in ipairs({ s.old_buf, s.new_buf }) do
 			api.nvim_buf_clear_namespace(buf, -1, 0, -1)
 		end
-		if s.unstaged_exhausted then
-			api.nvim_win_set_cursor(s.tree_win, { s.unstaged_row, 0 })
-			vim.wo[s.new_win].winbar = " No unstaged hunks · :fs to review staged changes"
+		if s.exhausted_group then
+			api.nvim_win_set_cursor(s.tree_win, { s.group_rows[s.exhausted_group], 0 })
+			vim.wo[s.new_win].winbar = s.exhausted_group == "staged"
+					and " No staged changes · :fm to review unstaged changes"
+				or " No unstaged changes · :fs to review staged changes"
 			if s.old_win then
 				vim.wo[s.old_win].winbar = ""
 			end
@@ -550,48 +516,6 @@ function M.refresh_live()
 		end
 	end
 	return true
-end
-
-function M.toggle_reviewed()
-	local s = state()
-	local win = api.nvim_get_current_win()
-	local index = s.index
-	if win == s.tree_win then
-		index = s.rows[api.nvim_win_get_cursor(win)[1]]
-	end
-	local entry = assert(s.entries[index], "Select a changed file")
-	local key = entry_key(entry)
-	if s.reviewed[key] then
-		s.reviewed[key] = nil
-	else
-		local snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
-		git.validate(s.root, snapshot)
-		s.reviewed[key] = git.review_fingerprint(snapshot)
-	end
-	local current = s.current and s.current.id
-	local old_view = s.old_win and api.nvim_win_call(s.old_win, vim.fn.winsaveview)
-	local new_view = api.nvim_win_call(s.new_win, vim.fn.winsaveview)
-	s.index = index
-	M.refresh(entry)
-	if s.current and s.current.id == current then
-		if old_view then
-			api.nvim_win_call(s.old_win, function()
-				vim.fn.winrestview(old_view)
-			end)
-		end
-		api.nvim_win_call(s.new_win, function()
-			vim.fn.winrestview(new_view)
-		end)
-	end
-	api.nvim_set_current_win(win)
-end
-
-function M.toggle_unreviewed()
-	local s = state()
-	local win = api.nvim_get_current_win()
-	s.only_unreviewed = not s.only_unreviewed
-	M.refresh(s.entries[s.index or 1])
-	api.nvim_set_current_win(win)
 end
 
 function M.focus(group)
@@ -704,35 +628,34 @@ local function advance_staged_hunk(snapshot, hunk, entries, index)
 			notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
 		end
 	end
-	s.unstaged_exhausted = true
+	s.exhausted_group = "unstaged"
 	M.refresh()
 	return false
 end
 
 function M.stage(whole_file, unstage)
 	local s = assert(M.active(), "Enter Review first")
+	assert(not s.annotation_id, "Press Space R to return to current files before staging")
 	local win = api.nvim_get_current_win()
 	local snapshot, side, line = s.current, "new", 1
-	local next_entry, staging_from_tree
+	local next_entry, tree_group
 	if win == s.tree_win then
 		assert(whole_file, "Focus a source pane to stage/unstage a hunk; S acts on the selected file")
 		local index = s.rows[api.nvim_win_get_cursor(win)[1]]
 		local entry = assert(s.entries[index], "Select a changed file")
 		snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
-		staging_from_tree = entry.group ~= "staged"
-		if staging_from_tree then
-			for i = index + 1, #s.entries do
-				if s.entries[i].group ~= "staged" then
+		tree_group = entry.group == "staged" and "staged" or "unstaged"
+		for i = index + 1, #s.entries do
+			if (s.entries[i].group == "staged") == (tree_group == "staged") then
+				next_entry = s.entries[i]
+				break
+			end
+		end
+		if not next_entry then
+			for i = index - 1, 1, -1 do
+				if (s.entries[i].group == "staged") == (tree_group == "staged") then
 					next_entry = s.entries[i]
 					break
-				end
-			end
-			if not next_entry then
-				for i = index - 1, 1, -1 do
-					if s.entries[i].group ~= "staged" then
-						next_entry = s.entries[i]
-						break
-					end
 				end
 			end
 		end
@@ -748,13 +671,14 @@ function M.stage(whole_file, unstage)
 	end
 	local entries, index = s.entries, s.index
 	local hunk = git.stage(s.root, snapshot, side, line, whole_file)
-	M.refresh(next_entry or snapshot)
+	if tree_group then
+		s.exhausted_group = tree_group
+		M.refresh(next_entry)
+	else
+		M.refresh(snapshot)
+	end
 	if hunk and snapshot.group ~= "staged" and not advance_staged_hunk(snapshot, hunk, entries, index) then
 		win = s.tree_win
-	end
-	if staging_from_tree and not next_entry then
-		api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
-		api.nvim_win_set_cursor(s.tree_win, { s.unstaged_row, 0 })
 	end
 	api.nvim_set_current_win(win)
 	notify("Index updated; source files unchanged. Existing comments retain their original snapshots.")
@@ -821,7 +745,7 @@ local function release_composer()
 	api.nvim_buf_delete(buf, { force = true })
 end
 
-function M.compose(visual, keys)
+function M.compose(visual, keys, comment)
 	local s = state()
 	if s.composer and api.nvim_win_is_valid(s.composer_win) then
 		api.nvim_set_current_win(s.composer_win)
@@ -845,7 +769,15 @@ function M.compose(visual, keys)
 	else
 		anchor.selection = selection.line(buf, line)
 	end
-	local draft = { anchor = anchor, text = "" }
+	if comment then
+		anchor = {
+			file = comment.file,
+			side = comment.side,
+			snapshot_id = comment.snapshot_id,
+			selection = vim.deepcopy(comment.selection),
+		}
+	end
+	local draft = { anchor = anchor, text = comment and comment.text or "", comment_id = comment and comment.id }
 	s.draft = draft
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
 	s.composer = composer
@@ -856,13 +788,13 @@ function M.compose(visual, keys)
 	vim.wo[s.composer_win].number = false
 	vim.wo[s.composer_win].signcolumn = "no"
 	vim.wo[s.composer_win].wrap = true
-	vim.wo[s.composer_win].winbar = " Annotation · :w save+close · :q discard+close %<"
+	vim.wo[s.composer_win].winbar = " Note · %<"
 		.. vim.fn.strtrans(draft.anchor.file):gsub("%%", "%%%%")
 		.. ":"
 		.. draft.anchor.selection.spans[1].line
-		.. " ("
+		.. " "
 		.. draft.anchor.side
-		.. ")"
+		.. " · :w save · :q discard"
 	api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufLeave" }, {
 		buffer = composer,
 		callback = function()
@@ -902,6 +834,9 @@ function M.clear_sent(root, path)
 		end
 		if s.draft and s.draft.comment_id == comment.id then
 			s.draft.comment_id = nil
+		end
+		if s.annotation_id == comment.id then
+			s.annotation_id = nil
 		end
 		return false
 	end, s.comments)
@@ -970,6 +905,7 @@ function M.archive()
 		draft = s.draft,
 	})
 	s.comments, s.snapshots, s.draft = {}, {}, nil
+	s.annotation_id = nil
 	if s.current then
 		s.snapshots[s.current.id] = s.current
 	end
@@ -983,6 +919,9 @@ local function remove_comment(comment)
 	for i, item in ipairs(s.comments) do
 		if item.id == comment.id then
 			table.remove(s.comments, i)
+			if s.annotation_id == comment.id then
+				s.annotation_id = nil
+			end
 			if s.draft and s.draft.comment_id == comment.id then
 				s.draft.comment_id = nil
 			end
@@ -993,7 +932,7 @@ local function remove_comment(comment)
 	end
 end
 
-function M.delete_comment()
+local function comments_at_cursor()
 	local s = state()
 	local side, line = side_at_cursor(), api.nvim_win_get_cursor(0)[1]
 	local matches = {}
@@ -1008,6 +947,12 @@ function M.delete_comment()
 			table.insert(matches, comment)
 		end
 	end
+	return matches
+end
+
+function M.delete_comment()
+	local s = state()
+	local matches = comments_at_cursor()
 	if #matches == 0 then
 		notify("No annotation on this line")
 	elseif #matches == 1 then
@@ -1026,28 +971,115 @@ function M.delete_comment()
 	end
 end
 
-function M.list_comments()
+local function pick_comments(comments, action)
 	local s = state()
-	vim.ui.select(s.comments, {
-		prompt = "Comments (select to remove a draft; submitted payloads are retained):",
-		format_item = function(comment)
-			return string.format(
-				"%s:%d [%s/%s] %s",
-				comment.file,
-				comment.line,
-				comment.side,
-				comment.selection.kind,
-				comment.text:gsub("\n", " ")
-			)
-		end,
-	}, function(comment)
-		if M.state ~= s or not comment then
+	if #comments == 0 then
+		notify("No annotations")
+		return
+	end
+	local items = {}
+	for i, comment in ipairs(comments) do
+		local snapshot = s.snapshots[comment.snapshot_id]
+		items[i] = string.format(
+			"%d\t%s:%d-%d [%s/%s] %s",
+			i,
+			vim.fn.strtrans(comment.file),
+			comment.line,
+			comment.line_end,
+			snapshot.group,
+			comment.side,
+			vim.fn.strtrans((comment.text:gsub("\n", " ")))
+		)
+	end
+	require("fzf-lua").fzf_exec(items, {
+		prompt = "Annotations> ",
+		previewer = false,
+		fzf_opts = { ["--delimiter"] = "\t", ["--with-nth"] = "2..", ["--no-multi"] = true },
+		actions = {
+			enter = guard(function(selected)
+				if M.state == s and selected[1] then
+					local comment = comments[tonumber(selected[1]:match("^(%d+)\t"))]
+					if comment then
+						action(comment)
+					end
+				end
+			end),
+		},
+	})
+end
+
+function M.jump_comment(comment)
+	local s = state()
+	assert(not s.composer, "Save or close the current annotation before jumping")
+	assert(vim.tbl_contains(s.comments, comment), "Annotation no longer exists")
+	local snapshot = assert(s.snapshots[comment.snapshot_id], "Missing annotation snapshot")
+	if comment.side == "old" and s.layout == "merged" then
+		M.view("split")
+	end
+	local index
+	for i, entry in ipairs(s.entries) do
+		if entry_key(entry) == entry_key(snapshot) then
+			index = i
+			break
+		end
+	end
+	M.show(index, snapshot)
+	s.annotation_id = comment.id
+	local win = comment.side == "old" and s.old_win or s.new_win
+	api.nvim_set_current_win(win)
+	local span = comment.selection.spans[1]
+	local column =
+		math.min(math.max(0, span.start_byte - 1), #api.nvim_buf_get_lines(0, span.line - 1, span.line, false)[1])
+	api.nvim_win_set_cursor(win, { span.line, column })
+	vim.cmd("normal! zz")
+	vim.cmd.redrawstatus()
+end
+
+function M.edit_comment(comment)
+	local s = state()
+	if comment then
+		M.jump_comment(comment)
+		M.compose(false, "i", comment)
+		return
+	end
+	if s.composer then
+		M.compose()
+		return
+	end
+	local matches = comments_at_cursor()
+	for _, item in ipairs(matches) do
+		if item.id == s.annotation_id then
+			M.edit_comment(item)
 			return
 		end
-		if vim.fn.confirm("Remove this draft comment?", "&Remove\n&Cancel", 2) == 1 then
-			remove_comment(comment)
+	end
+	if #matches == 0 then
+		M.compose()
+	elseif #matches == 1 then
+		M.edit_comment(matches[1])
+	else
+		pick_comments(matches, M.edit_comment)
+	end
+end
+
+function M.list_comments()
+	pick_comments(vim.list_slice(state().comments), M.jump_comment)
+end
+
+function M.next_comment(direction)
+	local s = state()
+	if #s.comments == 0 then
+		notify("No annotations")
+		return
+	end
+	local index = direction > 0 and 0 or 1
+	for i, comment in ipairs(s.comments) do
+		if comment.id == s.annotation_id then
+			index = i
+			break
 		end
-	end)
+	end
+	M.jump_comment(s.comments[(index - 1 + direction) % #s.comments + 1])
 end
 
 function M.leave()
@@ -1093,12 +1125,6 @@ function M.open()
 	local fd = assert(vim.uv.fs_open(lock, "wx", 384), "Review already open in another editor")
 	vim.uv.fs_write(fd, tostring(vim.uv.os_getpid()), 0)
 	vim.uv.fs_close(fd)
-	local ok, draft = pcall(feedback.read, directory .. "/draft.json")
-	if not ok then
-		vim.uv.fs_unlink(lock)
-		error("Could not read saved feedback; file left intact: " .. tostring(draft))
-	end
-	draft = draft or {}
 	local pending = reviews[root] or {}
 	local s = {
 		root = root,
@@ -1106,7 +1132,6 @@ function M.open()
 		comments = pending.comments or {},
 		snapshots = pending.snapshots or {},
 		harness = target,
-		reviewed = draft.reviewed or {},
 		previous_tab = api.nvim_get_current_tabpage(),
 		id = string.format("%.0f", vim.uv.hrtime()),
 		delivery = "draft",
@@ -1172,7 +1197,11 @@ function M.open()
 		}) do
 			map(buf, "n", key, function()
 				local prefix = '"' .. vim.v.register .. (vim.v.count > 0 and tostring(vim.v.count) or "")
-				M.compose(false, prefix .. key)
+				if key == "i" then
+					M.edit_comment()
+				else
+					M.compose(false, prefix .. key)
+				end
 			end, "Comment instead of editing code")
 		end
 		map(buf, "n", "d", M.delete_comment, "Delete annotation on this line")
@@ -1188,9 +1217,14 @@ function M.open()
 		map_staging(buf)
 		map(buf, "n", "<leader>R", M.refresh, "Refresh snapshot")
 		map(buf, "n", "<leader>q", M.leave, "Leave Review")
-		map(buf, "n", "<leader>c", M.list_comments, "List/remove draft comments")
-		map(buf, "n", "<leader>m", M.toggle_reviewed, "Toggle file reviewed")
-		map(buf, "n", "<leader>u", M.toggle_unreviewed, "Toggle unreviewed-only filter")
+		map(buf, "n", "<leader>c", M.list_comments, "Find/jump to annotations")
+		for key, direction in pairs({ ["}"] = 1, ["{"] = -1 }) do
+			map(buf, "n", key, function()
+				for _ = 1, vim.v.count1 do
+					M.next_comment(direction)
+				end
+			end, direction > 0 and "Next annotation" or "Previous annotation")
+		end
 		map(buf, "n", "<Tab>", function()
 			api.nvim_set_current_win(api.nvim_get_current_win() == s.tree_win and s.new_win or s.tree_win)
 		end, "Focus tree/diff")
@@ -1226,6 +1260,7 @@ function M.statusline()
 			.. #s.comments
 			.. " comments   %<"
 			.. file
+			.. (s.annotation_id and " · annotation snapshot · Space R to refresh" or "")
 			.. "%=%l:%c "
 	end
 	return " EDIT · " .. vim.fn.mode():upper() .. " · " .. harness.statusline() .. " %<%f %m%=%l:%c %p%%"
@@ -1269,10 +1304,33 @@ function M.setup()
 			local buf = api.nvim_get_current_buf()
 			if buf == s.tree_buf then
 				local cursor = api.nvim_win_get_cursor(0)
-				if cursor[2] ~= 0 then
-					api.nvim_win_set_cursor(0, { cursor[1], 0 })
-				end
 				local index = s.rows[cursor[1]]
+				-- Keep the intentional empty-group stop after staging, but ordinary
+				-- motions must land on files rather than headings or separator rows.
+				local empty_group = s.exhausted_group and cursor[1] == s.group_rows[s.exhausted_group]
+				if not index and not empty_group then
+					local previous = cursor[1]
+					for row, item in pairs(s.rows) do
+						if item == s.index then
+							previous = row
+							break
+						end
+					end
+					local step = cursor[1] < previous and -1 or 1
+					for _, direction in ipairs({ step, -step }) do
+						local boundary = direction > 0 and api.nvim_buf_line_count(buf) or 1
+						for row = cursor[1] + direction, boundary, direction do
+							if s.rows[row] then
+								cursor[1], index = row, s.rows[row]
+								break
+							end
+						end
+						if index then
+							break
+						end
+					end
+				end
+				api.nvim_win_set_cursor(0, { cursor[1], 0 })
 				if index and (index ~= s.index or not s.current) then
 					local entry = s.entries[index]
 					local ok, snapshot = pcall(git.snapshot, s.root, entry)
@@ -1336,7 +1394,36 @@ function M.setup()
 			end,
 		}
 	)
-	for alias, command in pairs({ focus = "Focus", fs = "Focus staged", fm = "Focus modified" }) do
+	api.nvim_create_user_command(
+		"Annotations",
+		guard(function(opts)
+			assert(M.active(), "Enter Review first")
+			local actions = {
+				list = M.list_comments,
+				new = M.compose,
+				next = function()
+					M.next_comment(1)
+				end,
+				prev = function()
+					M.next_comment(-1)
+				end,
+			}
+			assert(actions[opts.args], "Usage: annotations list|next|prev|new")()
+		end),
+		{
+			nargs = 1,
+			complete = function()
+				return { "list", "next", "prev", "new" }
+			end,
+		}
+	)
+	for alias, command in pairs({
+		focus = "Focus",
+		fs = "Focus staged",
+		fm = "Focus modified",
+		annotations = "Annotations",
+		al = "Annotations list",
+	}) do
 		vim.cmd(
 			string.format(
 				[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('myeditor.review').active() ~= nil") ? '%s' : '%s']],
@@ -1381,8 +1468,6 @@ function M.setup()
 		ReviewLeave = M.leave,
 		ReviewRefresh = M.refresh,
 		ReviewComments = M.list_comments,
-		ReviewMark = M.toggle_reviewed,
-		ReviewUnreviewed = M.toggle_unreviewed,
 		WriteFeedback = M.submit,
 		ReviewRetry = harness.retry,
 		ReviewArchive = function()

@@ -1,6 +1,6 @@
 # Feature list
 
-myeditor is a portable, Nix-packaged Neovim configuration with ordinary
+rediff is a portable, Nix-packaged Neovim configuration with ordinary
 editing and a protected, side-by-side Git Review workspace. Review supports
 exact-range comments, local drafts/outbox, explicit staging, and Amp, Claude,
 or custom feedback receivers. It intentionally does not claim complete
@@ -20,8 +20,10 @@ revdiff parity.
   or oversized files retain ordinary text highlights.
 - The sidebar has **STAGED** and **UNSTAGED** sections. Untracked files appear in
   UNSTAGED with `U`; `M`, `R`, `A`, and `D` identify modified, Git-detected renamed,
-  added, and deleted paths. Staging a sidebar file advances to the next unstaged
-  entry, or the previous one at the end; an exhausted section keeps header focus.
+  added, and deleted paths. Staging/unstaging a sidebar file advances to the next
+  entry in the same group, or the previous one at the end. An exhausted group
+  keeps header focus through refresh; further **S** presses change nothing.
+  Tree navigation skips headers and blank rows, clamping to the first/last file.
   Moving onto a file row immediately displays its diff while retaining tree focus.
   The full-row highlight follows that file; normal cursor styling returns on exit.
 - **Space e** / `:ft` / `:Explorer` focuses the Git sidebar in Review and Neo-tree
@@ -52,15 +54,9 @@ revdiff parity.
   **Enter** chooses and **Esc** cancels. Native `/`, `n`, and `N` remain
   current-buffer search.
 - **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
-  and Review. `?` opens help; `:help myeditor-commands` lists editor commands
+  and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
-- **Space m** / `:ReviewMark` toggles reviewed `✓` / unreviewed `○` for the selected tree row
-  or displayed diff. **Space u** / `:ReviewUnreviewed` filters to unreviewed
-  entries for the sidebar, Review pickers, and navigation.
-- Reviewed marks are private per worktree and fingerprint changed content,
-  independently for staged and unstaged entries. They survive context-only
-  shifts and reopen/refresh, but are cleared when changed content changes.
-  Review checks saved files and the index about once a second, preserving file
+- Review checks saved files and the index about once a second, preserving file
   selection and pane focus. Refresh pauses during composition, selections,
   command input, pickers, and delivery. **Space R** also refreshes immediately.
 - The bottom Review bar shows the current branch, or `@short-SHA` for detached
@@ -77,17 +73,16 @@ revdiff parity.
 
 Implemented: tree/diff focus and pane switching; cross-file counted hunk and
 file navigation; fuzzy file/content search; staged/unstaged groups and status badges;
-hunk/file staging; reviewed marks and unreviewed filtering; protected diffs;
+hunk/file staging; protected diffs;
 line/range feedback drafts; help; live/manual refresh; and worktree switching
 and creation with a selected harness process.
 
-Partial: annotations are strong native Neovim editing and exact-range review
-comments, but do not yet provide revdiff's file/hunk annotation scopes or
-next/previous annotation navigation. Filters cover unreviewed state, not the
-broader filter set. Display and command-palette parity is selective.
+Partial: annotations support native editing, exact ranges, fuzzy discovery and
+next/previous navigation, but not revdiff's file/hunk scopes. Display and
+command-palette parity is selective.
 
 Pending: LSP symbol inspection/definition/references; blame views; collapsed
-and compact diff presentation; file/hunk-level annotations and annotation navigation; and
+and compact diff presentation; file/hunk-level annotations; and
 the remaining view toggles, filters, and general commands in the revdiff fork.
 
 ## Live harness steering
@@ -110,8 +105,15 @@ re-entering Review, but a fresh editor process always starts without notes.
 Submitted payloads and receipts remain in the outbox for inspection/retry.
 
 Closing an annotation with `:q` discards edits since its last write; `:wq`
-saves locally and closes. Starting another opens a fresh panel, even on the
-same hunk. Saved notes remain in the batch. **d** in a source pane deletes a
+saves locally and closes. **Space c** / `:annotations list` / `:al` opens a fuzzy
+picker over filenames and note text; Enter jumps to the note. **i** on an
+annotated source line edits that note (choose if several overlap), preserving
+its ID and anchor. **} / {** or `:annotations next` / `prev` cycle through saved
+notes from the tree or diff panes, accepting counts such as **3}**. Ordinary
+files and annotation text retain native paragraph motions.
+`:annotations new` creates a separate note on the same line. Jumps display
+the original snapshot; **Space R** returns to current files and live refresh.
+Saved notes remain in the batch. **d** in a source pane deletes a
 note covering the cursor, with a picker if several overlap; it never deletes
 source or retracts sent feedback. General-message `:q` retains its draft for
 continued editing and does not block quitting, even with a hidden composer.

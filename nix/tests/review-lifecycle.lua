@@ -101,6 +101,7 @@ return function(root, equal, fails)
 		comments = { { text = "Legacy note from an earlier launch" } },
 		snapshots = {},
 		draft = { text = "Legacy unwritten annotation" },
+		reviewed = { ["unstaged\0auth.lua"] = "legacy-mark" },
 		harness = { name = "claude", session = "preserve-binding" },
 	})
 	local function launch(write)
@@ -123,11 +124,10 @@ return function(root, equal, fails)
 			local result = {
 				count = #s.comments,
 				draft = s.draft ~= nil,
-				marked = s.reviewed["unstaged\0auth.lua"] ~= nil,
+				marked = s.reviewed ~= nil,
 				session = s.harness.session,
 			}
 			if write then
-				review.toggle_reviewed()
 				vim.api.nvim_set_current_win(s.new_win)
 				review.compose()
 				vim.api.nvim_buf_set_lines(s.composer, 0, -1, false, { "Saved before quitting" })
@@ -155,10 +155,11 @@ return function(root, equal, fails)
 			"Fresh launch ignores legacy notes and composer, preserving the harness"
 		)
 		equal(nil, feedback.read(directory .. "/draft.json").comments, "Quit does not persist annotations")
+		equal(nil, feedback.read(directory .. "/draft.json").reviewed, "Legacy reviewed marks are not retained")
 		equal(
-			{ count = 0, draft = false, marked = true, session = "preserve-binding" },
+			{ count = 0, draft = false, marked = false, session = "preserve-binding" },
 			launch(false),
-			"Second fresh launch has no notes; reviewed marks and binding survive"
+			"Second fresh launch has no notes or reviewed marks; binding survives"
 		)
 	end, debug.traceback)
 	vim.fn.delete(restart_root, "rf")

@@ -1,4 +1,4 @@
-# Portable Review editor
+# rediff: read agent diffs
 
 This directory is a self-contained flake. It packages Neovim, Git, ripgrep, difftastic,
 Neo-tree, Codediff (including its compiled native library), review.nvim, and
@@ -26,7 +26,7 @@ nix run path:/path/to/myeditor/nix -- src/main.lua
 ```
 
 Interactive launches inside a Git worktree open Review automatically, focused
-on the protected new-side pane. **Space q** returns to the editing tab, retaining
+on the file tree with the first diff previewed. **Space q** returns to the editing tab, retaining
 any file arguments; **Space r** re-enters Review. **Space R** refreshes snapshots.
 Outside Git, the filesystem tree opens on the left with focus in the editor.
 **Space e** or **:ft** focuses it, **Space d** returns to the editor, and
@@ -39,8 +39,9 @@ annotations, and harness messages) and in command/search input. Normal-mode
 Vim bindings remain unchanged. Typed **:ft** expands to `:Explorer` and focuses
 the Git sidebar in Review; scripts should use `:Explorer` directly.
 
-The package defines `myeditor`; Home Manager can also expose it as `nvim`.
-Both use `NVIM_APPNAME=myeditor` and a configuration in the Nix store.
+The package defines `rediff`; Home Manager can also expose it as `nvim`.
+`myeditor` remains a compatibility alias. Both use `NVIM_APPNAME=myeditor`
+and a configuration in the Nix store, preserving existing settings and outboxes.
 The theme is **Rosé Pine (main)**, bundled through the pinned nixpkgs.
 Existing Neovim configurations and plugins are not modified.
 Targets are Apple Silicon macOS and ARM64/x86-64
@@ -97,19 +98,20 @@ configuration over a larger home configuration: Home Manager manages one profile
 Add the flake to your existing flake's inputs:
 
 ```nix
-inputs.myeditor.url = "github:cmattatall/myeditor?dir=nix";
+inputs.rediff.url = "github:cmattatall/myeditor?dir=nix";
 ```
 
 Add its module and enable it in your Home Manager configuration:
 
 ```nix
 {
-  imports = [ inputs.myeditor.homeManagerModules.default ];
-  programs.myeditor.enable = true;
-  programs.myeditor.nvimAlias = true;
+  imports = [ inputs.rediff.homeManagerModules.default ];
+  programs.rediff.enable = true;
+  programs.rediff.nvimAlias = true;
 }
 ```
 
+Existing `programs.myeditor` options remain compatible aliases.
 `nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
 they opt in. Disable any other Home Manager `nvim` package to avoid a profile
 collision. If Home Manager does not manage your shell, source
@@ -123,10 +125,10 @@ Then run your usual `home-manager switch --flake ...` (or your existing
 NixOS/nix-darwin rebuild command if Home Manager is integrated there).
 
 To vendor this instead, copy this entire directory, including `flake.lock`,
-into your dotfiles as `myeditor/` and use:
+into your dotfiles as `rediff/` and use:
 
 ```nix
-inputs.myeditor.url = "path:./myeditor";
+inputs.rediff.url = "path:./rediff";
 ```
 
 Keep copied files tracked if the enclosing flake is a Git repository.
@@ -149,13 +151,19 @@ so changing your system's packages does not silently change this editor.
    registers, macros, and undo/redo. **Esc**, then **:w** saves the note locally
    and closes the annotation. **:wq** does the same. Neither sends
    feedback or writes the source file. **:q** (or **:q!**) discards edits since
-   the last write and closes. The next annotation starts empty, even on the
-   same hunk; previously saved comments remain in the batch.
+   the last write and closes. **i** on an annotated line edits the existing note;
+   **:annotations new** starts a separate note on the same line.
 5. **:w** from a diff pane or Git sidebar submits the saved batch;
    **:WriteFeedback** is an alias. Unsaved annotation text is never included.
    With no receiver configured, feedback is queued locally only. Use
    **d** on an annotated source line to delete its note (choose from a picker
-   if several overlap), or **:ReviewComments** to list/remove notes. **q**
+   if several overlap). **Space c**, **:annotations list** or **:al** opens a
+   fuzzy picker over filenames and note text; Enter jumps to the note, then
+   **i** edits it. **} / {** or **:annotations next** / **prev** cycle through
+   saved notes from tree/diff panes; counts work (**3}**). Ordinary files and
+   annotation text keep native paragraph motions.
+   Jumps show the original snapshot; **Space R** returns to current files.
+   **:ReviewComments** also opens the picker. **q**
    retains its normal macro-recording behavior in annotations.
 6. Accepted/completed delivery removes the sent notes, preserving newer notes
    and edits. Pending, failed, and local-only batches remain in this editor
@@ -177,10 +185,12 @@ Outside Review, native `:checktime` checks ordinary buffers for external changes
 The sidebar separates **STAGED** and **UNSTAGED** with colored header rows and
 counts; empty sections remain visible. Untracked files are included in UNSTAGED.
 Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
-`D` deleted. Staging a file from the sidebar selects the next unstaged file, or
-the previous one at the end. With none left, focus stays on the UNSTAGED header.
+`D` deleted. Staging/unstaging from the sidebar selects the next file in the
+same group, or the previous one at the end. With none left, focus stays on that
+group's header, including after refresh; further **S** presses change nothing.
 Focused tree navigation highlights a full row instead of a character cursor;
-moving onto a file immediately displays its diff without leaving the tree.
+motions skip headers/blank rows and clamp at the first/last file. Moving onto
+a file immediately displays its diff without leaving the tree.
 Tab focuses that diff. Normal cursor styling returns when focus leaves the tree.
 A partially staged file appears in both comparisons. **] / [** jump between changes,
 cycling across visible files within the current STAGED or UNSTAGED group.
@@ -204,11 +214,6 @@ Nix-pinned **difftastic** engine. Codediff retains text alignment/navigation and
 Git retains staging boundaries. Unsupported languages use difftastic's text
 comparison; missing/failed tools, a two-second timeout, or files over 1 MB retain
 the ordinary text renderer. The bottom bar shows `difftastic` or `text`.
-
-**Space m** toggles reviewed (`✓`) / unreviewed (`○`); **Space u**
-filters the sidebar, navigation, and Review pickers to unreviewed entries.
-Marks are private per worktree, separately fingerprint staged/unstaged changed
-content, survive context-only shifts, and clear when that content changes.
 
 **?** in Normal mode (or **:help**) opens a centered overlay from editing,
 either tree, Review, annotations, or harness messages. Press **?**, **q**, or
@@ -237,12 +242,12 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space f / `:Files` | Fuzzy project files, or visible Review entries |
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
 | Space p / `:Commands` | Search native and plugin commands |
-| Space m / `:ReviewMark` | Toggle reviewed mark |
-| Space u / `:ReviewUnreviewed` | Toggle unreviewed-only filter |
 | i/a/o/O/I/A/c/r/R/x/p… | Edit annotation rather than source |
 | d in source pane | Delete annotation covering cursor; picker if several overlap |
 | Visual selection, then i or Space c | Comment on exact selection |
-| Space c / `:ReviewComments` | List/remove draft comments |
+| Space c / `:annotations list` / `:al` | Fuzzy-search annotations; Enter jumps, i edits |
+| } / { or `:annotations next` / `prev` | Next/previous saved annotation; accepts counts |
+| `:annotations new` | Create a separate note at the cursor |
 | s in a source pane | Stage/unstage the Git hunk containing the cursor |
 | S in sidebar or source pane | Stage/unstage selected file or entire displayed diff |
 | `:ReviewStage hunk` / `:ReviewStage file` | Explicitly stage; rejects STAGED entries |
@@ -329,7 +334,7 @@ so updating the editor is sufficient; no plugin reload is needed for this change
 For Home Manager, enable the plugin alongside the editor:
 
 ```nix
-programs.myeditor = {
+programs.rediff = {
   enable = true;
   ampPlugin.enable = true;
 };
@@ -377,7 +382,7 @@ In Amp's command palette, **anthrodiff: connect** shows connection instructions;
 **anthrodiff: disconnect** stops this thread's endpoint. Session/agent start
 registers silently by default.
 
-Relaunch myeditor using the updated package, then connect in the same checkout:
+Relaunch rediff using the updated package, then connect in the same checkout:
 
 ```vim
 :Harness install amp
@@ -428,7 +433,7 @@ commands are uppercase. Credentials never belong in Nix or Git.
 For Amp, set the default in Home Manager:
 
 ```nix
-programs.myeditor = {
+programs.rediff = {
   enable = true;
   harness = "amp";
 };
@@ -484,7 +489,7 @@ Without Home Manager, create `~/.config/myeditor/settings.json` (respecting
 For Aider, LangGraph, or another harness, configure your own receiver:
 
 ```nix
-programs.myeditor = {
+programs.rediff = {
   enable = true;
   harness = "custom";
   feedbackCommand = [ "/absolute/path/to/receiver" "optional-argument" ];
@@ -544,7 +549,7 @@ to be sent to another agent; verify the binding before submitting.
 - Review reads saved disk/index content, not unsaved normal buffers. Snapshots
   are immutable until refresh. Feedback on changed/unverifiable content is
   submitted with a warning and the original reviewed context; it is never
-  silently re-anchored. Staging and marking reviewed still reject changed
+  silently re-anchored. Staging still rejects changed
   content. Drafts remain available through `:ReviewComments` and the outbox.
 - Regular text files up to 2 MiB are supported. Merge conflicts, binary files,
   and working-tree symlinks/submodules are not an editing/review target here.

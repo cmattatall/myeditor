@@ -1,8 +1,9 @@
-# myeditor
+# rediff
 
 Testing
 
-A Nix-packaged Neovim setup for modal editing and agent-assisted code review.
+Read diff: a human reading the agent's changes. A Nix-packaged Neovim setup
+for modal editing and agent-assisted code review.
 
 The self-contained [`nix/`](nix/) directory contains the flake, Home Manager
 module, pinned plugins, configuration, and tests. Copy that directory into
@@ -25,7 +26,8 @@ It refuses to replace an existing Home Manager setup; use the module in the
 your existing Neovim configuration. The theme is **Rosé Pine (main)**, packaged
 by Nix along with the editor and plugins.
 
-The `myeditor` command uses `NVIM_APPNAME=myeditor`; your normal `nvim`
+The `rediff` command retains `NVIM_APPNAME=myeditor` for existing settings,
+outboxes and harness bindings; `myeditor` remains a compatibility alias. Your normal `nvim`
 configuration is untouched. Interactive launches inside a Git worktree open
 Review automatically. Press **i** to comment and **:w** in a diff pane to send
 saved feedback. **Space q** returns to ordinary editing; **Space r** re-enters
@@ -37,7 +39,7 @@ and credentials stay separate from your portable editor setup.
 
 For live Amp steering, this repository owns the **anthrodiff** plugin and
 installer in [`nix/amp/`](nix/amp/). Enable
-`programs.myeditor.ampPlugin.enable = true` in Home Manager, or run
+`programs.rediff.ampPlugin.enable = true` in Home Manager, or run
 `:harness install amp` in the editor (shell: `bash nix/amp/install.sh`), then
 restart/reload Amp and use `:harness connect amp`.
 The revdiff plugin is no longer required or supported; see the guide for replacing it.

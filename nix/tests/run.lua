@@ -56,7 +56,7 @@ local function test()
 		if
 			name:match("^Review")
 			or vim.list_contains(
-				{ "Harness", "WriteFeedback", "Explorer", "FocusDiff", "Files", "Search", "Commands" },
+				{ "Harness", "WriteFeedback", "Explorer", "FocusDiff", "Files", "Search", "Commands", "Annotations" },
 				name
 			)
 		then
@@ -69,6 +69,14 @@ local function test()
 	for tag in guide:gmatch("|(myeditor[%w%-]*)|") do
 		vim.cmd("help " .. tag)
 		equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Help link resolves: " .. tag)
+	end
+	for _, tag in ipairs({ "rediff", "rediff-commands", "myeditor" }) do
+		vim.cmd("help " .. tag)
+		equal(
+			"myeditor.txt",
+			vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"),
+			"Branded and legacy help resolves: " .. tag
+		)
 	end
 	vim.cmd("help motion")
 	equal(1, vim.api.nvim_buf_get_name(0):find(vim.env.VIMRUNTIME, 1, true), "Native help topics remain available")
@@ -113,13 +121,18 @@ local function test()
 	keys(" e")
 	equal(s.tree_win, vim.api.nvim_get_current_win(), "Space e focuses Review explorer")
 	vim.api.nvim_win_set_cursor(s.tree_win, { 1, 0 })
-	fails(review.toggle_reviewed, "Select a changed file")
 	keys("<Tab>")
 	equal(s.new_win, vim.api.nvim_get_current_win(), "Tab returns to diff")
-	keys(" m")
-	equal(true, vim.list_contains(sidebar(), " ✓ M auth.lua"), "Reviewed file has a Unicode check and status")
-	keys(" u")
-	equal(2, #s.entries, "Unreviewed filter hides reviewed file")
+	for _, command in ipairs({ "ReviewMark", "ReviewUnreviewed" }) do
+		equal(0, vim.fn.exists(":" .. command), "Removed command is unavailable: " .. command)
+	end
+	for _, buf in ipairs({ s.tree_buf, s.old_buf, s.new_buf }) do
+		vim.api.nvim_buf_call(buf, function()
+			for _, key in ipairs({ "<leader>m", "<leader>u" }) do
+				equal("", vim.fn.maparg(key, "n"), "No reviewed-state mapping: " .. key)
+			end
+		end)
+	end
 	local fzf = require("fzf-lua")
 	local exec, items, opts = fzf.fzf_exec
 	fzf.fzf_exec = function(values, options)
@@ -127,15 +140,7 @@ local function test()
 	end
 	local navigation = require("myeditor.navigation")
 	navigation.files()
-	equal(2, #items, "Changed-file picker respects unreviewed filter")
-	equal("removed.lua", s.current.path, "Filter advances past the hidden reviewed entry")
-	keys(" u")
-	equal("removed.lua", s.current.path, "Removing filter preserves file identity as its index shifts")
-	review.show(1)
-	keys(" m")
-	equal(true, vim.tbl_isempty(s.reviewed), "Mark command toggles back to unreviewed")
-	equal(true, vim.list_contains(sidebar(), " ○ M auth.lua"), "Unmarking restores the unreviewed circle")
-	navigation.files()
+	equal(3, #items, "Changed-file picker includes every Git entry")
 	local matched = vim.system({ "fzf", "--filter", "plnmd" }, { stdin = table.concat(items, "\n"), text = true })
 		:wait()
 	equal(0, matched.code, "File picker supports non-contiguous fuzzy matching")
@@ -176,7 +181,19 @@ local function test()
 	equal(true, vim.list_contains(sidebar(), " STAGED (0)"), "Empty staged section stays visible")
 	equal(true, vim.list_contains(sidebar(), " UNSTAGED (3)"), "Unstaged count includes untracked files")
 	equal(false, table.concat(sidebar(), "\n"):find("UNTRACKED", 1, true) ~= nil, "No separate untracked section")
-	equal(true, vim.list_contains(sidebar(), " ○ U plan.md"), "Untracked files have a U badge")
+	equal(true, vim.list_contains(sidebar(), " U plan.md"), "Untracked files have a U badge")
+	equal({
+		" REVIEW · Git changes",
+		"",
+		" STAGED (0)",
+		"   (none)",
+		"",
+		" UNSTAGED (3)",
+		" M auth.lua",
+		" D removed.lua",
+		" U plan.md",
+		"",
+	}, sidebar(), "Sidebar contains Git entries only, without reviewed icons or help")
 	local headers = vim.api.nvim_buf_get_extmarks(
 		s.tree_buf,
 		vim.api.nvim_get_namespaces()["myeditor.tree"],
@@ -278,8 +295,8 @@ local function test()
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Composer never modifies source")
 	equal(index_before, run({ "write-tree" }), "Writing composer never stages source")
 	keys("i<Esc>:wq<CR>")
-	equal(nil, s.composer, "Native wq still closes a blank annotation")
-	equal(2, #s.comments, "Blank write adds no note")
+	equal(nil, s.composer, "Native wq closes the reopened annotation")
+	equal(2, #s.comments, "Editing an existing note does not duplicate it")
 	equal(3, #vim.api.nvim_tabpage_list_wins(0), "Deferred close after wq does not close a source pane")
 	equal(written, s.last_submission, "Annotation wq never submits")
 
@@ -302,7 +319,7 @@ local function test()
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
 		"q records macros rather than closing annotation"
 	)
-	keys(":wq<CR>iOld note<Esc>Sreplacement note<Esc>0sR<Esc>")
+	keys(":wq<CR>:Annotations new<CR>Old note<Esc>Sreplacement note<Esc>0sR<Esc>")
 	equal(
 		{ "Replacement note" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
@@ -346,7 +363,6 @@ local function test()
 	equal(s.current, stale_payload.snapshots[s.current.id], "Stale submission retains the original reviewed snapshot")
 	equal(s.comments, stale_payload.comments, "Stale feedback keeps exact comment coordinates and selected text")
 	equal(mutated, vim.fn.readfile(root .. "/auth.lua"), "Submitting stale feedback leaves agent edits untouched")
-	fails(review.toggle_reviewed, "Reviewed content changed")
 	fails(function()
 		git.stage(root, s.current, "new", 5, false)
 	end, "Reviewed content changed")
@@ -377,13 +393,10 @@ local function test()
 		"Unverified feedback still contains only reviewed source"
 	)
 	vim.fn.writefile(changed, root .. "/auth.lua")
-	review.toggle_reviewed()
 	review.leave()
 	equal(original_tab, vim.api.nvim_get_current_tabpage(), "Return to original tab")
 	review.open()
 	equal(5, #review.state.comments, "Draft comments survive reopening")
-	equal(true, review.state.reviewed["unstaged\0auth.lua"] ~= nil, "Reviewed identity persists across reopening")
-	review.toggle_reviewed()
 	review.archive()
 	s = review.state
 	keys("<Tab>")
@@ -422,7 +435,7 @@ local function test()
 	keys("iUNSAVED NOTE<Esc>")
 	vim.api.nvim_set_current_win(s.new_win)
 	keys(":w<CR>")
-	equal(1, #feedback.read(s.last_submission).comments, "Review write excludes the unwritten new annotation")
+	equal(1, #feedback.read(s.last_submission).comments, "Review write excludes unsaved annotation edits")
 	equal(
 		"Saved range note",
 		feedback.read(s.last_submission).comments[1].text,
@@ -430,8 +443,9 @@ local function test()
 	)
 	vim.api.nvim_set_current_win(s.composer_win)
 	keys(":q<CR>")
-	equal("Saved range note", s.comments[1].text, "q discards the new draft, not the saved note")
-	keys("iSecond saved annotation<Esc>:wq<CR>")
+	equal("Saved range note", s.comments[1].text, "q discards the edit, not the saved note")
+	vim.api.nvim_win_set_cursor(s.new_win, { 17, 0 })
+	keys(":Annotations new<CR>Second saved annotation<Esc>:wq<CR>")
 	equal(2, #s.comments, "wq saves a separate annotation without sending")
 	keys(":w<CR>")
 	local submitted = feedback.read(s.last_submission)
@@ -562,9 +576,6 @@ local function test()
 	vim.cmd("Focus staged")
 	equal("staged", s.current.group, "Focus staged explicitly returns to staged")
 	equal(5, vim.api.nvim_win_get_cursor(s.new_win)[1], "Staged hunk has its own coordinates")
-	review.toggle_reviewed()
-	equal(nil, s.reviewed["unstaged\0auth.lua"], "Staged reviewed mark does not mark worktree comparison")
-	review.toggle_reviewed()
 	vim.api.nvim_set_current_win(s.new_win)
 	fails(function()
 		review.stage(false, false)
@@ -671,35 +682,21 @@ local function test()
 	equal(1, s.selected_hunk, "Forward wrap selects the first hunk")
 	keys("[")
 	equal("plan.md", s.current.path, "Backward wrap also skips hunkless files")
-	review.toggle_reviewed()
-	review.toggle_unreviewed()
 	vim.fn.writefile({ "Agent changed this plan" }, root .. "/plan.md")
 	review.refresh()
-	equal(nil, s.reviewed["untracked\0plan.md"], "Agent edit invalidates reviewed mark")
-	equal(
-		true,
-		vim.list_contains(sidebar(), " ○ U plan.md"),
-		"Changed reviewed file reappears under unreviewed filter"
-	)
-	review.toggle_unreviewed()
-	for index = 1, #s.entries do
-		review.show(index)
-		review.toggle_reviewed()
+	equal("Agent changed this plan\n", s.current.new, "Refresh displays the agent's changed file")
+	-- Leave only a hunkless file in UNSTAGED in this disposable fixture.
+	for _, entry in ipairs(git.entries(root)) do
+		if entry.group ~= "staged" and entry.path ~= "zzz-empty.txt" then
+			git.stage(root, git.snapshot(root, entry), "new", 1, true)
+		end
 	end
-	review.toggle_unreviewed()
-	equal(0, #s.entries, "All-reviewed filter handles empty results")
-	equal(nil, s.current, "All-reviewed filter clears source selection")
-	review.toggle_unreviewed()
-	equal(4, #s.entries, "Disabling filter restores all files")
+	review.refresh()
 	review.show(#s.entries)
-	review.toggle_reviewed()
-	review.toggle_unreviewed()
-	equal(1, #s.entries, "Only the hunkless file is visible")
 	vim.api.nvim_set_current_win(s.tree_win)
 	keys("][")
 	equal("zzz-empty.txt", s.current.path, "A group without hunks keeps its selected file")
 	equal(s.tree_win, vim.api.nvim_get_current_win(), "A group without hunks retains sidebar focus")
-	review.toggle_unreviewed()
 
 	review.leave()
 	equal(0, vim.fn.maparg("]", "n", false, true).buffer or 0, "Review bracket mapping does not leak into editing")
@@ -757,14 +754,6 @@ local function test()
 	equal("completed", deliver("ok").status, "Completed batch is not resent")
 	equal({ "3" }, vim.fn.readfile(submission .. ".calls"), "Exactly three receiver executions")
 	equal(id, feedback.enqueue(root, { { text = "transport test" } }, {}), "Dedupe persists across reads")
-	local fingerprint = { path = "demo.lua", group = "unstaged", old = "old\n", new = "new\n", patch = "" }
-	local identity = git.review_fingerprint(fingerprint)
-	fingerprint.old, fingerprint.new = "prefix\nold\n", "prefix\nnew\n"
-	equal(identity, git.review_fingerprint(fingerprint), "Unchanged diff survives shifted hunk/context")
-	fingerprint.new = "prefix\nother\n"
-	equal(false, identity == git.review_fingerprint(fingerprint), "Changed addition invalidates semantic identity")
-	fingerprint.old, fingerprint.new = "old\n", "new"
-	equal(false, identity == git.review_fingerprint(fingerprint), "Final newline change invalidates reviewed identity")
 	dofile(tests .. "/input.lua")(equal)
 	print(string.format("PASS: %d assertions", assertions))
 end
