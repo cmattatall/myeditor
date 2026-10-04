@@ -137,6 +137,14 @@ for _, binding in ipairs({
 	{ "<leader>d", "FocusDiff", navigation.diff, "Focus diff/editor" },
 	{ "<leader>f", "Files", navigation.files, "Fuzzy find files" },
 	{ "<leader>/", "Search", navigation.text, "Fuzzy find text" },
+	{
+		"<leader>p",
+		"Commands",
+		function()
+			require("fzf-lua").commands()
+		end,
+		"Find commands",
+	},
 }) do
 	vim.keymap.set("n", binding[1], binding[3], { desc = binding[4] })
 	vim.api.nvim_create_user_command(binding[2], binding[3], {})

@@ -236,6 +236,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 | `:fm` / `:focus modified` | Select first visible UNSTAGED file/hunk, including untracked |
 | Space f / `:Files` | Fuzzy project files, or visible Review entries |
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
+| Space p / `:Commands` | Search native and plugin commands |
 | Space m / `:ReviewMark` | Toggle reviewed mark |
 | Space u / `:ReviewUnreviewed` | Toggle unreviewed-only filter |
 | i/a/o/O/I/A/c/r/R/x/p… | Edit annotation rather than source |

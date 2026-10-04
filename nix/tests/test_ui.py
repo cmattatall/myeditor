@@ -109,6 +109,35 @@ class EditorUI(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
 
+    def test_command_picker(self):
+        editor = self.launch(self.root)
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        editor.exec_lua(
+            'vim.api.nvim_create_user_command("PaletteProbe", function() '
+            'vim.g.palette_window = vim.api.nvim_get_current_win() end, {})'
+        )
+        for pane in ("tree_win", "old_win", "new_win"):
+            self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane})")
+            original = editor.current.window.handle
+            self.keys(editor, " p")
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.keys(editor, "PaletteProbe")
+            self.keys(editor, "<Esc>")
+            self.wait_for(editor, f"vim.api.nvim_get_current_win() == {original}")
+            self.assertIsNone(editor.vars.get("palette_window"))
+        for opening in (":Commands<CR>", " p"):
+            original = editor.current.window.handle
+            self.keys(editor, opening)
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.keys(editor, "PaletteProbe")
+            self.keys(editor, "<CR>")
+            self.wait_for(editor, f"vim.g.palette_window == {original}")
+            editor.vars["palette_window"] = None
+            self.keys(editor, " q")
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_startup_and_lock(self):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         editor = self.launch(self.root, file="plan.md")

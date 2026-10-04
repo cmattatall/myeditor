@@ -3,6 +3,7 @@
 
 MODAL EDITING AND AGENT REVIEW
 
+  Space p         Search available commands       :Commands
   Space r         Enter Review                  :Review
   Space e / :ft   Focus tree/sidebar             :Explorer
   Space d         Focus editor/diff               :FocusDiff
@@ -375,6 +376,12 @@ Neo-tree's additional file operations are documented at |neo-tree-mappings|.
 ==============================================================================
 COMMAND INDEX                                              *myeditor-commands*
 
+Space p / :Commands opens a fuzzy picker for native and plugin commands.
+Type to filter; Esc cancels. Use this index for command arguments and meanings.
+For native command-line discovery, type :Review then Ctrl-d to list matches,
+or Tab to complete. :command lists user/plugin commands; :help :write explains
+a native command. Our Tab hints accept a suggestion without executing it.
+
 All myeditor commands are listed here. Capitalization matters in scripts;
 typed :harness, :hs, and :ft are abbreviations, not additional Ex commands.
 :ft expands to :Explorer, focusing the Git sidebar in Review or the ordinary
@@ -386,6 +393,7 @@ In Review, typed :focus, :fs, and :fm expand to :Focus, :Focus staged, and
   :ReviewLeave              Leave Review, retaining drafts (Space q)
   :Explorer / :FocusDiff     Focus tree or editor/diff (Space e/d)
   :Files / :Search           Fuzzy files or text (Space f / Space /)
+  :Commands                 Search available commands (Space p)
   :ReviewComments           List/remove draft comments (Space c)
   :ReviewMark               Toggle reviewed mark (Space m)
   :ReviewUnreviewed         Toggle unreviewed filter (Space u)

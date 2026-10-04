@@ -51,6 +51,9 @@ revdiff parity.
   while editing and old plus new lines (including deletions) in Review.
   **Enter** chooses and **Esc** cancels. Native `/`, `n`, and `N` remain
   current-buffer search.
+- **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
+  and Review. `?` opens help; `:help myeditor-commands` lists editor commands
+  with their arguments and meanings.
 - **Space m** / `:ReviewMark` toggles reviewed `✓` / unreviewed `○` for the selected tree row
   or displayed diff. **Space u** / `:ReviewUnreviewed` filters to unreviewed
   entries for the sidebar, Review pickers, and navigation.

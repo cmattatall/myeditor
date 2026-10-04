@@ -55,7 +55,10 @@ local function test()
 	for name in pairs(vim.api.nvim_get_commands({ builtin = false })) do
 		if
 			name:match("^Review")
-			or vim.list_contains({ "Harness", "WriteFeedback", "Explorer", "FocusDiff", "Files", "Search" }, name)
+			or vim.list_contains(
+				{ "Harness", "WriteFeedback", "Explorer", "FocusDiff", "Files", "Search", "Commands" },
+				name
+			)
 		then
 			equal(true, guide:find(":" .. name .. "%f[%W]") ~= nil, "Help documents command " .. name)
 		end
