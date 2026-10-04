@@ -44,14 +44,16 @@ changing code. i edits the note under the cursor; overlapping notes open a picke
 v/V/Ctrl-v, then a (also i or Space c). The harness receives the selection's range
 and character/block columns, not just the cursor line.
 
+The note editor floats below the selected range without resizing the diff panes.
 Notes use normal Neovim editing. Esc returns to Normal mode:
   :w / :wq    Save locally and close; never send
   :q / :q!    Discard unsaved edits and close; keep any previously saved note
 
-Saved notes appear as orange text under their source range. @ searches filenames
-and note text; Enter jumps, Esc cancels. i then edits that note. } / { cycles in
-creation order across files/sides; counts work (3}). d deletes a note, not source
-or already-sent feedback. These bindings leave ordinary files/note text unchanged.
+Saved notes appear as orange text under their source range. Orange >> in the gutter
+marks notes at the cursor. @ searches filenames and note text; Enter jumps, Esc
+cancels. i edits that note. } / { cycles in creation order across files/sides;
+counts work (3}). d deletes a note, not source or already-sent feedback. These
+bindings leave ordinary files/note text unchanged.
 
 Jumping to an older note shows its original snapshot and pauses refresh/staging.
 Space R returns to current files. Old-side notes switch merged view to split.

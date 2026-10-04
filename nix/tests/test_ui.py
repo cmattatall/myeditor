@@ -181,6 +181,83 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
 
+    def test_annotation_editor_is_anchored_below_source(self):
+        editor = self.launch(self.root)
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        original = Path(self.root, "auth.lua").read_bytes()
+
+        def below(side, last):
+            geometry = self.lua(
+                editor,
+                f"""
+                local win = s.{side}_win
+                local cfg = vim.api.nvim_win_get_config(s.composer_win)
+                local pos = vim.fn.screenpos(win, {last}, 1)
+                return {{cfg.relative, cfg.win == win, cfg.bufpos,
+                    vim.api.nvim_win_get_position(s.composer_win), pos.row, pos.col,
+                    cfg.width, cfg.height, vim.api.nvim_win_get_position(win),
+                    vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win)}}
+            """,
+            )
+            relative, same_win, anchor, pos, row, col, width, height, source, sw, sh = (
+                geometry
+            )
+            self.assertEqual("win", relative)
+            self.assertTrue(same_win)
+            self.assertEqual([last - 1, 0], anchor)
+            self.assertGreater(row, 0, "The annotated line must remain visible")
+            # screenpos is 1-based; float position is 0-based, including border.
+            self.assertEqual(
+                row, pos[0], "Top border is immediately below the annotation range"
+            )
+            self.assertEqual(col - 1, pos[1])
+            self.assertLessEqual(pos[1] + width + 2, source[1] + sw)
+            self.assertLessEqual(pos[0] + height + 2, source[0] + sh)
+
+        for layout, side, line, opening, last in (
+            ("split", "new", 5, "i", 5),
+            ("split", "old", 8, "Vkka", 8),
+            ("merged", "new", 17, "i", 17),
+        ):
+            with self.subTest(layout=layout, side=side):
+                editor.command("View " + layout)
+                self.lua(editor, f"vim.api.nvim_set_current_win(s.{side}_win)")
+                editor.current.window.cursor = [line, 0]
+                panes = editor.eval("winlayout()")
+                height = editor.current.window.height
+                self.keys(editor, opening + "Review this range<Esc>")
+                below(side, last)
+                self.assertEqual(panes, editor.eval("winlayout()"))
+                self.assertEqual(
+                    height,
+                    self.lua(
+                        editor, f"return vim.api.nvim_win_get_height(s.{side}_win)"
+                    ),
+                )
+                self.assertEqual(["Review this range"], editor.current.buffer[:])
+                if layout == "merged":
+                    editor.ui_try_resize(79, 14)
+                    pump(editor)
+                    below(side, last)
+                    self.assertEqual(["Review this range"], editor.current.buffer[:])
+                    self.assertTrue(
+                        self.lua(
+                            editor,
+                            "return vim.api.nvim_get_current_win() == s.composer_win",
+                        )
+                    )
+                self.keys(editor, ":q<CR>")
+                self.wait_for(editor, "s.composer == nil")
+                self.assertTrue(
+                    self.lua(
+                        editor, f"return vim.api.nvim_get_current_win() == s.{side}_win"
+                    )
+                )
+        self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_visual_a_preserves_annotation_ranges_through_submission(self):
         editor = self.launch(self.root)
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
@@ -476,6 +553,123 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, ":view split<CR>")
         self.assertEqual(3, len(marks("new")))
         self.assertEqual(original, path.read_bytes())
+
+    def test_annotation_cursor_gutter_marker(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            local selection = require('rediff.selection')
+            local range = selection.capture(s.new_buf, 'V', {s.new_buf,3,1,0}, {s.new_buf,5,1,0})
+            r.add_comment({file=s.current.path, side='new', snapshot_id=s.current.id,
+                selection=range}, 'Range note\\nSecond line')
+            r.add_comment({file=s.current.path, side='new', snapshot_id=s.current.id,
+                selection=selection.line(s.new_buf,3)}, 'Overlapping note')
+            r.add_comment({file=s.current.path, side='old', snapshot_id=s.current.id,
+                selection=selection.line(s.old_buf,17)}, 'Old note')
+            """,
+        )
+
+        def marked(side):
+            marks = self.lua(
+                editor,
+                f"return vim.api.nvim_buf_get_extmarks(s.{side}_buf, "
+                'vim.api.nvim_get_namespaces()["rediff.annotations"], 0, -1, {details=true})',
+            )
+            selected = []
+            gutter = self.lua(
+                editor, f"return vim.fn.getwininfo(s.{side}_win)[1].textoff"
+            )
+            for _, _, _, details in marks:
+                lines = details["virt_lines"]
+                if not lines or not lines[0]:
+                    continue
+                if details.get("virt_lines_leftcol", False):
+                    self.assertEqual(
+                        [" " * (gutter - 3) + ">> ", "ReviewAnnotation"], lines[0][0]
+                    )
+                    self.assertTrue(lines[0][1][0].startswith("● "))
+                    self.assertTrue(all(row[0][0] == " " * gutter for row in lines[1:]))
+                    selected.append(details["priority"] - 250)
+                else:
+                    self.assertTrue(lines[0][0][0].startswith("● "))
+            return sorted(selected)
+
+        self.assertEqual([], marked("new"))  # Tree focus never selects a note.
+        self.lua(editor, "vim.api.nvim_set_current_win(s.new_win)")
+        for line, expected in ((2, []), (3, [1, 2]), (4, [1]), (5, [1]), (6, [])):
+            self.keys(editor, f"{line}G")
+            self.assertEqual(expected, marked("new"))
+            self.assertEqual([], marked("old"))
+            self.assertIsNone(self.lua(editor, "return s.annotation_id"))
+
+        # Jumps to overlapping notes share a cursor position but select only one.
+        self.lua(editor, "r.jump_comment(s.comments[1])")
+        self.assertEqual([1], marked("new"))
+        self.keys(editor, "}")
+        self.assertEqual([2], marked("new"))
+        self.keys(editor, ":view merged<CR>")
+        self.assertEqual([2], marked("new"))
+        self.keys(editor, "}")  # An old-side note reopens split view.
+        self.assertEqual([3], marked("old"))
+        self.assertEqual([], marked("new"))
+        self.keys(editor, "<Tab>")
+        self.assertEqual([], marked("old"))
+        self.keys(editor, "<Tab>")
+        self.assertEqual([], marked("old"))  # Tab returns to the new-side pane.
+        self.lua(editor, "vim.api.nvim_set_current_win(s.old_win)")
+        self.assertEqual([3], marked("old"))
+        editor.command("colorscheme rose-pine")
+        self.assertEqual(
+            0xFF9E64, editor.api.get_hl(0, {"name": "ReviewAnnotation"})["fg"]
+        )
+        self.assertNotIn("bg", editor.api.get_hl(0, {"name": "ReviewAnnotation"}))
+
+    def test_single_annotation_navigation_does_not_reopen_current_note(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            -- Count navigation reloads independently of the background Git poll.
+            require('rediff.live').stop(s)
+            local selection = require('rediff.selection')
+            r.add_comment({file=s.current.path, side='new', snapshot_id=s.current.id,
+                selection=selection.capture(s.new_buf,'V',{s.new_buf,3,1,0},{s.new_buf,5,1,0})},
+                'Only annotation')
+            local show = r.show
+            vim.g.annotation_show_count = 0
+            r.show = function(...)
+                vim.g.annotation_show_count = vim.g.annotation_show_count + 1
+                return show(...)
+            end
+            vim.api.nvim_set_current_win(s.new_win)
+            """,
+        )
+        self.keys(editor, "4Gzt")
+        view = self.lua(editor, "return vim.fn.winsaveview()")
+        for keys in ("}", "{", "3}", "3{"):
+            self.keys(editor, keys)
+            self.assertEqual(view, self.lua(editor, "return vim.fn.winsaveview()"))
+            self.assertEqual(0, self.lua(editor, "return vim.g.annotation_show_count"))
+            self.assertIsNone(self.lua(editor, "return s.annotation_id"))
+
+        # A lone note remains reachable from elsewhere, including the tree.
+        for origin in ("10G", "<Tab>"):
+            self.keys(editor, origin + "}")
+            self.assertTrue(
+                self.lua(editor, "return vim.api.nvim_get_current_win() == s.new_win")
+            )
+            self.assertEqual(
+                3, self.lua(editor, "return vim.api.nvim_win_get_cursor(0)[1]")
+            )
+            self.keys(editor, "zt")
+            view = self.lua(editor, "return vim.fn.winsaveview()")
+            shows = self.lua(editor, "return vim.g.annotation_show_count")
+            self.keys(editor, "}{")
+            self.assertEqual(view, self.lua(editor, "return vim.fn.winsaveview()"))
+            self.assertEqual(
+                shows, self.lua(editor, "return vim.g.annotation_show_count")
+            )
 
     def test_startup_and_lock(self):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])

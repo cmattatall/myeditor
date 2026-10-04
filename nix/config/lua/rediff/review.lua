@@ -181,18 +181,59 @@ local function opposite_line(line, side, changes)
 	return line + offset
 end
 
-local function render_comments()
+local function side_at_cursor()
 	local s = state()
+	local buf = api.nvim_get_current_buf()
+	assert(buf == s.old_buf or buf == s.new_buf, "Focus a source pane first")
+	return buf == s.old_buf and "old" or "new", buf
+end
+
+local function comments_at_cursor()
+	local s = state()
+	local side, line = side_at_cursor(), api.nvim_win_get_cursor(0)[1]
+	local matches = {}
+	for _, comment in ipairs(s.comments) do
+		if
+			s.current
+			and comment.snapshot_id == s.current.id
+			and comment.side == side
+			and comment.line <= line
+			and comment.line_end >= line
+		then
+			table.insert(matches, comment)
+		end
+	end
+	return matches
+end
+
+local function render_comments(selection_only)
+	local s = state()
+	local selected = {}
+	local buf = api.nvim_get_current_buf()
+	if M.active() == s and (buf == s.old_buf or buf == s.new_buf) then
+		for _, comment in ipairs(comments_at_cursor()) do
+			selected[comment.id] = true
+			if comment.id == s.annotation_id then
+				selected = { [comment.id] = true }
+				break
+			end
+		end
+	end
+	if selection_only and vim.deep_equal(selected, s.cursor_comments) then
+		return
+	end
+	s.cursor_comments = selected
 	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
 		api.nvim_buf_clear_namespace(buf, annotation_ns, 0, -1)
 	end
 	if not s.current or not api.nvim_win_is_valid(s.new_win) then
 		return
 	end
-	local function place(buf, line, lines, priority)
+	local function place(buf, line, lines, priority, leftcol)
 		api.nvim_buf_set_extmark(buf, annotation_ns, math.max(0, math.min(line, api.nvim_buf_line_count(buf)) - 1), 0, {
 			virt_lines = lines,
 			virt_lines_above = line < 1,
+			virt_lines_leftcol = leftcol or false,
 			priority = priority,
 		})
 	end
@@ -200,13 +241,22 @@ local function render_comments()
 		if comment.snapshot_id == s.current.id and (comment.side ~= "old" or s.old_win) then
 			local old = comment.side == "old"
 			local win = old and s.old_win or s.new_win
-			local width = math.max(1, api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff - 2)
+			local active = selected[comment.id]
+			local gutter = vim.fn.getwininfo(win)[1].textoff
+			gutter = active and math.max(3, gutter) or gutter
+			local width = math.max(1, api.nvim_win_get_width(win) - gutter - 2)
 			local lines, padding = {}, {}
 			for row, text in ipairs(wrap_comment(comment.text, width)) do
 				lines[row] = { { (row == 1 and "● " or "  ") .. text, "ReviewAnnotation" } }
+				if active then
+					table.insert(lines[row], 1, {
+						row == 1 and string.rep(" ", gutter - 3) .. ">> " or string.rep(" ", gutter),
+						"ReviewAnnotation",
+					})
+				end
 				padding[row] = {}
 			end
-			place(old and s.old_buf or s.new_buf, comment.line_end, lines, 250 + i)
+			place(old and s.old_buf or s.new_buf, comment.line_end, lines, 250 + i, active)
 			if s.old_win then
 				place(
 					old and s.new_buf or s.old_buf,
@@ -218,13 +268,6 @@ local function render_comments()
 		end
 	end
 	vim.cmd.redrawstatus()
-end
-
-local function side_at_cursor()
-	local s = state()
-	local buf = api.nvim_get_current_buf()
-	assert(buf == s.old_buf or buf == s.new_buf, "Focus a source pane first")
-	return buf == s.old_buf and "old" or "new", buf
 end
 
 local function hunk_range(change, side, buf)
@@ -384,6 +427,7 @@ function M.view(layout)
 	end
 	s.annotation_id = annotation_id
 	api.nvim_set_current_win(api.nvim_win_is_valid(focus) and focus or s.new_win)
+	render_comments()
 end
 
 local function read_changes(s, preferred)
@@ -777,6 +821,43 @@ local function release_composer()
 	api.nvim_buf_delete(buf, { force = true })
 end
 
+local function composer_config(s)
+	local anchor = s.draft.anchor
+	local win = anchor.side == "old" and s.old_win or s.new_win
+	local spans = anchor.selection.spans
+	local last = spans[#spans].line
+	local height = math.max(1, math.min(6, api.nvim_win_get_height(win) - 4))
+	local rows = api.nvim_win_text_height(win, { start_row = last - 1, start_vcol = 0, end_row = last - 1 }).all
+	local pos = vim.fn.screenpos(win, last, 1)
+	local bottom = api.nvim_win_get_position(win)[1] + api.nvim_win_get_height(win)
+	if pos.row == 0 or pos.row + rows + height + 1 > bottom then
+		-- Make room below the anchor instead of letting Neovim move the float
+		-- over the source being annotated. This also reveals reversed selections.
+		api.nvim_win_call(win, function()
+			api.nvim_win_set_cursor(win, { last, 0 })
+			vim.cmd("normal! zt")
+		end)
+	end
+	return {
+		relative = "win",
+		win = win,
+		bufpos = { last - 1, 0 },
+		row = rows,
+		col = 0,
+		width = math.max(1, api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff - 2),
+		height = height,
+		style = "minimal",
+		border = "single",
+		title = " Note · "
+			.. spans[1].line
+			.. (last ~= spans[1].line and "–" .. last or "")
+			.. " · "
+			.. anchor.side
+			.. " ",
+		footer = " :w save · :q discard ",
+	}
+end
+
 function M.compose(visual, keys, comment)
 	local s = state()
 	if s.composer and api.nvim_win_is_valid(s.composer_win) then
@@ -814,19 +895,10 @@ function M.compose(visual, keys, comment)
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
 	s.composer = composer
 	vim.bo[composer].filetype = "markdown"
-	vim.cmd("belowright 6new")
-	s.composer_win = api.nvim_get_current_win()
-	api.nvim_win_set_buf(s.composer_win, composer)
-	vim.wo[s.composer_win].number = false
-	vim.wo[s.composer_win].signcolumn = "no"
+	s.composer_win = api.nvim_open_win(composer, true, composer_config(s))
 	vim.wo[s.composer_win].wrap = true
-	vim.wo[s.composer_win].winbar = " Note · %<"
-		.. vim.fn.strtrans(draft.anchor.file):gsub("%%", "%%%%")
-		.. ":"
-		.. draft.anchor.selection.spans[1].line
-		.. " "
-		.. draft.anchor.side
-		.. " · :w save · :q discard"
+	vim.wo[s.composer_win].linebreak = true
+	vim.wo[s.composer_win].winhighlight = "FloatBorder:ReviewAnnotation,FloatTitle:ReviewAnnotation"
 	api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufLeave" }, {
 		buffer = composer,
 		callback = function()
@@ -964,24 +1036,6 @@ local function remove_comment(comment)
 	end
 end
 
-local function comments_at_cursor()
-	local s = state()
-	local side, line = side_at_cursor(), api.nvim_win_get_cursor(0)[1]
-	local matches = {}
-	for _, comment in ipairs(s.comments) do
-		if
-			s.current
-			and comment.snapshot_id == s.current.id
-			and comment.side == side
-			and comment.line <= line
-			and comment.line_end >= line
-		then
-			table.insert(matches, comment)
-		end
-	end
-	return matches
-end
-
 function M.delete_comment()
 	local s = state()
 	local matches = comments_at_cursor()
@@ -1064,7 +1118,7 @@ function M.jump_comment(comment)
 		math.min(math.max(0, span.start_byte - 1), #api.nvim_buf_get_lines(0, span.line - 1, span.line, false)[1])
 	api.nvim_win_set_cursor(win, { span.line, column })
 	vim.cmd("normal! zz")
-	vim.cmd.redrawstatus()
+	render_comments()
 end
 
 function M.edit_comment(comment)
@@ -1102,6 +1156,10 @@ function M.next_comment(direction)
 	local s = state()
 	if #s.comments == 0 then
 		notify("No annotations")
+		return
+	end
+	local buf = api.nvim_get_current_buf()
+	if #s.comments == 1 and (buf == s.old_buf or buf == s.new_buf) and comments_at_cursor()[1] == s.comments[1] then
 		return
 	end
 	local index = direction > 0 and 0 or 1
@@ -1320,6 +1378,9 @@ function M.setup()
 			tree_focus(
 				s ~= nil and api.nvim_get_current_win() == s.tree_win and api.nvim_get_current_buf() == s.tree_buf
 			)
+			if s and s.diff then
+				render_comments(true)
+			end
 		end,
 	})
 	api.nvim_create_autocmd({ "WinLeave", "BufLeave" }, {
@@ -1387,6 +1448,7 @@ function M.setup()
 			if not s.diff or (buf ~= s.old_buf and buf ~= s.new_buf) then
 				return
 			end
+			render_comments(true)
 			local side = buf == s.old_buf and "old" or "new"
 			local line = api.nvim_win_get_cursor(0)[1]
 			for i, change in ipairs(s.diff.changes) do
@@ -1547,14 +1609,21 @@ function M.setup()
 		end,
 	})
 	api.nvim_create_autocmd("WinClosed", {
-		callback = function()
+		callback = function(event)
+			local refocus = M.state
+				and tonumber(event.match) == M.state.composer_win
+				and api.nvim_get_current_win() == M.state.composer_win
 			vim.schedule(function()
 				local s = M.state
 				if not s then
 					return
 				end
 				if s.composer and not api.nvim_win_is_valid(s.composer_win) then
+					local source = s.draft.anchor.side == "old" and s.old_win or s.new_win
 					release_composer()
+					if refocus and M.active() == s and source and api.nvim_win_is_valid(source) then
+						api.nvim_set_current_win(source)
+					end
 				end
 				if
 					(s.old_win and not api.nvim_win_is_valid(s.old_win))
@@ -1578,6 +1647,9 @@ function M.setup()
 					api.nvim_win_set_width(s.old_win, math.floor(width / 2))
 				end
 				render_comments()
+				if s.composer and api.nvim_win_is_valid(s.composer_win) then
+					api.nvim_win_set_config(s.composer_win, composer_config(s))
+				end
 			end
 		end,
 	})
