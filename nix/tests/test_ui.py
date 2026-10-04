@@ -146,6 +146,94 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
 
+    def test_visual_a_preserves_annotation_ranges_through_submission(self):
+        editor = self.launch(self.root)
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        original = Path(self.root, "auth.lua").read_bytes()
+        cases = (
+            (
+                "old",
+                [5, 0],
+                "Vkka",
+                "line",
+                3,
+                5,
+                [
+                    "function M.authorize(token)",
+                    "  if token == nil then",
+                    "    return false",
+                ],
+                1,
+                17,
+            ),
+            (
+                "new",
+                [3, 9],
+                "vj06la",
+                "character",
+                3,
+                4,
+                ["M.authorize(token)", "  if to"],
+                10,
+                7,
+            ),
+            ("new", [4, 5], "<C-v>j3la", "block", 4, 5, ["toke", "etur"], 6, 9),
+        )
+        expected_notes = []
+        for side, cursor, keys, kind, first, last, text, start_byte, end_byte in cases:
+            with self.subTest(kind=kind):
+                self.lua(editor, f"vim.api.nvim_set_current_win(s.{side}_win)")
+                editor.current.window.cursor = cursor
+                self.keys(editor, keys + f"Review {kind} range<Esc>")
+                self.wait_for(editor, "s.composer ~= nil")
+                self.assertEqual([f"Review {kind} range"], editor.current.buffer[:])
+                selection = self.lua(editor, "return s.draft.anchor.selection")
+                self.assertEqual(kind, selection["kind"])
+                self.assertEqual(text, selection["text"])
+                self.assertEqual("nvim-getregionpos-v1", selection["coordinates"])
+                spans = selection["spans"]
+                self.assertEqual(
+                    list(range(first, last + 1)), [s["line"] for s in spans]
+                )
+                self.assertEqual(start_byte, spans[0]["start_byte"])
+                self.assertEqual(end_byte, spans[-1]["end_byte"])
+                if kind == "block":
+                    for span in spans:
+                        self.assertEqual(
+                            (6, 9, 0, 0),
+                            (
+                                span["start_byte"],
+                                span["end_byte"],
+                                span["start_offset"],
+                                span["end_offset"],
+                            ),
+                        )
+                self.keys(editor, ":w<CR>")
+                self.wait_for(editor, "s.composer == nil")
+                note = self.lua(editor, "return s.comments[#s.comments]")
+                self.assertEqual(
+                    ("auth.lua", side, first, last),
+                    (
+                        note["file"],
+                        note["side"],
+                        note["line"],
+                        note["line_end"],
+                    ),
+                )
+                self.assertEqual(selection, note["selection"])
+                expected_notes.append(note)
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        # No receiver is connected: submission archives the batch locally only.
+        self.keys(editor, ":w<CR>")
+        payload = self.lua(
+            editor, 'return require("myeditor.feedback").read(s.last_submission)'
+        )
+        self.assertEqual(expected_notes, payload["comments"])
+        self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_annotation_picker_jump_edit_and_saved_snapshots(self):
         editor = self.launch(self.root)
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
@@ -177,6 +265,14 @@ class EditorUI(unittest.TestCase):
             self.keys(editor, "<CR>")
             self.wait_for(editor, 'vim.bo.filetype ~= "fzf"')
 
+        for pane in ("tree_win", "old_win", "new_win"):
+            self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane})")
+            self.assertEqual(
+                "", self.lua(editor, 'return vim.fn.maparg("<leader>c", "n")')
+            )
+            self.keys(editor, "@")
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.keys(editor, "<Esc>")
         choose(":al<CR>", "lease timeout")
         self.assertEqual(
             ["auth.lua", "new", 5, notes[0]["id"]],
@@ -194,7 +290,7 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(
             self.lua(
                 editor,
-                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == ""',
+                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == "" and vim.fn.maparg("@", "n") == ""',
             )
         )
         self.keys(editor, "gg0CUpdated boundary<Esc>:w<CR>")
@@ -232,7 +328,7 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(notes[0]["id"], self.lua(editor, "return s.annotation_id"))
         choose(":annotations list<CR>", "Old refresh")
         self.assertEqual(notes[2]["id"], self.lua(editor, "return s.annotation_id"))
-        choose(" c", "Plan details")
+        choose("@", "Plan details")
         self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
         self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
 
@@ -264,9 +360,87 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(
             self.lua(
                 editor,
-                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == ""',
+                'return vim.fn.maparg("{", "n") == "" and vim.fn.maparg("}", "n") == "" and vim.fn.maparg("@", "n") == ""',
             )
         )
+
+    def test_compact_orange_annotations(self):
+        path = Path(self.root, "auth.lua")
+        path.write_text(
+            "-- inserted line one\n-- inserted line two\n" + path.read_text()
+        )
+        original = path.read_bytes()
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            local selection = require('myeditor.selection')
+            local function note(side, line, text)
+                r.add_comment({file=s.current.path, side=side, snapshot_id=s.current.id,
+                    selection=selection.line(side=='old' and s.old_buf or s.new_buf,line)},text)
+            end
+            note('new',7,'Check token.\\nKeep this exact.')
+            note('old',17,string.rep('界 boundary ',8))
+            note('new',7,'Second note')
+            """,
+        )
+
+        def marks(side):
+            return self.lua(
+                editor,
+                f"return vim.api.nvim_buf_get_extmarks(s.{side}_buf, "
+                'vim.api.nvim_get_namespaces()["myeditor.annotations"], 0, -1, {details=true})',
+            )
+
+        for side, expected_rows in (
+            ("old", {251: 4, 252: 16, 253: 4}),
+            ("new", {251: 6, 252: 18, 253: 6}),
+        ):
+            rendered = marks(side)
+            self.assertEqual(3, len(rendered))
+            for _, row, _, details in rendered:
+                self.assertEqual(expected_rows[details["priority"]], row)
+                self.assertFalse(details.get("virt_lines_above", False))
+                self.assertNotIn("sign_text", details)
+        new_note = next(
+            mark[3]["virt_lines"] for mark in marks("new") if mark[3]["priority"] == 251
+        )
+        self.assertEqual(
+            [
+                [["● Check token.", "ReviewAnnotation"]],
+                [["  Keep this exact.", "ReviewAnnotation"]],
+            ],
+            new_note,
+        )
+        old_note = next(
+            mark[3]["virt_lines"] for mark in marks("old") if mark[3]["priority"] == 252
+        )
+        self.assertGreater(len(old_note), 1)
+        self.assertEqual(
+            "界 boundary " * 8, "".join(line[0][0][2:] for line in old_note)
+        )
+        self.assertTrue(all(line[0][1] == "ReviewAnnotation" for line in old_note))
+        padding = next(
+            mark[3]["virt_lines"] for mark in marks("new") if mark[3]["priority"] == 252
+        )
+        self.assertEqual(len(old_note), len(padding))
+        self.assertTrue(all(not line for line in padding))
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return vim.fn.screenpos(s.old_win,8,1).row == vim.fn.screenpos(s.new_win,10,1).row",
+            )
+        )
+        editor.command("colorscheme rose-pine")
+        self.assertEqual(
+            0xFF9E64, editor.api.get_hl(0, {"name": "ReviewAnnotation"})["fg"]
+        )
+        self.keys(editor, ":view merged<CR>")
+        self.assertEqual(2, len(marks("new")))
+        self.assertEqual([], marks("old"))
+        self.keys(editor, ":view split<CR>")
+        self.assertEqual(3, len(marks("new")))
+        self.assertEqual(original, path.read_bytes())
 
     def test_startup_and_lock(self):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])

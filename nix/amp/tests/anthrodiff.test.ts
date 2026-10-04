@@ -242,8 +242,8 @@ test('editor bridge discovers anthrodiff and sends once with neutral guidance', 
   await run('send', found[0].connection, id, review)
   const feedback = f.messages.get(id)!.at(-1)![0].content
   assert.match(feedback, /Check this boundary/)
-  assert.match(feedback, /demo.lua/)
-  assert.match(feedback, /"line":42/)
+  assert.ok(feedback.includes(`${root}/demo.lua:42 (new; unstaged)\nCheck this boundary`))
+  assert.ok(!feedback.includes('"comments"'))
   assert.ok(!feedback.includes('UNRELATED'))
   assert.ok(feedback.length < 1500, 'Amp receives a compact annotation, not the local snapshot archive')
 })

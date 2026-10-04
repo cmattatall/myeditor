@@ -7,6 +7,60 @@ import subprocess
 import sys
 from pathlib import Path
 
+GUIDANCE = (
+    "The user owns staging. Do not stage, unstage, reset, commit, or push without "
+    "asking. Check current files before editing."
+)
+
+
+def review_prompt(payload, archive):
+    sections = [
+        "Address these review annotations. Locations refer to the reviewed versions."
+    ]
+    byte_columns = False
+
+    def column(span, edge):
+        value = str(span[edge + "_byte"])
+        offset = span.get(edge + "_offset", 0)
+        return value + (f"+{offset}" if offset else "")
+
+    for note in payload["comments"]:
+        snapshot_id = note.get("snapshot_id")
+        snapshot = payload.get("snapshots", {}).get(snapshot_id, {})
+        status = payload.get("snapshot_status", {}).get(snapshot_id, "unverified")
+        first, last = note["line"], note.get("line_end", note["line"])
+        location = str(first) if first == last else f"{first}-{last}"
+        details = [note["side"], snapshot.get("group", "unknown")]
+        if status != "current":
+            details.append("snapshot " + status)
+        selection = note.get("selection", {})
+        spans = selection.get("spans", [])
+        if spans and selection.get("kind") in ("character", "block"):
+            byte_columns = True
+            if selection["kind"] == "character":
+                location = f"{spans[0]['line']}:{column(spans[0], 'start')}-{spans[-1]['line']}:{column(spans[-1], 'end')}"
+                details.append("character selection")
+            else:
+                columns = ", ".join(
+                    f"{s['line']}:{column(s, 'start')}-{column(s, 'end')}"
+                    for s in spans
+                )
+                details.append("block columns " + columns)
+            if "tabstop" in selection:
+                details.append(f"tabstop {selection['tabstop']}")
+        path = (Path(payload["repository"]) / note["file"]).absolute()
+        sections.append(f"{path}:{location} ({'; '.join(details)})\n{note['text']}")
+
+    epilogue = GUIDANCE
+    if byte_columns:
+        epilogue += (
+            " Columns are 1-based bytes, inclusive; +offset counts display cells into a tab/wide character "
+            "(an end offset is the first excluded cell)."
+        )
+    epilogue += f"\nHistorical source and exact selections, if needed: {Path(archive).absolute()}"
+    sections.append(epilogue)
+    return "\n\n".join(sections)
+
 
 def command(harness, session):
     if not session or session.startswith("-"):
@@ -98,17 +152,10 @@ def main():
         )
         file.flush()
         os.fsync(file.fileno())
-    prompt = (
-        "Address this human code-review feedback in the current repository. "
-        "The payload contains immutable reviewed content; check current files before "
-        "editing. Do not stage, commit, or push. Report changes and tests.\n\n"
-        + json.dumps(payload, ensure_ascii=False)
-    )
     if "message" in payload:
-        prompt = payload["message"] + (
-            "\n\nThe user owns staging. Do not stage, unstage, reset, commit, or "
-            "push without asking. Check current files before editing."
-        )
+        prompt = payload["message"] + "\n\n" + GUIDANCE
+    else:
+        prompt = review_prompt(payload, path)
     try:
         result = subprocess.run(
             argv,

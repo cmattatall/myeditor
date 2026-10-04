@@ -119,7 +119,7 @@
               }
               ''
                 export HOME="$TMPDIR/home"
-                export ANTHRODIFF_TEST_BRIDGE=${./amp_live.py}
+                export ANTHRODIFF_TEST_BRIDGE=${self}/amp_live.py
                 mkdir -p "$HOME"
                 node --test ${./amp}/tests/anthrodiff.test.ts
                 bash ${./amp}/tests/install.test.sh
@@ -139,7 +139,7 @@
                 mkdir -p "$HOME"
                 myeditor --headless -l ${./tests}/run.lua
                 python3 -B ${./tests/test_harness.py} ${./harness.py}
-                python3 -B ${./tests/test_amp_live.py} ${./amp_live.py}
+                python3 -B ${./tests/test_amp_live.py} ${self}/amp_live.py
                 python3 -B ${./tests}/test_ui.py
                 touch "$out"
               '';

@@ -23,7 +23,25 @@ class HarnessReceiverTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.payload = Path(self.temp.name) / "batch.json"
         self.payload.write_text(
-            json.dumps({"submission_id": "batch-1", "comments": []})
+            json.dumps(
+                {
+                    "submission_id": "batch-1",
+                    "repository": self.temp.name,
+                    "comments": [
+                        {
+                            "file": "file with spaces.go",
+                            "side": "new",
+                            "line": 177,
+                            "text": "Use sentinel errors.",
+                            "snapshot_id": "s",
+                        }
+                    ],
+                    "snapshots": {
+                        "s": {"group": "untracked", "new": "UNRELATED SOURCE"}
+                    },
+                    "snapshot_status": {"s": "current"},
+                }
+            )
         )
         self.receipt = Path(str(self.payload) + ".claude-receipt.json")
 
@@ -60,8 +78,60 @@ class HarnessReceiverTests(unittest.TestCase):
             ],
             run.call_args.args[0],
         )
-        self.assertIn('"submission_id": "batch-1"', run.call_args.kwargs["input"])
+        self.assertIn(
+            f"{self.temp.name}/file with spaces.go:177 (new; untracked)\nUse sentinel errors.",
+            run.call_args.kwargs["input"],
+        )
+        self.assertNotIn("UNRELATED SOURCE", run.call_args.kwargs["input"])
         self.assertEqual(0o600, self.receipt.stat().st_mode & 0o777)
+
+    def test_review_prompt_ranges_and_note_order(self):
+        payload = {
+            "repository": "/checkout with spaces",
+            "comments": [
+                {
+                    "file": "old.go",
+                    "side": "old",
+                    "line": 8,
+                    "line_end": 12,
+                    "text": "First note\nPreserve the second paragraph.",
+                    "snapshot_id": "s",
+                },
+                {
+                    "file": "α.go",
+                    "side": "new",
+                    "line": 21,
+                    "line_end": 22,
+                    "text": "Second note",
+                    "snapshot_id": "s",
+                    "selection": {
+                        "kind": "character",
+                        "spans": [
+                            {"line": 21, "start_byte": 5, "end_byte": 18},
+                            {"line": 22, "start_byte": 1, "end_byte": 9},
+                        ],
+                    },
+                },
+            ],
+            "snapshots": {"s": {"group": "staged"}},
+            "snapshot_status": {"s": "changed"},
+        }
+        prompt = receiver.review_prompt(payload, self.payload)
+        sections = prompt.split("\n\n")
+        self.assertEqual(
+            "Address these review annotations. Locations refer to the reviewed versions.",
+            sections[0],
+        )
+        self.assertEqual(
+            "/checkout with spaces/old.go:8-12 (old; staged; snapshot changed)\nFirst note\nPreserve the second paragraph.",
+            sections[1],
+        )
+        self.assertEqual(
+            "/checkout with spaces/α.go:21:5-22:9 (new; staged; snapshot changed; character selection)\nSecond note",
+            sections[2],
+        )
+        self.assertTrue(sections[3].startswith(receiver.GUIDANCE))
+        self.assertTrue(sections[3].endswith(str(self.payload.absolute())))
 
     def test_uncertain_delivery_is_not_reexecuted(self):
         response = subprocess.CompletedProcess([], 1, "", "connection lost")
@@ -138,7 +208,11 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertEqual("batch-1", first["submission_id"])
         self.assertEqual("Fixed expiry; tests passed.", first["result"])
         self.assertEqual(["shell_command"], first["permission_denials"])
-        self.assertIn('"submission_id": "batch-1"', run.call_args.kwargs["input"])
+        self.assertIn(
+            f"{self.temp.name}/file with spaces.go:177 (new; untracked)\nUse sentinel errors.",
+            run.call_args.kwargs["input"],
+        )
+        self.assertNotIn("UNRELATED SOURCE", run.call_args.kwargs["input"])
         self.assertEqual(
             0o600, Path(str(self.payload) + ".amp-receipt.json").stat().st_mode & 0o777
         )

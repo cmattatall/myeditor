@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("amp_live", sys.argv.pop(1))
+sys.path.insert(0, str(Path(spec.origin).parent))
 amp_live = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(amp_live)
 
@@ -99,7 +100,9 @@ class AmpLiveTests(unittest.TestCase):
 
     def payload_write(self, **extra):
         value = {"submission_id": "one", "repository": str(self.root.resolve()),
-                 "comments": [{"text": "fix this"}], "snapshots": {"s": {"text": "old"}}}
+                 "comments": [{"file": "demo.lua", "side": "new", "line": 7,
+                               "text": "fix this", "snapshot_id": "s"}],
+                 "snapshots": {"s": {"text": "old"}}}
         value.update(extra)
         self.payload.write_text(json.dumps(value))
 
@@ -152,23 +155,26 @@ class AmpLiveTests(unittest.TestCase):
     def test_review_sends_references_not_full_files_and_keeps_archive(self):
         note = {"file": "src/space name.lua", "side": "old", "line": 17, "line_end": 19,
                 "text": "Keep the boundary check", "snapshot_id": "s",
-                "selection": {"text": ["selected α" * 200]}}
+                "selection": {"kind": "block", "coordinates": "nvim-getregionpos-v1", "tabstop": 4,
+                              "spans": [
+                                  {"line": 17, "start_byte": 1, "start_offset": 2, "end_byte": 6, "end_offset": 0},
+                                  {"line": 18, "start_byte": 3, "start_offset": 0, "end_byte": 8, "end_offset": 0},
+                                  {"line": 19, "start_byte": 2, "start_offset": 1, "end_byte": 2, "end_offset": 3},
+                              ], "text": ["selected α" * 200]}}
         self.payload_write(comments=[note], snapshot_status={"s": "changed"},
                            snapshots={"s": {"group": "staged", "old": "OLD FILE " * 150000,
                                              "new": "NEW FILE " * 150000, "patch": "FULL PATCH"}})
         original = self.payload.read_bytes()
         amp_live.send(self.connection, THREAD, self.payload)
         content = Handler.requests[-1][2]["content"]
-        self.assertLess(len(content.encode()), 3000)
-        compact = json.loads(content.split("\n\n", 1)[1])
-        sent = compact["comments"][0]
-        for key in ("file", "side", "line", "line_end", "text"):
-            self.assertEqual(note[key], sent[key])
-        self.assertEqual("staged", sent["comparison"])
-        self.assertEqual("changed", sent["snapshot_status"])
-        self.assertTrue(sent["selected_text"].endswith("[excerpt truncated]"))
-        self.assertEqual(str(self.payload.absolute()), compact["snapshot_archive"])
-        for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", '"snapshots"'):
+        self.assertLess(len(content.encode()), 1500)
+        self.assertIn(
+            f"{self.root}/src/space name.lua:17-19 (old; staged; snapshot changed; "
+            "block columns 17:1+2-6, 18:3-8, 19:2+1-2+3; tabstop 4)\nKeep the boundary check", content)
+        self.assertIn("Columns are 1-based bytes", content)
+        self.assertIn("an end offset is the first excluded cell", content)
+        self.assertTrue(content.endswith(str(self.payload.absolute())))
+        for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", "selected α", '"snapshots"', '"comments"'):
             self.assertNotIn(excluded, content)
         self.assertEqual(original, self.payload.read_bytes())
 

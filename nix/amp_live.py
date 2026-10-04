@@ -11,11 +11,9 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
+from harness import GUIDANCE, review_prompt
+
 MAX_BODY = 1024 * 1024
-GUIDANCE = (
-    "The user owns staging. Do not stage, unstage, reset, commit, or push without "
-    "asking. Check current files before editing."
-)
 
 
 def _private(path, directory=False):
@@ -117,28 +115,6 @@ def _write_private(path, value, exclusive=False):
             os.unlink(temporary)
 
 
-def _review_content(payload, archive):
-    comments = []
-    for note in payload["comments"]:
-        comment = {key: note[key] for key in ("file", "side", "line", "line_end", "text") if key in note}
-        snapshot_id = note.get("snapshot_id")
-        snapshot = payload["snapshots"].get(snapshot_id, {})
-        comment["comparison"] = snapshot.get("group", "unknown")
-        comment["snapshot_status"] = payload.get("snapshot_status", {}).get(snapshot_id, "unverified")
-        selection = note.get("selection", {})
-        excerpt = "\n".join(selection.get("text", []))
-        if excerpt:
-            comment["selected_text"] = excerpt[:1000] + ("\n[excerpt truncated]" if len(excerpt) > 1000 else "")
-        comments.append(comment)
-    return (
-        "Address these review annotations. " + GUIDANCE + "\n"
-        "Line ranges refer to the reviewed old/new side, not necessarily today's file. "
-        "Read the referenced files; use the local archive only if historical context is needed.\n\n"
-        + json.dumps({"repository": payload["repository"], "comments": comments,
-                      "snapshot_archive": str(archive.absolute())}, ensure_ascii=False, separators=(",", ":"))
-    )
-
-
 def send(connection_path, expected_thread, submission_path):
     connection_path, desc, port, generation = _load(connection_path)
     canonical_root = os.path.realpath(desc["root"])
@@ -158,7 +134,7 @@ def send(connection_path, expected_thread, submission_path):
     else:
         if not isinstance(payload.get("comments"), list) or not isinstance(payload.get("snapshots"), dict):
             raise ValueError("invalid review submission")
-        content = _review_content(payload, submission_path)
+        content = review_prompt(payload, submission_path)
     request_id = payload["submission_id"]
     request = {"id": request_id, "content": content}
     body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()

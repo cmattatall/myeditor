@@ -157,7 +157,8 @@ so changing your system's packages does not silently change this editor.
    **:WriteFeedback** is an alias. Unsaved annotation text is never included.
    With no receiver configured, feedback is queued locally only. Use
    **d** on an annotated source line to delete its note (choose from a picker
-   if several overlap). **Space c**, **:annotations list** or **:al** opens a
+   if several overlap). Notes use a small orange icon and orange text below
+   the source range, without a label or border. **@**, **:annotations list** or **:al** opens a
    fuzzy picker over filenames and note text; Enter jumps to the note, then
    **i** edits it. **} / {** or **:annotations next** / **prev** cycle through
    saved notes from tree/diff panes; counts work (**3}**). Ordinary files and
@@ -244,8 +245,8 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space p / `:Commands` | Search native and plugin commands |
 | i/a/o/O/I/A/c/r/R/x/p… | Edit annotation rather than source |
 | d in source pane | Delete annotation covering cursor; picker if several overlap |
-| Visual selection, then i or Space c | Comment on exact selection |
-| Space c / `:annotations list` / `:al` | Fuzzy-search annotations; Enter jumps, i edits |
+| Visual selection, then a (also i or Space c) | Comment on the entire character/line/block selection |
+| @ / `:annotations list` / `:al` | Fuzzy-search annotations; Enter jumps, i edits |
 | } / { or `:annotations next` / `prev` | Next/previous saved annotation; accepts counts |
 | `:annotations new` | Create a separate note at the cursor |
 | s in a source pane | Stage/unstage the Git hunk containing the cursor |
@@ -324,12 +325,15 @@ its installer, and tests. It publishes a private live registry at
 and does not discover the old revdiff registry. Feedback starts with the
 tool-neutral **Review feedback** prefix and preserves the Git safety guidance.
 
-Annotation delivery sends the note, file/line reference, comparison side and
-snapshot status, with at most 1,000 selected-text characters per note. It does
-not paste complete old/new files or patches into Amp. Full immutable payloads
-remain in the local outbox; the message includes their archive path for optional
-historical lookup. This formatting happens in the editor bridge, not the plugin,
-so updating the editor is sufficient; no plugin reload is needed for this change.
+Built-in Amp and Claude annotation delivery uses readable text: a short prelude,
+an absolute file/range reference followed by each note, then a safety epilogue.
+References include the old/new side, Git group, and a warning for changed or
+unverified snapshots. Character selections include byte columns; block selections
+include per-line column ranges and partial-tab offsets. Source excerpts and JSON
+are not pasted into the conversation. Full immutable payloads remain in the local
+outbox, referenced by path for optional historical lookup. Custom receivers still
+get the full JSON payload. Formatting happens in the editor adapters, not the Amp
+plugin, so updating the editor is sufficient; no plugin reload is needed.
 
 For Home Manager, enable the plugin alongside the editor:
 

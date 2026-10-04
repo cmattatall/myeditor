@@ -87,9 +87,14 @@ the remaining view toggles, filters, and general commands in the revdiff fork.
 
 ## Live harness steering
 
-Live Amp feedback sends annotations, file/line references, snapshot status, and
-at most 1,000 selected-text characters per note. Full old/new files and patches
-stay in the local outbox, referenced by archive path rather than pasted into Amp.
+Built-in harnesses receive readable review messages: a short prelude, an
+absolute file/range reference followed by each note, and a safety epilogue.
+References retain old/new side, Git group, and stale-snapshot warnings.
+Visual **a** annotates the whole character, line, or block selection; column
+ranges and partial-tab offsets accompany character/block references.
+Full source, selected text, and patches stay in the local outbox, referenced
+by archive path rather than pasted into the conversation. Custom receivers
+still receive the complete JSON payload.
 
 General-message drafts clear after accepted/completed delivery, including the
 open `:harness send` window. Success updates the status bar quietly, without a
@@ -105,7 +110,9 @@ re-entering Review, but a fresh editor process always starts without notes.
 Submitted payloads and receipts remain in the outbox for inspection/retry.
 
 Closing an annotation with `:q` discards edits since its last write; `:wq`
-saves locally and closes. **Space c** / `:annotations list` / `:al` opens a fuzzy
+saves locally and closes. Notes appear below their source range as a small
+orange icon and orange text, without a label or border.
+**@** / `:annotations list` / `:al` opens a fuzzy
 picker over filenames and note text; Enter jumps to the note. **i** on an
 annotated source line edits that note (choose if several overlap), preserving
 its ID and anchor. **} / {** or `:annotations next` / `prev` cycle through saved

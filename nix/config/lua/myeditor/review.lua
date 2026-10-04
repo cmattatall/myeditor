@@ -7,6 +7,7 @@ local selection = require("myeditor.selection")
 local tree_ns = api.nvim_create_namespace("myeditor.tree")
 local active_ns = api.nvim_create_namespace("myeditor.active-file")
 local hunk_ns = api.nvim_create_namespace("myeditor.hunk")
+local annotation_ns = api.nvim_create_namespace("myeditor.annotations")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 local saved_guicursor
 
@@ -150,6 +151,7 @@ end
 local function wrap_comment(text, width)
 	local lines = {}
 	for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+		line = vim.fn.strtrans(line)
 		while vim.fn.strdisplaywidth(line) > width do
 			local count = 1
 			while vim.fn.strdisplaywidth(vim.fn.strcharpart(line, 0, count + 1)) <= width do
@@ -160,30 +162,60 @@ local function wrap_comment(text, width)
 		end
 		table.insert(lines, line)
 	end
-	return table.concat(lines, "\n")
+	return lines
+end
+
+local function opposite_line(line, side, changes)
+	local offset = 0
+	for _, change in ipairs(changes) do
+		local source = change[side == "old" and "original" or "modified"]
+		local target = change[side == "old" and "modified" or "original"]
+		if line < source.start_line then
+			break
+		end
+		if line < source.end_line then
+			return target.start_line + math.min(line - source.start_line, target.end_line - target.start_line - 1)
+		end
+		offset = target.end_line - source.end_line
+	end
+	return line + offset
 end
 
 local function render_comments()
 	local s = state()
+	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
+		api.nvim_buf_clear_namespace(buf, annotation_ns, 0, -1)
+	end
 	if not s.current or not api.nvim_win_is_valid(s.new_win) then
 		return
 	end
-	local comments = {}
-	for _, comment in ipairs(s.comments) do
-		if comment.snapshot_id == s.current.id then
-			local win = comment.side == "old" and s.old_win or s.new_win
-			local width = api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff - 4
-			local rendered = vim.deepcopy(comment)
-			rendered.text = wrap_comment(comment.text, math.max(20, width))
-			table.insert(comments, rendered)
-		end
+	local function place(buf, line, lines, priority)
+		api.nvim_buf_set_extmark(buf, annotation_ns, math.max(0, math.min(line, api.nvim_buf_line_count(buf)) - 1), 0, {
+			virt_lines = lines,
+			virt_lines_above = line < 1,
+			priority = priority,
+		})
 	end
-	require("review.store").comments = { [s.current.path] = comments }
-	local marks = require("review.marks")
-	marks.render_for_buffer(s.old_buf, "old", s.current.path)
-	marks.render_for_buffer(s.new_buf, "new", s.current.path)
-	if s.old_win then
-		marks.align_buffers(s.old_buf, s.new_buf, s.current.path, s.current.path)
+	for i, comment in ipairs(s.comments) do
+		if comment.snapshot_id == s.current.id and (comment.side ~= "old" or s.old_win) then
+			local old = comment.side == "old"
+			local win = old and s.old_win or s.new_win
+			local width = math.max(1, api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff - 2)
+			local lines, padding = {}, {}
+			for row, text in ipairs(wrap_comment(comment.text, width)) do
+				lines[row] = { { (row == 1 and "● " or "  ") .. text, "ReviewAnnotation" } }
+				padding[row] = {}
+			end
+			place(old and s.old_buf or s.new_buf, comment.line_end, lines, 250 + i)
+			if s.old_win then
+				place(
+					old and s.new_buf or s.old_buf,
+					opposite_line(comment.line_end, comment.side, s.diff.changes),
+					padding,
+					250 + i
+				)
+			end
+		end
 	end
 	vim.cmd.redrawstatus()
 end
@@ -1205,19 +1237,18 @@ function M.open()
 			end, "Comment instead of editing code")
 		end
 		map(buf, "n", "d", M.delete_comment, "Delete annotation on this line")
-		map(buf, "x", "i", function()
-			M.compose(true)
-		end, "Comment on exact selection")
-		map(buf, "x", "<leader>c", function()
-			M.compose(true)
-		end, "Comment on exact selection")
+		for _, key in ipairs({ "a", "i", "<leader>c" }) do
+			map(buf, "x", key, function()
+				M.compose(true)
+			end, "Comment on exact selection")
+		end
 	end
 	for _, buf in ipairs({ s.tree_buf, s.old_buf, s.new_buf }) do
 		map_hunks(buf)
 		map_staging(buf)
 		map(buf, "n", "<leader>R", M.refresh, "Refresh snapshot")
 		map(buf, "n", "<leader>q", M.leave, "Leave Review")
-		map(buf, "n", "<leader>c", M.list_comments, "Find/jump to annotations")
+		map(buf, "n", "@", M.list_comments, "Find/jump to annotations")
 		for key, direction in pairs({ ["}"] = 1, ["{"] = -1 }) do
 			map(buf, "n", key, function()
 				for _ = 1, vim.v.count1 do
@@ -1272,7 +1303,8 @@ function M.setup()
 	api.nvim_set_hl(0, "ReviewUnstaged", { fg = palette.gold, bg = palette.surface, bold = true })
 	api.nvim_set_hl(0, "ReviewActiveFile", { bg = palette.highlight_med, bold = true })
 	api.nvim_set_hl(0, "ReviewHunk", { fg = palette.gold, bold = true })
-	local function tree_highlights()
+	local function review_highlights()
+		api.nvim_set_hl(0, "ReviewAnnotation", { fg = "#ff9e64" })
 		api.nvim_set_hl(0, "ReviewTreeSelection", { fg = palette.text, bg = palette.highlight_high, bold = true })
 		api.nvim_set_hl(
 			0,
@@ -1280,8 +1312,8 @@ function M.setup()
 			{ fg = palette.highlight_high, bg = palette.highlight_high, blend = 100 }
 		)
 	end
-	tree_highlights()
-	api.nvim_create_autocmd("ColorScheme", { callback = tree_highlights })
+	review_highlights()
+	api.nvim_create_autocmd("ColorScheme", { callback = review_highlights })
 	api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
 		callback = function()
 			local s = M.state
