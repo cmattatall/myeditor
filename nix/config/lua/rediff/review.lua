@@ -905,7 +905,6 @@ function M.compose(visual, keys, comment)
 			if M.state == s and s.draft and s.composer then
 				s.draft.text = table.concat(api.nvim_buf_get_lines(composer, 0, -1, false), "\n")
 				s.draft.saved = not vim.bo[composer].modified
-				save()
 			end
 		end,
 	})

@@ -7,7 +7,8 @@ for modal editing and agent-assisted code review.
 
 The root flake packages the Home Manager module, editor configuration, and tests
 under [`nix/`](nix/), plus harness plugins under [`plugins/`](plugins/).
-Consume this repository as a flake input or vendor both directories with the flake.
+Consume this repository as a flake input or vendor both directories with the flake
+and [`LICENSE`](LICENSE).
 
 ```sh
 nix run path:.
@@ -53,3 +54,7 @@ Review bar shows the branch or detached commit. Use `:harness use amp`, then
 `:worktree new` to create a checkout with its own harness process.
 `:worktree list` / `:worktree switch` navigates existing checkouts. See the
 [feature list](FEATURES.md) for implemented behavior and remaining gaps.
+
+Licensed under the [MIT License](LICENSE).
+
+Third-party code retains its existing copyright notices and licenses.

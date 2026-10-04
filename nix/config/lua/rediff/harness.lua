@@ -311,7 +311,6 @@ function M.compose()
 		local function capture()
 			if api.nvim_buf_is_loaded(buf) then
 				s.message = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-				save(s)
 			end
 		end
 		local function reject()
@@ -470,8 +469,8 @@ function M.setup()
 			for _, s in pairs(sessions) do
 				if s.buf and api.nvim_buf_is_loaded(s.buf) then
 					s.message = table.concat(api.nvim_buf_get_lines(s.buf, 0, -1, false), "\n")
-					save(s)
-					-- A locally persisted draft need not be sent to allow :q/:qa.
+					save(s) -- Also removes legacy persisted drafts without writing on every edit.
+					-- Session-only drafts need not be sent to allow :q/:qa.
 					-- Include hidden composers, which otherwise cause E162 at exit.
 					vim.bo[s.buf].modified = false
 				end

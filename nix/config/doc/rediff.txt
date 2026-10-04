@@ -224,6 +224,8 @@ Failed, pending and local-only batches stay in this process. Leaving/re-entering
 Review retains drafts; exiting discards them without an unsent-note quit guard.
 Every fresh editor starts empty. Submitted payloads/receipts persist in the outbox.
 
+You can keep editing while the agent responds.
+One delivery per worktree may be in flight. Typing drafts does not write to disk.
 Keep the editor running during delivery. "accepted" means queued; "completed"
 means the turn finished, not that its changes are correct. Inspect the session
 and receipt before retrying uncertain delivery. Retries use the original payload.

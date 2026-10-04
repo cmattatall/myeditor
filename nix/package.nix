@@ -55,6 +55,7 @@ stdenv.mkDerivation {
   installPhase = ''
     mkdir -p "$out/share/rediff" "$out/bin"
     cp -R . "$out/share/rediff/"
+    install -Dm644 ${../LICENSE} "$out/share/licenses/rediff/LICENSE"
     ${neovim}/bin/nvim --headless -u NONE -i NONE -n \
       -c "helptags $out/share/rediff/doc" -c 'qa!'
     makeWrapper ${neovim}/bin/nvim "$out/bin/rediff" \
@@ -87,6 +88,7 @@ stdenv.mkDerivation {
   '';
   meta = {
     description = "Read agent diffs with a portable modal review editor";
+    license = lib.licenses.mit;
     mainProgram = "rediff";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };

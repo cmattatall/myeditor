@@ -109,6 +109,113 @@ class EditorUI(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
 
+    def test_harness_delivery_keeps_editor_responsive(self):
+        editor = self.launch(self.root)
+        editor.exec_lua(
+            STATE
+            + """
+            require('rediff.live').stop(s)
+            local feedback = require('rediff.feedback')
+            local receiver = ...
+            feedback.settings = function()
+                return {feedback_command={vim.v.progpath,'--headless','-u','NONE','-l',receiver,'wait'}}
+            end
+            r.select_harness('custom')
+            local write = feedback.write
+            vim.g.feedback_writes = 0
+            feedback.write = function(...)
+                vim.g.feedback_writes = vim.g.feedback_writes + 1
+                return write(...)
+            end
+            """,
+            str(Path(FIXTURE).with_name("receiver.lua")),
+        )
+        for kind in ("message", "annotation"):
+            with self.subTest(kind=kind):
+                if kind == "message":
+                    self.keys(editor, ":harness send<CR>")
+                else:
+                    self.lua(
+                        editor,
+                        "vim.api.nvim_set_current_win(s.new_win); "
+                        "vim.api.nvim_win_set_cursor(0,{5,0}); r.compose()",
+                    )
+                    self.keys(editor, "<Esc>")
+                writes = self.lua(editor, "return vim.g.feedback_writes")
+                self.keys(editor, f"iPending {kind}<Esc>")
+                self.assertEqual(
+                    writes, self.lua(editor, "return vim.g.feedback_writes")
+                )
+                if kind == "annotation":
+                    self.keys(editor, ":w<CR>")  # Save locally first.
+                    self.wait_for(editor, "s.composer == nil")
+                self.lua(
+                    editor,
+                    "vim.g.delivery_tick = false; "
+                    "vim.defer_fn(function() vim.g.delivery_tick = true end, 50)",
+                )
+                self.keys(editor, ":w<CR>")
+                path = self.lua(
+                    editor, "return require('rediff.harness').get(s.root).last.path"
+                )
+                try:
+                    self.wait_for(
+                        editor,
+                        "vim.fn.filereadable(require('rediff.harness').get(s.root).last.path .. '.calls') == 1",
+                    )
+                    self.assertTrue(
+                        self.lua(
+                            editor, "return require('rediff.feedback').busy(s.root)"
+                        )
+                    )
+                    self.assertTrue(self.lua(editor, "return vim.g.delivery_tick"))
+                    if kind == "message":
+                        self.keys(editor, "A with newer edits<Esc>")
+                        self.assertEqual(
+                            ["Pending message with newer edits"],
+                            list(editor.current.buffer[:]),
+                        )
+                        self.keys(editor, "<Tab>")
+                        self.assertTrue(
+                            self.lua(
+                                editor,
+                                "return vim.api.nvim_get_current_win() == s.tree_win",
+                            )
+                        )
+                    else:
+                        self.keys(editor, "gg3j")
+                        self.assertEqual(
+                            4,
+                            self.lua(
+                                editor, "return vim.api.nvim_win_get_cursor(0)[1]"
+                            ),
+                        )
+                        self.assertEqual(1, self.lua(editor, "return #s.comments"))
+                    self.assertTrue(
+                        self.lua(
+                            editor, "return require('rediff.feedback').busy(s.root)"
+                        )
+                    )
+                finally:
+                    Path(path + ".release").touch()
+                self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
+                self.assertEqual(
+                    "completed",
+                    self.lua(
+                        editor, "return require('rediff.harness').get(s.root).delivery"
+                    ),
+                )
+                if kind == "message":
+                    self.assertEqual(
+                        "Pending message with newer edits",
+                        self.lua(
+                            editor,
+                            "return require('rediff.harness').get(s.root).message",
+                        ),
+                    )
+                else:
+                    self.assertEqual(0, self.lua(editor, "return #s.comments"))
+
     def test_harness_use_discovers_and_picks_live_session(self):
         editor = self.launch(self.root)
         self.lua(

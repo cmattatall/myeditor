@@ -129,8 +129,8 @@ pass it through `extraSpecialArgs` if your home module is a separate file.
 Then run your usual `home-manager switch --flake ...` (or your existing
 NixOS/nix-darwin rebuild command if Home Manager is integrated there).
 
-To vendor this instead, copy the root `flake.nix`, `flake.lock`, and `install.sh`
-alongside the complete `nix/` and `plugins/` directories into your dotfiles as
+To vendor this instead, copy the root `flake.nix`, `flake.lock`, `install.sh`, and
+`LICENSE` alongside the complete `nix/` and `plugins/` directories into your dotfiles as
 `rediff/`, preserving their layout, and use:
 
 ```nix
