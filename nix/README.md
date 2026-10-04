@@ -22,7 +22,7 @@ nix run 'github:cmattatall/myeditor?dir=nix'
 Run from a Git worktree to review its changes. Arguments are passed to Neovim:
 
 ```sh
-nix run path:/path/to/myeditor/nix -- src/main.lua
+nix run path:/path/to/rediff/nix -- src/main.lua
 ```
 
 Interactive launches inside a Git worktree open Review automatically, focused
@@ -40,8 +40,9 @@ Vim bindings remain unchanged. Typed **:ft** expands to `:Explorer` and focuses
 the Git sidebar in Review; scripts should use `:Explorer` directly.
 
 The package defines `rediff`; Home Manager can also expose it as `nvim`.
-`myeditor` remains a compatibility alias. Both use `NVIM_APPNAME=myeditor`
-and a configuration in the Nix store, preserving existing settings and outboxes.
+It uses `NVIM_APPNAME=rediff` and a configuration in the Nix store.
+The renamed profile starts fresh: old settings, outboxes, and bindings are not
+migrated or deleted. Reconfigure your harness and reconnect after upgrading.
 The theme is **Rosé Pine (main)**, bundled through the pinned nixpkgs.
 Existing Neovim configurations and plugins are not modified.
 Targets are Apple Silicon macOS and ARM64/x86-64
@@ -111,7 +112,8 @@ Add its module and enable it in your Home Manager configuration:
 }
 ```
 
-Existing `programs.myeditor` options remain compatible aliases.
+Use `programs.rediff` and `inputs.rediff` when upgrading an existing configuration.
+The GitHub URLs above retain the repository's current name until it is renamed.
 `nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
 they opt in. Disable any other Home Manager `nvim` package to avoid a profile
 collision. If Home Manager does not manage your shell, source
@@ -283,7 +285,7 @@ Bare **s/S** retains native substitution inside annotations and ordinary files.
 :worktree switch
 :worktree switch feature-branch
 :worktree new
-:worktree new feature-branch ../myeditor-feature
+:worktree new feature-branch ../rediff-feature
 ```
 
 `list` and `switch` open a chooser showing paths and branches; `switch` also
@@ -319,21 +321,24 @@ includes the adapters, not the agent CLIs or credentials.
 
 ### Steer a live Amp process
 
-This repository owns the **anthrodiff** Amp plugin in `amp/anthrodiff.ts`,
+This repository owns the **rediff** Amp plugin in `amp/rediff.ts`,
 its installer, and tests. It publishes a private live registry at
-`~/.cache/anthrodiff/amp`. It has no runtime dependency on the revdiff fork
-and does not discover the old revdiff registry. Feedback starts with the
-tool-neutral **Review feedback** prefix and preserves the Git safety guidance.
+`~/.cache/rediff/amp`. It has no runtime dependency on the revdiff fork
+and does not discover older registries. The plugin forwards the editor's
+content unchanged, without adding instructions.
 
-Built-in Amp and Claude annotation delivery uses readable text: a short prelude,
-an absolute file/range reference followed by each note, then a safety epilogue.
-References include the old/new side, Git group, and a warning for changed or
-unverified snapshots. Character selections include byte columns; block selections
-include per-line column ranges and partial-tab offsets. Source excerpts and JSON
-are not pasted into the conversation. Full immutable payloads remain in the local
-outbox, referenced by path for optional historical lookup. Custom receivers still
-get the full JSON payload. Formatting happens in the editor adapters, not the Amp
-plugin, so updating the editor is sufficient; no plugin reload is needed.
+Built-in Amp and Claude delivery uses JSON: `rules` first, `repository` and
+`snapshot_archive` context next, then `annotations`. General messages use
+`rules`, `repository`, and `message`, without review context. Rules appear once;
+there is no prose prefix or epilogue. Ask-first defaults explicitly permit actions
+the user authorizes in the feedback, including commits, pushes, and pull requests.
+Annotations retain absolute file paths, old/new side, line ranges, Git group,
+snapshot identity/status, and exact selection spans. Full files, patches and
+selected source text stay in the local outbox, referenced by archive path.
+Custom receivers still get the full original payload.
+
+To upgrade from the old prose format, update the editor and bundled Amp plugin,
+reload Amp's plugins, then reconnect. Older plugins still prepend the old guidance.
 
 For Home Manager, enable the plugin alongside the editor:
 
@@ -345,11 +350,9 @@ programs.rediff = {
 ```
 
 `ampPlugin.enable` also defaults to true when `harness = "amp"`. The plugin
-is installed at `~/.config/amp/plugins/anthrodiff.ts`; Amp itself and its
-authentication remain separate. Home Manager refuses activation while a
-user-local revdiff plugin exists. Disable that old plugin first, and move
-aside any manually installed anthrodiff copy before giving Home Manager
-ownership. Do not enable another copy in a project or global plugin scope.
+is installed at `~/.config/amp/plugins/rediff.ts`; Amp itself and its
+authentication remain separate. Other plugin files are left untouched.
+Do not enable another copy in a project or global plugin scope.
 
 Without Home Manager, install directly from the editor:
 
@@ -357,9 +360,8 @@ Without Home Manager, install directly from the editor:
 :harness install amp
 ```
 
-This asks for confirmation before installing the bundled **anthrodiff plugin**
-(not the Amp CLI). If the old user-local revdiff plugin exists, the confirmation
-explicitly offers to back it up and replace it. Cancel is the default. No Git
+This asks for confirmation before installing the bundled **rediff plugin**
+(not the Amp CLI). Cancel is the default. No Git
 repository is required. With a selected live Amp target, the confirmation also
 authorizes a small request to that thread to call `reload_plugins` after a
 successful installation. Amp's plugin API has no direct reload method, so this
@@ -372,18 +374,15 @@ The same installer can be run from this repository's root:
 
 ```sh
 bash nix/amp/install.sh
-# To explicitly replace an existing user-local revdiff.ts instead:
-bash nix/amp/install.sh --replace-revdiff
 ```
 
-Replacement moves the old regular file to
-`~/.config/amp/plugin-backups/revdiff.ts` without overwriting existing backups.
-The installer refuses symlinks (including Home Manager-owned files). It installs
+The installer only writes `rediff.ts` and refuses to replace symlinks
+(including Home Manager-owned files) or non-files. It installs
 only the plugin; use Nix for the editor. Shell and Home Manager installations
 still require a manual plugin reload. Reload invalidates the live connection;
 use `:harness connect amp` again once Amp has registered the new endpoint.
-In Amp's command palette, **anthrodiff: connect** shows connection instructions;
-**anthrodiff: disconnect** stops this thread's endpoint. Session/agent start
+In Amp's command palette, **rediff: connect** shows connection instructions;
+**rediff: disconnect** stops this thread's endpoint. Session/agent start
 registers silently by default.
 
 Relaunch rediff using the updated package, then connect in the same checkout:
@@ -481,7 +480,7 @@ finished, not that every comment was resolved; review its result and any
 `permission_denials` in the outbox receipt. Agent credentials never belong in
 Nix configuration, command arguments, or this repository.
 
-Without Home Manager, create `~/.config/myeditor/settings.json` (respecting
+Without Home Manager, create `~/.config/rediff/settings.json` (respecting
 `XDG_CONFIG_HOME`):
 
 ```json
@@ -543,7 +542,7 @@ to be sent to another agent; verify the binding before submitting.
 ## Persistence and boundaries
 
 - Outbox payloads/receipts live under `stdpath("state")/reviews/<repository-hash>/`,
-  normally `~/.local/state/myeditor/reviews/`. Files are private (0600), with
+  normally `~/.local/state/rediff/reviews/`. Files are private (0600), with
   atomic replacement. Annotation and message drafts live only in this editor
   process; closing and reopening their views retains them, but quitting discards
   them. Reviewed marks and harness bindings persist. Drafts, snapshots and agent
@@ -575,7 +574,7 @@ From inside this directory, use `path:.` instead; format Nix files there with
 `nix fmt -- *.nix`. `flake check` builds a sample
 Home Manager generation without activating it, runs Neovim integration tests
 against a disposable Git repository, tests the harness adapters, and exercises
-the anthrodiff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
+the rediff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
 It does not contact a live LLM or alter your Home Manager profile.
 
 Update nixpkgs/Home Manager with `nix flake update --flake path:./nix` and rerun

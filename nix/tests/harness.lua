@@ -1,22 +1,22 @@
 local tests = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 
 return function(root, equal, fails, keys)
-	local harness = require("myeditor.harness")
-	local feedback = require("myeditor.feedback")
-	local review = require("myeditor.review")
+	local harness = require("rediff.harness")
+	local feedback = require("rediff.feedback")
+	local review = require("rediff.review")
 	local s, session = review.state, harness.get(root)
 	local thread = "T-00000000-1111-2222-3333-444444444444"
-	equal(1, vim.fn.executable("myeditor-install-amp-plugin"), "Amp installer is packaged")
+	equal(1, vim.fn.executable("rediff-install-amp-plugin"), "Amp installer is packaged")
 	local home, confirm, notify = vim.env.HOME, vim.fn.confirm, vim.notify
 	local install_home = vim.fn.tempname()
 	vim.env.HOME = install_home
-	local plugin = install_home .. "/.config/amp/plugins/anthrodiff.ts"
-	local notices, choice, prompt = {}, 2, nil
+	local plugin = install_home .. "/.config/amp/plugins/rediff.ts"
+	local notices, choice = {}, 2
 	vim.notify = function(message)
 		table.insert(notices, message)
 	end
 	vim.fn.confirm = function(message, _, default)
-		prompt = message
+		equal(true, message:find("rediff.ts", 1, true) ~= nil, "Confirmation names the installed plugin")
 		equal(2, default, "Plugin installation defaults to cancel")
 		return choice
 	end
@@ -30,22 +30,8 @@ return function(root, equal, fails, keys)
 			return #notices > 0
 		end))
 		equal(true, notices[1]:find("Installed", 1, true) ~= nil, "Installer reports success")
-		local bundled = vim.env.MYEDITOR_RUNTIME .. "/amp/anthrodiff.ts"
+		local bundled = vim.env.REDIFF_RUNTIME .. "/amp/rediff.ts"
 		equal(vim.fn.readfile(bundled), vim.fn.readfile(plugin), "Editor installs its exact bundled plugin")
-		local legacy = install_home .. "/.config/amp/plugins/revdiff.ts"
-		vim.fn.writefile({ "old plugin" }, legacy)
-		notices = {}
-		vim.cmd("Harness install amp")
-		assert(vim.wait(5000, function()
-			return #notices > 0
-		end))
-		equal(true, prompt:find("old revdiff.ts will be moved", 1, true) ~= nil, "Replacement is explicitly disclosed")
-		equal(0, vim.fn.filereadable(legacy), "Approved replacement removes the old active plugin")
-		equal(
-			{ "old plugin" },
-			vim.fn.readfile(install_home .. "/.config/amp/plugin-backups/revdiff.ts"),
-			"Replacement retains a backup"
-		)
 		vim.fn.delete(plugin)
 		assert(vim.uv.fs_symlink(bundled, plugin))
 		notices = {}
@@ -90,7 +76,7 @@ return function(root, equal, fails, keys)
 		callbacks[2]({ code = 0, stdout = "Installed" })
 		vim.wait(10)
 		equal(
-			{ "myeditor-amp-live", "reload", "/fake/connection.json", thread, root },
+			{ "rediff-amp-live", "reload", "/fake/connection.json", thread, root },
 			calls[3],
 			"Successful install requests reload of the confirmed target"
 		)
@@ -112,7 +98,7 @@ return function(root, equal, fails, keys)
 	session.target = original_target
 	assert(reload_ok, reload_err)
 
-	equal(1, vim.fn.executable("myeditor-amp-live"), "Live adapter is packaged")
+	equal(1, vim.fn.executable("rediff-amp-live"), "Live adapter is packaged")
 	local system, discover, picker = vim.system, nil, nil
 	local fzf = require("fzf-lua")
 	local fzf_exec = fzf.fzf_exec
@@ -120,7 +106,7 @@ return function(root, equal, fails, keys)
 		picker = { items = items, opts = opts }
 	end
 	vim.system = function(argv, opts, callback)
-		equal({ "myeditor-amp-live", "discover", root }, argv, "Connection only discovers in the current root")
+		equal({ "rediff-amp-live", "discover", root }, argv, "Connection only discovers in the current root")
 		equal(root, opts.cwd, "Discovery cwd is the worktree")
 		discover = callback
 	end
@@ -139,7 +125,7 @@ return function(root, equal, fails, keys)
 	)
 	equal(true, review.statusline():find(harness.statusline(root), 1, true) ~= nil, "Review displays harness status")
 	equal(
-		{ "myeditor-amp-live", "send", matches[1].connection, thread },
+		{ "rediff-amp-live", "send", matches[1].connection, thread },
 		feedback.command(s.harness),
 		"Live receiver argv"
 	)
@@ -164,7 +150,7 @@ return function(root, equal, fails, keys)
 		review.statusline():find("harness: amp-live · T-second · idle", 1, true) ~= nil,
 		"Editing also displays the binding"
 	)
-	local git = require("myeditor.git")
+	local git = require("rediff.git")
 	local get_root = git.root
 	git.root = function()
 		error("Status redraw must not run Git")
@@ -178,7 +164,7 @@ return function(root, equal, fails, keys)
 		file = s.current.path,
 		side = "new",
 		snapshot_id = s.current.id,
-		selection = require("myeditor.selection").line(s.new_buf, 5),
+		selection = require("rediff.selection").line(s.new_buf, 5),
 	}, "Unsent review comment")
 	local settings = feedback.settings
 	feedback.settings = function()
@@ -365,7 +351,7 @@ return function(root, equal, fails, keys)
 	local directory = feedback.directory(restart_root)
 	local function reopen(retype, hidden)
 		local child = vim.fn.jobstart(
-			{ vim.fn.exepath("myeditor"), "--embed", "--headless", "-i", "NONE" },
+			{ vim.fn.exepath("rediff"), "--embed", "--headless", "-i", "NONE" },
 			{ rpc = true }
 		)
 		assert(child > 0)
@@ -376,7 +362,7 @@ return function(root, equal, fails, keys)
 			[[
 			local root, retype, hidden = ...
 			vim.cmd.cd(root)
-			require("myeditor.feedback").deliver = function() error("Opening must not send") end
+			require("rediff.feedback").deliver = function() error("Opening must not send") end
 			vim.cmd("Harness send")
 			local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
 			if retype then

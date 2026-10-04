@@ -1,7 +1,7 @@
 local M = {}
 local api = vim.api
 local win, buf
-local namespace = api.nvim_create_namespace("myeditor.cmdline")
+local namespace = api.nvim_create_namespace("rediff.cmdline")
 
 local function hide()
 	if win and api.nvim_win_is_valid(win) then
@@ -79,14 +79,14 @@ local function update()
 		api.nvim_win_set_config(win, config)
 	else
 		win = api.nvim_open_win(buf, false, config)
-		vim.wo[win].winhighlight = "Normal:MyeditorCommandHint,NormalFloat:MyeditorCommandHint"
+		vim.wo[win].winhighlight = "Normal:RediffCommandHint,NormalFloat:RediffCommandHint"
 	end
 	vim.cmd.redraw()
 end
 
 function M.setup()
 	local function highlight()
-		api.nvim_set_hl(0, "MyeditorCommandHint", { link = "Comment" })
+		api.nvim_set_hl(0, "RediffCommandHint", { link = "Comment" })
 	end
 	highlight()
 	api.nvim_create_autocmd("ColorScheme", { callback = highlight })

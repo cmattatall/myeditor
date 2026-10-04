@@ -44,7 +44,7 @@ function M.command(target, settings)
 		return vim.deepcopy(argv)
 	elseif target.name == "amp-live" then
 		assert(target.connection and target.session, "Select a live session with :Harness connect amp")
-		return { "myeditor-amp-live", "send", target.connection, target.session }
+		return { "rediff-amp-live", "send", target.connection, target.session }
 	end
 	assert(target.name == "amp" or target.name == "claude", "Unknown harness: " .. tostring(target.name))
 	assert(
@@ -59,7 +59,7 @@ function M.command(target, settings)
 			assert(#parts[i + 1] == length and parts[i + 1]:match("^%x+$"), "Expected an Amp T-uuid thread ID")
 		end
 	end
-	return { "myeditor-harness", target.name, target.session }
+	return { "rediff-harness", target.name, target.session }
 end
 
 local function canonical(value)

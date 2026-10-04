@@ -1,8 +1,8 @@
 local tests = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
-local git = require("myeditor.git")
-local review = require("myeditor.review")
-local feedback = require("myeditor.feedback")
-local selection = require("myeditor.selection")
+local git = require("rediff.git")
+local review = require("rediff.review")
+local feedback = require("rediff.feedback")
+local selection = require("rediff.selection")
 local root, baseline, changed, run = dofile(tests .. "/fixture.lua").create()
 local assertions = 0
 
@@ -48,7 +48,7 @@ local function test()
 	local index_before = run({ "write-tree" })
 	local layout = vim.fn.winlayout()
 	keys("?")
-	equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Bare help opens editor guide")
+	equal("rediff.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Bare help opens editor guide")
 	equal("editor", vim.api.nvim_win_get_config(0).relative, "Help opens as an overlay")
 	equal(layout, vim.fn.winlayout(), "Help leaves underlying splits unchanged")
 	local guide = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
@@ -66,28 +66,28 @@ local function test()
 	for _, subcommand in ipairs(vim.fn.getcompletion("Harness ", "cmdline")) do
 		equal(true, guide:find(":Harness " .. subcommand, 1, true) ~= nil, "Help documents Harness " .. subcommand)
 	end
-	for tag in guide:gmatch("|(myeditor[%w%-]*)|") do
+	for tag in guide:gmatch("|(rediff[%w%-]*)|") do
 		vim.cmd("help " .. tag)
-		equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Help link resolves: " .. tag)
+		equal("rediff.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Help link resolves: " .. tag)
 	end
-	for _, tag in ipairs({ "rediff", "rediff-commands", "myeditor" }) do
+	for _, tag in ipairs({ "rediff", "rediff-commands" }) do
 		vim.cmd("help " .. tag)
 		equal(
-			"myeditor.txt",
+			"rediff.txt",
 			vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"),
-			"Branded and legacy help resolves: " .. tag
+			"Branded help resolves: " .. tag
 		)
 	end
 	vim.cmd("help motion")
 	equal(1, vim.api.nvim_buf_get_name(0):find(vim.env.VIMRUNTIME, 1, true), "Native help topics remain available")
-	vim.cmd("help myeditor-harness")
-	equal("myeditor.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Editor help tags resolve")
+	vim.cmd("help rediff-harness")
+	equal("rediff.txt", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "Editor help tags resolve")
 	keys("q")
 	equal(original_buf, vim.api.nvim_get_current_buf(), "q dismisses help to the original buffer")
 	keys("A?<Esc>")
 	equal("local M = {}?", vim.api.nvim_get_current_line(), "Insert-mode question mark remains literal")
 	keys("u")
-	require("myeditor.navigation").explorer()
+	require("rediff.navigation").explorer()
 	local tree_win = vim.api.nvim_get_current_win()
 	equal("neo-tree", vim.bo.filetype, "Filesystem explorer is focused")
 	keys("?")
@@ -107,7 +107,7 @@ local function test()
 		keys("?")
 		equal(win, vim.api.nvim_get_current_win(), "Help dismissal restores its invoking pane")
 	end
-	equal(1, vim.fn.executable("myeditor-harness"), "Nix launcher includes its receiver on PATH")
+	equal(1, vim.fn.executable("rediff-harness"), "Nix launcher includes its receiver on PATH")
 	equal("auth.lua", s.current.path, "First changed file")
 	equal(false, vim.bo[s.new_buf].modifiable, "Review code is protected")
 	equal("acwrite", vim.bo[s.new_buf].buftype, "Review write is virtual")
@@ -138,7 +138,7 @@ local function test()
 	fzf.fzf_exec = function(values, options)
 		items, opts = values, options
 	end
-	local navigation = require("myeditor.navigation")
+	local navigation = require("rediff.navigation")
 	navigation.files()
 	equal(3, #items, "Changed-file picker includes every Git entry")
 	local matched = vim.system({ "fzf", "--filter", "plnmd" }, { stdin = table.concat(items, "\n"), text = true })
@@ -196,7 +196,7 @@ local function test()
 	}, sidebar(), "Sidebar contains Git entries only, without reviewed icons or help")
 	local headers = vim.api.nvim_buf_get_extmarks(
 		s.tree_buf,
-		vim.api.nvim_get_namespaces()["myeditor.tree"],
+		vim.api.nvim_get_namespaces()["rediff.tree"],
 		0,
 		-1,
 		{ details = true }
@@ -211,7 +211,7 @@ local function test()
 	equal(s.tree_win, vim.api.nvim_get_current_win(), "Hunk navigation retains sidebar focus")
 	local markers = vim.api.nvim_buf_get_extmarks(
 		s.new_buf,
-		vim.api.nvim_get_namespaces()["myeditor.hunk"],
+		vim.api.nvim_get_namespaces()["rediff.hunk"],
 		0,
 		-1,
 		{ details = true }
@@ -375,7 +375,7 @@ local function test()
 	vim.cmd("ReviewRetry")
 	equal(
 		stale_path,
-		require("myeditor.harness").get(root).last.path,
+		require("rediff.harness").get(root).last.path,
 		"ReviewRetry sends the saved payload, not edited drafts"
 	)
 	local binary = assert(vim.uv.fs_open(root .. "/auth.lua", "w", 384))
@@ -487,7 +487,7 @@ local function test()
 	review.archive()
 
 	local thread = "T-00000000-1111-2222-3333-444444444444"
-	local amp = { "myeditor-harness", "amp", thread }
+	local amp = { "rediff-harness", "amp", thread }
 	vim.cmd("ReviewHarness amp " .. thread)
 	equal(amp, feedback.command(s.harness), "Command binds Amp to an explicit thread")
 	review.leave()
@@ -502,7 +502,7 @@ local function test()
 		feedback.command(nil, { harness = "amp" })
 	end, "Select a session")
 	equal(
-		{ "myeditor-harness", "claude", "other-session" },
+		{ "rediff-harness", "claude", "other-session" },
 		feedback.command({ name = "claude", session = "other-session" }),
 		"Claude uses its own adapter"
 	)
@@ -524,7 +524,7 @@ local function test()
 				root,
 				{ { text = "same feedback", side = "old" } },
 				{},
-				{ "myeditor-harness", "amp", "another-thread" }
+				{ "rediff-harness", "amp", "another-thread" }
 			),
 		"Changing target cannot reuse an earlier receipt"
 	)

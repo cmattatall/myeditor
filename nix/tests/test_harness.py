@@ -78,9 +78,11 @@ class HarnessReceiverTests(unittest.TestCase):
             ],
             run.call_args.args[0],
         )
-        self.assertIn(
-            f"{self.temp.name}/file with spaces.go:177 (new; untracked)\nUse sentinel errors.",
-            run.call_args.kwargs["input"],
+        note = json.loads(run.call_args.kwargs["input"])["annotations"][0]
+        self.assertEqual(f"{self.temp.name}/file with spaces.go", note["file"])
+        self.assertEqual(
+            (177, 177, "Use sentinel errors."),
+            (note["line"], note["line_end"], note["text"]),
         )
         self.assertNotIn("UNRELATED SOURCE", run.call_args.kwargs["input"])
         self.assertEqual(0o600, self.receipt.stat().st_mode & 0o777)
@@ -102,7 +104,7 @@ class HarnessReceiverTests(unittest.TestCase):
                     "side": "new",
                     "line": 21,
                     "line_end": 22,
-                    "text": "Second note",
+                    "text": "Fix this, commit the change, push it, and open a PR.",
                     "snapshot_id": "s",
                     "selection": {
                         "kind": "character",
@@ -116,22 +118,37 @@ class HarnessReceiverTests(unittest.TestCase):
             "snapshots": {"s": {"group": "staged"}},
             "snapshot_status": {"s": "changed"},
         }
-        prompt = receiver.review_prompt(payload, self.payload)
-        sections = prompt.split("\n\n")
+        prompt = receiver.feedback_prompt(payload, self.payload)
+        message = json.loads(prompt)  # Reject prose before or after the JSON.
         self.assertEqual(
-            "Address these review annotations. Locations refer to the reviewed versions.",
-            sections[0],
+            ["rules", "repository", "snapshot_archive", "annotations"], list(message)
+        )
+        self.assertEqual(str(self.payload.absolute()), message["snapshot_archive"])
+        self.assertEqual(1, prompt.count('"rules":'))
+        self.assertEqual(
+            "The user owns staging. Ask before staging, unstaging, resetting, committing, "
+            "pushing, or opening a pull request unless the user explicitly authorizes that "
+            "action in this feedback. Explicit authorization covers only the named actions; "
+            "do not ask again for those actions.",
+            message["rules"][0],
         )
         self.assertEqual(
-            "/checkout with spaces/old.go:8-12 (old; staged; snapshot changed)\nFirst note\nPreserve the second paragraph.",
-            sections[1],
+            [
+                {
+                    "file": "/checkout with spaces/" + note["file"],
+                    "side": note["side"],
+                    "line": note["line"],
+                    "line_end": note["line_end"],
+                    "snapshot_id": "s",
+                    "comparison": "staged",
+                    "snapshot_status": "changed",
+                    **({"selection": note["selection"]} if "selection" in note else {}),
+                    "text": note["text"],
+                }
+                for note in payload["comments"]
+            ],
+            message["annotations"],
         )
-        self.assertEqual(
-            "/checkout with spaces/α.go:21:5-22:9 (new; staged; snapshot changed; character selection)\nSecond note",
-            sections[2],
-        )
-        self.assertTrue(sections[3].startswith(receiver.GUIDANCE))
-        self.assertTrue(sections[3].endswith(str(self.payload.absolute())))
 
     def test_uncertain_delivery_is_not_reexecuted(self):
         response = subprocess.CompletedProcess([], 1, "", "connection lost")
@@ -151,14 +168,27 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertFalse(self.receipt.exists())
 
     def test_general_message_does_not_send_review_context(self):
-        self.payload.write_text(json.dumps({"submission_id": "message-1", "message": "Explain the design"}))
-        response = subprocess.CompletedProcess([], 0, '{"subtype":"success","result":"explained","is_error":false}', "")
+        instruction = "Commit this change and open a PR without asking again."
+        self.payload.write_text(
+            json.dumps(
+                {
+                    "submission_id": "message-1",
+                    "repository": self.temp.name,
+                    "message": instruction,
+                }
+            )
+        )
+        response = subprocess.CompletedProcess(
+            [], 0, '{"subtype":"success","result":"explained","is_error":false}', ""
+        )
         with patch.object(receiver.subprocess, "run", return_value=response) as run:
             self.assertEqual("completed", self.invoke()["status"])
-        prompt = run.call_args.kwargs["input"]
-        self.assertTrue(prompt.startswith("Explain the design\n\n"))
-        self.assertNotIn("code-review", prompt)
-        self.assertIn("user owns staging", prompt)
+        prompt = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(["rules", "repository", "message"], list(prompt))
+        self.assertEqual(instruction, prompt["message"])
+        self.assertIn(
+            "unless the user explicitly authorizes that action", prompt["rules"][0]
+        )
 
     def amp_output(self, **overrides):
         result = {
@@ -208,9 +238,11 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertEqual("batch-1", first["submission_id"])
         self.assertEqual("Fixed expiry; tests passed.", first["result"])
         self.assertEqual(["shell_command"], first["permission_denials"])
-        self.assertIn(
-            f"{self.temp.name}/file with spaces.go:177 (new; untracked)\nUse sentinel errors.",
-            run.call_args.kwargs["input"],
+        note = json.loads(run.call_args.kwargs["input"])["annotations"][0]
+        self.assertEqual(f"{self.temp.name}/file with spaces.go", note["file"])
+        self.assertEqual(
+            (177, 177, "Use sentinel errors."),
+            (note["line"], note["line_end"], note["text"]),
         )
         self.assertNotIn("UNRELATED SOURCE", run.call_args.kwargs["input"])
         self.assertEqual(

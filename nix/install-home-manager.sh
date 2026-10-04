@@ -14,7 +14,7 @@ esac
 if [ "$#" -gt 1 ]; then echo "Expected at most one argument" >&2; exit 2; fi
 
 source_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-export MYEDITOR_FLAKE="path:$source_dir"
+export REDIFF_FLAKE="path:$source_dir"
 export USER
 USER=$(id -un)
 : "${HOME:?HOME must be set}"
@@ -25,8 +25,10 @@ if [ "$mode" = --switch ]; then
         "/nix/var/nix/profiles/per-user/$USER/home-manager" \
         "/etc/profiles/per-user/$USER"; do
         if [ -e "$profile" ] || [ -L "$profile" ]; then
-            marker="$profile/home-files/.config/myeditor/standalone-owner"
-            if [ ! -f "$marker" ] || [ "$(cat "$marker")" != myeditor-standalone-v1 ]; then
+            marker="$profile/home-files/.config/rediff/standalone-owner"
+            old_marker="$profile/home-files/.config/myeditor/standalone-owner"
+            if { [ ! -f "$marker" ] || [ "$(cat "$marker")" != rediff-standalone-v1 ]; } && \
+               { [ ! -f "$old_marker" ] || [ "$(cat "$old_marker")" != myeditor-standalone-v1 ]; }; then
                 echo "Refusing to replace an existing Home Manager/system profile: $profile" >&2
                 echo "Import this repository's Home Manager module into your existing configuration instead." >&2
                 exit 1
@@ -66,7 +68,7 @@ fi
 "$generation/activate"
 if ! grep -Fxq "$session_line" "$shell_rc" 2>/dev/null; then
     if [ -f "$shell_rc" ]; then
-        backup=$(mktemp "$shell_rc.myeditor-backup.XXXXXX")
+        backup=$(mktemp "$shell_rc.rediff-backup.XXXXXX")
         cp -p "$shell_rc" "$backup"
         printf 'Backed up shell configuration: %s\n' "$backup"
     fi

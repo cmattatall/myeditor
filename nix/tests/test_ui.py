@@ -13,7 +13,7 @@ import pynvim
 
 EDITOR = shutil.which("rediff")
 FIXTURE = str(Path(__file__).with_name("fixture.lua"))
-STATE = 'local r = require("myeditor.review"); local s = r.state; '
+STATE = 'local r = require("rediff.review"); local s = r.state; '
 
 
 def pump(editor):
@@ -226,7 +226,7 @@ class EditorUI(unittest.TestCase):
         # No receiver is connected: submission archives the batch locally only.
         self.keys(editor, ":w<CR>")
         payload = self.lua(
-            editor, 'return require("myeditor.feedback").read(s.last_submission)'
+            editor, 'return require("rediff.feedback").read(s.last_submission)'
         )
         self.assertEqual(expected_notes, payload["comments"])
         self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
@@ -241,7 +241,7 @@ class EditorUI(unittest.TestCase):
         notes = self.lua(
             editor,
             r"""
-            local selection = require('myeditor.selection')
+            local selection = require('rediff.selection')
             local function note(side, line, text)
                 local buf = side == 'old' and s.old_buf or s.new_buf
                 return r.add_comment({file=s.current.path, side=side,
@@ -374,7 +374,7 @@ class EditorUI(unittest.TestCase):
         self.lua(
             editor,
             """
-            local selection = require('myeditor.selection')
+            local selection = require('rediff.selection')
             local function note(side, line, text)
                 r.add_comment({file=s.current.path, side=side, snapshot_id=s.current.id,
                     selection=selection.line(side=='old' and s.old_buf or s.new_buf,line)},text)
@@ -389,7 +389,7 @@ class EditorUI(unittest.TestCase):
             return self.lua(
                 editor,
                 f"return vim.api.nvim_buf_get_extmarks(s.{side}_buf, "
-                'vim.api.nvim_get_namespaces()["myeditor.annotations"], 0, -1, {details=true})',
+                'vim.api.nvim_get_namespaces()["rediff.annotations"], 0, -1, {details=true})',
             )
 
         for side, expected_rows in (
@@ -464,7 +464,7 @@ class EditorUI(unittest.TestCase):
         )
         self.assertTrue(
             self.lua(
-                editor, 'return require("myeditor.harness").get(s.root).last == nil'
+                editor, 'return require("rediff.harness").get(s.root).last == nil'
             )
         )
         locked = self.launch(self.root)
@@ -598,7 +598,7 @@ class EditorUI(unittest.TestCase):
             [row + 1],
             self.lua(
                 editor,
-                'local rows = {}; for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(s.tree_buf, vim.api.nvim_get_namespaces()["myeditor.active-file"], 0, -1, {})) do table.insert(rows, mark[2]) end; return rows',
+                'local rows = {}; for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(s.tree_buf, vim.api.nvim_get_namespaces()["rediff.active-file"], 0, -1, {})) do table.insert(rows, mark[2]) end; return rows',
             ),
         )
         self.assertTrue(
@@ -982,7 +982,7 @@ class EditorUI(unittest.TestCase):
         editor = self.launch(self.root)
         self.keys(editor, "<Tab>")
         # Layout changes themselves must use the current snapshot, not read disk.
-        self.lua(editor, 'require("myeditor.live").stop(s)')
+        self.lua(editor, 'require("rediff.live").stop(s)')
         self.keys(editor, "]")
         self.assertEqual(2, self.lua(editor, "return s.selected_hunk"))
         self.keys(
@@ -1078,7 +1078,7 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(draft, message[:])
         self.assertTrue(
             self.lua(
-                editor, 'return require("myeditor.harness").get(s.root).last == nil'
+                editor, 'return require("rediff.harness").get(s.root).last == nil'
             )
         )
         self.keys(editor, "<Tab>")
@@ -1091,9 +1091,9 @@ class EditorUI(unittest.TestCase):
         self.lua(
             editor,
             """
-            local feedback = require('myeditor.feedback')
+            local feedback = require('rediff.feedback')
             feedback.settings = function() return {feedback_command={'fake-receiver'}} end
-            require('myeditor.harness').select(s.root, {name='custom'})
+            require('rediff.harness').select(s.root, {name='custom'})
             local system = vim.system
             vim.system = function(argv, opts, callback)
                 if argv[1] ~= 'fake-receiver' then return system(argv, opts, callback) end
@@ -1109,7 +1109,7 @@ class EditorUI(unittest.TestCase):
         )
         self.keys(editor, ":harness send<CR>iSteer the agent<Esc>:w<CR>")
         self.wait_for(
-            editor, 'require("myeditor.harness").get(s.root).delivery == "accepted"'
+            editor, 'require("rediff.harness").get(s.root).delivery == "accepted"'
         )
         self.assertEqual([""], editor.current.buffer[:])
         self.keys(editor, "iNext message<Esc>")
@@ -1143,7 +1143,7 @@ class EditorUI(unittest.TestCase):
             editor.api.eval_statusline(editor.options["statusline"], {})["str"],
         )
         # The manual shortcut works independently of the polling timer.
-        self.lua(editor, 'require("myeditor.live").stop(s)')
+        self.lua(editor, 'require("rediff.live").stop(s)')
         path = Path(self.root, "auth.lua")
         path.write_text(path.read_text().replace("return nil", "return 321"))
         self.keys(editor, " R")
@@ -1214,8 +1214,8 @@ class EditorUI(unittest.TestCase):
             self.lua(
                 editor,
                 """
-                require('myeditor.live').stop(s)
-                local git = require('myeditor.git')
+                require('rediff.live').stop(s)
+                local git = require('rediff.git')
                 local snapshot = git.snapshot
                 git.snapshot = function(...)
                     git.snapshot = snapshot
@@ -1253,13 +1253,13 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, ":harness use amp<CR>")
         self.assertEqual(
             "amp",
-            self.lua(editor, 'return require("myeditor.harness").get(s.root).provider'),
+            self.lua(editor, 'return require("rediff.harness").get(s.root).provider'),
         )
         self.assertFalse(marker.exists(), "Selecting a type must not launch a process")
         self.lua(
             editor,
             """
-            local h = require('myeditor.harness')
+            local h = require('rediff.harness')
             h.select(s.root, {name='amp-live',session='T-parent',connection='/fake/parent.json'})
             _G.original = s
             _G.edit_buf = vim.api.nvim_win_get_buf(vim.api.nvim_tabpage_get_win(s.previous_tab))
@@ -1277,7 +1277,7 @@ class EditorUI(unittest.TestCase):
             [target, "amp", "none", 0, True],
             self.lua(
                 editor,
-                "local h=require('myeditor.harness').get(s.root); "
+                "local h=require('rediff.harness').get(s.root); "
                 "return {s.root,h.provider,h.target.name,#s.comments,original.live_refresh == nil}",
             ),
         )
@@ -1310,7 +1310,7 @@ class EditorUI(unittest.TestCase):
             ["claude", "none", 1],
             self.lua(
                 editor,
-                "local h=require('myeditor.harness').get(s.root); return {h.provider,h.target.name,#s.comments}",
+                "local h=require('rediff.harness').get(s.root); return {h.provider,h.target.name,#s.comments}",
             ),
         )
         restarted = self.launch(self.root, headless=True)
@@ -1318,7 +1318,7 @@ class EditorUI(unittest.TestCase):
             "claude",
             self.lua(
                 restarted,
-                'return require("myeditor.harness").get(require("myeditor.git").root()).provider',
+                'return require("rediff.harness").get(require("rediff.git").root()).provider',
             ),
         )
         # Missing CLI and invalid branch must fail before any worktree is created.
@@ -1328,7 +1328,7 @@ class EditorUI(unittest.TestCase):
                 """
             local original = vim.fn.exepath
             vim.fn.exepath = function() return '' end
-            local ok = pcall(require('myeditor.worktree').new, 'missing-cli')
+            local ok = pcall(require('rediff.worktree').new, 'missing-cli')
             vim.fn.exepath = original
             return ok
         """,
@@ -1336,10 +1336,10 @@ class EditorUI(unittest.TestCase):
         )
         self.assertFalse(Path(self.root + "-missing-cli").exists())
         self.assertFalse(
-            self.lua(editor, "return pcall(require('myeditor.worktree').new, '--bad')")
+            self.lua(editor, "return pcall(require('rediff.worktree').new, '--bad')")
         )
         self.assertEqual(
-            2, self.lua(editor, "return #require('myeditor.worktree').list()")
+            2, self.lua(editor, "return #require('rediff.worktree').list()")
         )
 
     def test_hunks_stay_in_git_group(self):
@@ -1367,7 +1367,7 @@ class EditorUI(unittest.TestCase):
                     """
                     local row = vim.api.nvim_win_get_cursor(s.tree_win)[1]
                     local marks = vim.api.nvim_buf_get_extmarks(s.tree_buf,
-                        vim.api.nvim_get_namespaces()['myeditor.active-file'], 0, -1, {})
+                        vim.api.nvim_get_namespaces()['rediff.active-file'], 0, -1, {})
                     return s.rows[row] == s.index and #marks == 1 and marks[1][2] == row - 1
                     """,
                 ),
@@ -1585,7 +1585,7 @@ class EditorUI(unittest.TestCase):
         )
         marks = self.lua(
             editor,
-            'return vim.api.nvim_buf_get_extmarks(s.new_buf, vim.api.nvim_get_namespaces()["myeditor.difftastic"], 0, -1, {details=true})',
+            'return vim.api.nvim_buf_get_extmarks(s.new_buf, vim.api.nvim_get_namespaces()["rediff.difftastic"], 0, -1, {details=true})',
         )
         self.assertEqual(1, len(marks))
         self.assertEqual([0, len(prefix.encode())], marks[0][1:3])
@@ -1616,7 +1616,7 @@ class EditorUI(unittest.TestCase):
             [],
             self.lua(
                 editor,
-                'return vim.api.nvim_buf_get_extmarks(s.new_buf, vim.api.nvim_get_namespaces()["myeditor.difftastic"], 0, -1, {})',
+                'return vim.api.nvim_buf_get_extmarks(s.new_buf, vim.api.nvim_get_namespaces()["rediff.difftastic"], 0, -1, {})',
             ),
         )
         # A failed tool must retain the ordinary text renderer, not blank the diff.

@@ -1,13 +1,13 @@
 local M = { state = nil }
 local api = vim.api
-local git = require("myeditor.git")
-local feedback = require("myeditor.feedback")
-local harness = require("myeditor.harness")
-local selection = require("myeditor.selection")
-local tree_ns = api.nvim_create_namespace("myeditor.tree")
-local active_ns = api.nvim_create_namespace("myeditor.active-file")
-local hunk_ns = api.nvim_create_namespace("myeditor.hunk")
-local annotation_ns = api.nvim_create_namespace("myeditor.annotations")
+local git = require("rediff.git")
+local feedback = require("rediff.feedback")
+local harness = require("rediff.harness")
+local selection = require("rediff.selection")
+local tree_ns = api.nvim_create_namespace("rediff.tree")
+local active_ns = api.nvim_create_namespace("rediff.active-file")
+local hunk_ns = api.nvim_create_namespace("rediff.hunk")
+local annotation_ns = api.nvim_create_namespace("rediff.annotations")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 local saved_guicursor
 
@@ -328,7 +328,7 @@ function M.show(index, snapshot)
 			true
 		)
 	end
-	require("myeditor.difftastic").highlight(s, snapshot)
+	require("rediff.difftastic").highlight(s, snapshot)
 	render_comments()
 	api.nvim_set_current_win(s.new_win)
 	mark_hunk(nil)
@@ -496,7 +496,7 @@ function M.refresh_live()
 	-- Git reads yield to input. Do not apply results after the user changed views,
 	-- opened a composer/picker, or left this worktree while the reads were running.
 	local changes = read_changes(s, snapshot)
-	if not require("myeditor.live").ready(s) or s.current ~= snapshot or s.entries ~= entries then
+	if not require("rediff.live").ready(s) or s.current ~= snapshot or s.entries ~= entries then
 		return false
 	end
 	local win = api.nvim_get_current_win()
@@ -1117,7 +1117,7 @@ end
 function M.leave()
 	local s = state()
 	tree_focus(false)
-	require("myeditor.live").stop(s)
+	require("rediff.live").stop(s)
 	if s.composer then
 		release_composer()
 	end
@@ -1272,7 +1272,7 @@ function M.open()
 	end
 	M.refresh()
 	api.nvim_set_current_win(s.tree_win)
-	require("myeditor.live").start(s)
+	require("rediff.live").start(s)
 	api.nvim_exec_autocmds("User", { pattern = "ReviewEnter" })
 end
 
@@ -1412,7 +1412,7 @@ function M.setup()
 		}
 	)
 	vim.cmd(
-		[[cnoreabbrev <expr> view getcmdtype() == ':' && getcmdline() == 'view' && getcmdpos() == 5 && luaeval("require('myeditor.review').active() ~= nil") ? 'View' : 'view']]
+		[[cnoreabbrev <expr> view getcmdtype() == ':' && getcmdline() == 'view' && getcmdpos() == 5 && luaeval("require('rediff.review').active() ~= nil") ? 'View' : 'view']]
 	)
 	api.nvim_create_user_command(
 		"Focus",
@@ -1458,7 +1458,7 @@ function M.setup()
 	}) do
 		vim.cmd(
 			string.format(
-				[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('myeditor.review').active() ~= nil") ? '%s' : '%s']],
+				[[cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d && luaeval("require('rediff.review').active() ~= nil") ? '%s' : '%s']],
 				alias,
 				alias,
 				#alias + 1,
@@ -1532,7 +1532,7 @@ function M.setup()
 	api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			if M.state then
-				require("myeditor.live").stop(M.state)
+				require("rediff.live").stop(M.state)
 				M.state.draft = nil
 				save()
 				vim.uv.fs_unlink(M.state.directory .. "/editor.lock")

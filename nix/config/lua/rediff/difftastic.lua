@@ -1,6 +1,6 @@
 local M = {}
 local api = vim.api
-local ns = api.nvim_create_namespace("myeditor.difftastic")
+local ns = api.nvim_create_namespace("rediff.difftastic")
 local job
 
 -- Keep Codediff's line geometry and filler lines: comments and Git staging use
@@ -43,7 +43,7 @@ function M.highlight(s, snapshot)
 		{ text = true, timeout = 2000, env = { DFT_UNSTABLE = "yes" } },
 		vim.schedule_wrap(function(result)
 			vim.fn.delete(directory, "rf")
-			if require("myeditor.review").state ~= s or s.current ~= snapshot then
+			if require("rediff.review").state ~= s or s.current ~= snapshot then
 				return
 			end
 			job = nil

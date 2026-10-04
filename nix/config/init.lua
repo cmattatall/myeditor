@@ -1,5 +1,5 @@
-vim.opt.runtimepath:prepend(assert(vim.env.MYEDITOR_RUNTIME, "Use the rediff launcher"))
-for path in (vim.env.MYEDITOR_PLUGINS or ""):gmatch("[^,]+") do
+vim.opt.runtimepath:prepend(assert(vim.env.REDIFF_RUNTIME, "Use the rediff launcher"))
+for path in (vim.env.REDIFF_PLUGINS or ""):gmatch("[^,]+") do
 	vim.opt.runtimepath:append(path)
 end
 
@@ -39,7 +39,7 @@ for _, key in ipairs({ "<M-Right>", "<M-Down>", "<M-l>", "<M-j>", "<M-f>" }) do
 end
 
 local palette = require("rose-pine.palette")
-vim.api.nvim_set_hl(0, "MyeditorHelpBorder", { fg = palette.iris, bg = palette.surface })
+vim.api.nvim_set_hl(0, "RediffHelpBorder", { fg = palette.iris, bg = palette.surface })
 vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 	callback = function(event)
 		if vim.bo[event.buf].filetype ~= "help" or vim.api.nvim_get_current_buf() ~= event.buf then
@@ -58,7 +58,7 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 			title = " Help · ?/Esc/q close ",
 			title_pos = "center",
 		})
-		vim.wo.winhighlight = "FloatBorder:MyeditorHelpBorder"
+		vim.wo.winhighlight = "FloatBorder:RediffHelpBorder"
 		vim.wo.wrap = true
 		vim.wo.linebreak = true
 		for _, key in ipairs({ "?", "q", "<Esc>" }) do
@@ -108,8 +108,8 @@ vim.api.nvim_create_autocmd("VimEnter", {
 	once = true,
 	callback = vim.schedule_wrap(function()
 		if #vim.api.nvim_list_uis() > 0 then
-			if pcall(require("myeditor.git").root) then
-				local ok, err = pcall(require("myeditor.review").open)
+			if pcall(require("rediff.git").root) then
+				local ok, err = pcall(require("rediff.review").open)
 				if ok then
 					return
 				end
@@ -120,18 +120,18 @@ vim.api.nvim_create_autocmd("VimEnter", {
 	end),
 })
 
-local review = require("myeditor.review")
+local review = require("rediff.review")
 review.setup()
-require("myeditor.harness").setup()
-require("myeditor.worktree").setup()
-require("myeditor.cmdline").setup()
+require("rediff.harness").setup()
+require("rediff.worktree").setup()
+require("rediff.cmdline").setup()
 require("fzf-lua").setup({
 	winopts = { width = 0.85, height = 0.8, preview = { hidden = true } },
 	keymap = { fzf = { ["esc"] = "abort" } },
 	files = { file_icons = false, git_icons = false },
 	grep = { file_icons = false, git_icons = false },
 })
-local navigation = require("myeditor.navigation")
+local navigation = require("rediff.navigation")
 for _, binding in ipairs({
 	{ "<leader>e", "Explorer", navigation.explorer, "Focus explorer" },
 	{ "<leader>d", "FocusDiff", navigation.diff, "Focus diff/editor" },
@@ -162,4 +162,4 @@ vim.keymap.set("n", "<leader>E", function()
 	end
 end, { desc = "Toggle file tree (focus in Review)" })
 vim.opt.laststatus = 3
-vim.opt.statusline = "%{%v:lua.require('myeditor.review').statusline()%}"
+vim.opt.statusline = "%{%v:lua.require('rediff.review').statusline()%}"

@@ -1,5 +1,5 @@
-*myeditor.txt*                  rediff help                          *rediff*
-                                                     *myeditor*   *help.txt*
+*rediff.txt*                    rediff help                          *rediff*
+                                                                 *help.txt*
 
 ? / Esc / q closes help. Space p finds commands. / searches; n/N repeats.
 Ctrl-] follows a topic link; Ctrl-t returns. Space is the leader key.
@@ -25,13 +25,13 @@ REVIEW QUICK REFERENCE
   Space r / Space q   Enter / leave Review
 
 TOPICS
-  |myeditor-review|     Annotations       |myeditor-git|        Staging
-  |myeditor-harness|    Agent messages    |myeditor-worktrees|  Worktrees
-  |myeditor-view|       Panes and layout  |myeditor-editing|    Editing
-  |myeditor-commands|   Command index     |myeditor-drafts|     Delivery
+  |rediff-review|      Annotations       |rediff-git|         Staging
+  |rediff-harness|     Agent messages    |rediff-worktrees|   Worktrees
+  |rediff-view|        Panes and layout  |rediff-editing|     Editing
+  |rediff-commands|    Command index     |rediff-drafts|      Delivery
 
 ==============================================================================
-REVIEW AND ANNOTATIONS                                        *myeditor-review*
+REVIEW AND ANNOTATIONS                                          *rediff-review*
 
 Interactive startup opens Review inside Git, with tree focus and a diff preview.
 Moving onto a file previews it; Tab enters the diff. Space q returns to editing.
@@ -56,10 +56,10 @@ or already-sent feedback. These bindings leave ordinary files/note text unchange
 Jumping to an older note shows its original snapshot and pauses refresh/staging.
 Space R returns to current files. Old-side notes switch merged view to split.
 Editing a note preserves its anchor. :w in diff/tree sends only saved notes;
-it never writes or stages source. See |myeditor-drafts| for retention and retry.
+it never writes or stages source. See |rediff-drafts| for retention and retry.
 
 ==============================================================================
-GIT AND REFRESH                                                  *myeditor-git*
+GIT AND REFRESH                                                    *rediff-git*
 
 STAGED compares HEAD/index; UNSTAGED compares index/worktree and includes untracked
 files. Badges: M modified, U untracked, R rename, A added, D deleted. Partially
@@ -86,7 +86,7 @@ Use it instead of :bufdo e: Review panes are snapshots, not ordinary file buffer
 Outside Review, :checktime checks loaded files for external changes.
 
 ==============================================================================
-AGENT HARNESSES                                             *myeditor-harness*
+AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
 Discovery is manual and checkout-specific; multiple matches open a picker.
@@ -118,7 +118,7 @@ or feedback_command in settings.json; they receive a JSON path and must acknowle
 its submission ID. See nix/README.md for installation and receiver details.
 
 ==============================================================================
-WORKTREES                                                *myeditor-worktrees*
+WORKTREES                                                  *rediff-worktrees*
 
 :worktree list or :worktree switch opens a chooser. Supply a branch/path to switch
 directly. :harness use amp|claude selects the launch type for this worktree.
@@ -135,7 +135,7 @@ saved notes stay with their checkout; save/close an open note before switching.
 Changing harness type disconnects incompatible bindings but retains drafts.
 
 ==============================================================================
-PANES AND VIEW                                                 *myeditor-view*
+PANES AND VIEW                                                   *rediff-view*
 
 :view split shows old/new panes; :view merged shows deleted rows above new text.
 :view toggles while retaining file/hunk and notes. Merged deletions are virtual:
@@ -156,7 +156,7 @@ text highlights remain on failure/timeout or files over 1 MB. Git defines stagin
 hunks regardless of rendering. The bottom bar names the active diff tool.
 
 ==============================================================================
-ORDINARY EDITING                                            *myeditor-editing*
+ORDINARY EDITING                                              *rediff-editing*
 
 Normal Neovim editing applies outside protected source panes. Space f searches
 project files; Space / searches saved contents. In Review these search changed
@@ -171,8 +171,7 @@ For native navigation/editing, see :help motion, :help editing, :help undo,
 :help registers and :help windows. File-tree actions: |neo-tree-mappings|.
 
 ==============================================================================
-COMMAND INDEX                                              *myeditor-commands*
-                                                            *rediff-commands*
+COMMAND INDEX                                                *rediff-commands*
 
 Space p / :Commands fuzzy-finds commands. Enter puts one on the command line;
 add arguments and press Enter again to run. Tab accepts inline suggestions or
@@ -216,7 +215,7 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
 Shell commands (:!) can change files/index outside the editor's protections.
 
 ==============================================================================
-DRAFTS AND DELIVERY                                          *myeditor-drafts*
+DRAFTS AND DELIVERY                                            *rediff-drafts*
 
 Accepted/completed delivery deletes sent notes/text but preserves newer edits.
 Failed, pending and local-only batches stay in this process. Leaving/re-entering
@@ -228,12 +227,13 @@ means the turn finished, not that its changes are correct. Inspect the session
 and receipt before retrying uncertain delivery. Retries use the original payload.
 Without a binding, submissions stay local. Credentials never belong in Nix/Git.
 
-Built-in harnesses receive one prelude, file/range references with notes, and one
-safety epilogue per batch. Exact columns and stale-snapshot warnings are retained.
-Source/patches stay in the private local outbox, referenced by path; custom
-receivers get full JSON. Source can be sensitive: choose your receiver carefully.
+Built-in harnesses receive JSON: rules once, then context and annotations/message.
+There is no prose prefix or epilogue. Explicit authorization in your feedback
+permits the named Git/PR actions; otherwise the agent must ask. Exact ranges and
+snapshot status remain. Source/patches stay in the private outbox, referenced by
+path; custom receivers get the full payload. Choose your receiver carefully.
 
-LIMITS                                                      *myeditor-parity*
+LIMITS                                                        *rediff-parity*
 Binary files, merge conflicts and files over 2 MiB are unsupported. Notes are
 not re-anchored automatically. File/hunk annotation scopes, LSP inspection, blame
 and collapsed/compact diffs are not implemented. See FEATURES.md for the inventory.

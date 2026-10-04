@@ -1,9 +1,9 @@
 local tests = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 
 return function(root, equal, fails)
-	local review = require("myeditor.review")
-	local feedback = require("myeditor.feedback")
-	local selection = require("myeditor.selection")
+	local review = require("rediff.review")
+	local feedback = require("rediff.feedback")
+	local selection = require("rediff.selection")
 	local system, settings, notify = vim.system, feedback.settings, vim.notify
 	local notice
 	vim.notify = function(message)
@@ -106,7 +106,7 @@ return function(root, equal, fails)
 	})
 	local function launch(write)
 		local child = vim.fn.jobstart(
-			{ vim.fn.exepath("myeditor"), "--embed", "--headless", "-i", "NONE" },
+			{ vim.fn.exepath("rediff"), "--embed", "--headless", "-i", "NONE" },
 			{ rpc = true }
 		)
 		assert(child > 0)
@@ -117,8 +117,8 @@ return function(root, equal, fails)
 			[[
 			local root, write = ...
 			vim.cmd.cd(root)
-			local review = require("myeditor.review")
-			require("myeditor.feedback").deliver = function() error("Opening must not send") end
+			local review = require("rediff.review")
+			require("rediff.feedback").deliver = function() error("Opening must not send") end
 			review.open()
 			local s = review.state
 			local result = {

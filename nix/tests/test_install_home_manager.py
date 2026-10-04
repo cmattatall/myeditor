@@ -10,7 +10,7 @@ INSTALLER = Path(sys.argv.pop(1)).resolve()
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="myeditor install ")
+        self.temp = tempfile.TemporaryDirectory(prefix="rediff install ")
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.bin = self.home / "bin"
@@ -24,7 +24,7 @@ class InstallerTests(unittest.TestCase):
                         XDG_STATE_HOME=str(self.home / ".local/state"),
                         XDG_CONFIG_HOME=str(self.home / ".config"), ZDOTDIR=str(self.home),
                         PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
-        self.executable(self.bin / "id", 'echo myeditor-install-test\n')
+        self.executable(self.bin / "id", 'echo rediff-install-test\n')
         self.executable(self.bin / "nix", 'printf "%s\\n" "$@" > "$HOME/build-args"\nprintf "%s\\n" "$HOME/generation"\n')
         self.executable(self.generation / "activate", 'touch "$HOME/activated"\n')
 
@@ -47,9 +47,9 @@ class InstallerTests(unittest.TestCase):
 
     def test_switch_preserves_shell_and_is_repeatable(self):
         profile = self.home / ".local/state/nix/profiles/home-manager"
-        marker = self.generation / "home-files/.config/myeditor/standalone-owner"
+        marker = self.generation / "home-files/.config/rediff/standalone-owner"
         marker.parent.mkdir(parents=True)
-        marker.write_text("myeditor-standalone-v1\n")
+        marker.write_text("rediff-standalone-v1\n")
         for _ in range(2):
             result = self.run_installer("--switch")
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -59,9 +59,31 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.home / "activated").exists())
         self.assertTrue(self.rc.read_text().startswith(self.original))
         self.assertEqual(self.rc.read_text().count('hm-session-vars.sh'), 1)
-        backups = list(self.home.glob(".zshrc.myeditor-backup.*"))
+        backups = list(self.home.glob(".zshrc.rediff-backup.*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(), self.original)
+
+    def test_old_standalone_marker_allows_safe_upgrade(self):
+        profile = self.home / ".local/state/nix/profiles/home-manager"
+        marker = self.generation / "home-files/.config/myeditor/standalone-owner"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("myeditor-standalone-v1\n")
+        profile.parent.mkdir(parents=True)
+        profile.symlink_to(self.generation)
+        result = self.run_installer("--switch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.home / "activated").exists())
+
+    def test_wrong_old_marker_is_not_accepted(self):
+        profile = self.home / ".local/state/nix/profiles/home-manager"
+        marker = self.generation / "home-files/.config/myeditor/standalone-owner"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("some-other-owner\n")
+        profile.parent.mkdir(parents=True)
+        profile.symlink_to(self.generation)
+        result = self.run_installer("--switch")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.home / "activated").exists())
 
     def test_unrelated_generation_is_not_replaced(self):
         profile = self.home / ".local/state/nix/profiles/home-manager"

@@ -53,14 +53,14 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ makeWrapper ];
   dontBuild = true;
   installPhase = ''
-    mkdir -p "$out/share/myeditor" "$out/bin"
-    cp -R . "$out/share/myeditor/"
+    mkdir -p "$out/share/rediff" "$out/bin"
+    cp -R . "$out/share/rediff/"
     ${neovim}/bin/nvim --headless -u NONE -i NONE -n \
-      -c "helptags $out/share/myeditor/doc" -c 'qa!'
+      -c "helptags $out/share/rediff/doc" -c 'qa!'
     makeWrapper ${neovim}/bin/nvim "$out/bin/rediff" \
-      --set NVIM_APPNAME myeditor \
-      --set MYEDITOR_RUNTIME "$out/share/myeditor" \
-      --set MYEDITOR_PLUGINS '${runtime}' \
+      --set NVIM_APPNAME rediff \
+      --set REDIFF_RUNTIME "$out/share/rediff" \
+      --set REDIFF_PLUGINS '${runtime}' \
       --set VSCODE_DIFF_NO_AUTO_INSTALL 1 \
       --prefix PATH : ${
         lib.makeBinPath [
@@ -71,20 +71,19 @@ stdenv.mkDerivation {
         ]
       } \
       --prefix PATH : "$out/bin" \
-      --add-flags '-u' --add-flags "$out/share/myeditor/init.lua"
-    ln -s rediff "$out/bin/myeditor"
-    cp ${./harness.py} "$out/share/myeditor/harness.py"
-    makeWrapper ${python3}/bin/python3 "$out/bin/myeditor-harness" \
-      --add-flags "$out/share/myeditor/harness.py"
-    cp ${./amp_live.py} "$out/share/myeditor/amp_live.py"
-    makeWrapper ${python3}/bin/python3 "$out/bin/myeditor-amp-live" \
-      --add-flags "$out/share/myeditor/amp_live.py"
-    mkdir -p "$out/share/myeditor/amp"
-    cp ${./amp/anthrodiff.ts} "$out/share/myeditor/amp/anthrodiff.ts"
-    cp ${./amp/install.sh} "$out/share/myeditor/amp/install.sh"
-    makeWrapper ${bash}/bin/bash "$out/bin/myeditor-install-amp-plugin" \
+      --add-flags '-u' --add-flags "$out/share/rediff/init.lua"
+    cp ${./harness.py} "$out/share/rediff/harness.py"
+    makeWrapper ${python3}/bin/python3 "$out/bin/rediff-harness" \
+      --add-flags "$out/share/rediff/harness.py"
+    cp ${./amp_live.py} "$out/share/rediff/amp_live.py"
+    makeWrapper ${python3}/bin/python3 "$out/bin/rediff-amp-live" \
+      --add-flags "$out/share/rediff/amp_live.py"
+    mkdir -p "$out/share/rediff/amp"
+    cp ${./amp/rediff.ts} "$out/share/rediff/amp/rediff.ts"
+    cp ${./amp/install.sh} "$out/share/rediff/amp/install.sh"
+    makeWrapper ${bash}/bin/bash "$out/bin/rediff-install-amp-plugin" \
       --prefix PATH : ${lib.makeBinPath [ coreutils ]} \
-      --add-flags "$out/share/myeditor/amp/install.sh"
+      --add-flags "$out/share/rediff/amp/install.sh"
   '';
   meta = {
     description = "Read agent diffs with a portable modal review editor";

@@ -87,9 +87,11 @@ the remaining view toggles, filters, and general commands in the revdiff fork.
 
 ## Live harness steering
 
-Built-in harnesses receive readable review messages: a short prelude, an
-absolute file/range reference followed by each note, and a safety epilogue.
-References retain old/new side, Git group, and stale-snapshot warnings.
+Built-in harnesses receive JSON with overarching `rules` once, then context and
+`annotations` (or `message`). There is no prose prefix or trailing epilogue.
+Rules require permission for Git/PR actions unless explicitly authorized in
+the feedback. Annotations retain absolute paths, old/new side, Git group, and
+snapshot status.
 Visual **a** annotates the whole character, line, or block selection; column
 ranges and partial-tab offsets accompany character/block references.
 Full source, selected text, and patches stay in the local outbox, referenced
@@ -125,15 +127,15 @@ note covering the cursor, with a picker if several overlap; it never deletes
 source or retracts sent feedback. General-message `:q` retains its draft for
 continued editing and does not block quitting, even with a hidden composer.
 
-`:Harness install amp` installs the bundled anthrodiff bridge plugin after
-confirmation, including explicit backup/replacement of the old user-local
-plugin. With a selected live Amp target, it then asks that thread to call
+`:Harness install amp` installs the bundled rediff bridge plugin after
+confirmation, leaving other plugin files untouched.
+With a selected live Amp target, it then asks that thread to call
 `reload_plugins`; queued acknowledgment is not proof the reload completed.
 Without a live target, reload manually once and use `:harness connect amp`.
 It preserves Home Manager symlinks, does not install the Amp CLI, and never
 sends annotations or composer text as part of installation.
 
-`:Harness connect amp` manually discovers live anthrodiff-plugin registrations
+`:Harness connect amp` manually discovers live rediff-plugin registrations
 for this exact checkout: one live match is selected directly, otherwise a
 fuzzy session picker is shown. `:Harness send` opens a normal Vim message
 buffer (`:w` submits only, `:wq` submits and closes, `:q!` closes while
@@ -144,9 +146,9 @@ stop the agent. An accepted ACK means queued steering, not a completed turn.
 Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate
 from `:ReviewHarness amp THREAD`, which starts an Amp CLI continuation. This
-repository owns the anthrodiff plugin, installer, and tests under `nix/amp/`.
+repository owns the rediff plugin, installer, and tests under `nix/amp/`.
 Home Manager can install it; Home Manager and shell installs require a manual
 reload. The registry is
-`~/.cache/anthrodiff/amp` with no legacy discovery. Feedback uses the neutral
-"Review feedback" prefix. Harness discovery is manual, no real sends
+`~/.cache/rediff/amp` with no legacy discovery. Feedback uses rules-first JSON
+without a prose prefix or epilogue. Harness discovery is manual, no real sends
 occur merely by connecting, and credentials never belong in Nix or Git.

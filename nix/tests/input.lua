@@ -1,7 +1,7 @@
 local tests = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 
 return function(equal)
-	local suffix = require("myeditor.cmdline").suffix
+	local suffix = require("rediff.cmdline").suffix
 	for _, case in ipairs({
 		{ "h", "elp" },
 		{ "ha", "rness" },
@@ -30,7 +30,7 @@ return function(equal)
 	end
 	-- feedkeys(..., "x") flushes pending mappings and conceals prefix timeouts.
 	-- Send actual input to a separate event loop with a deliberately long timeout.
-	local child = vim.fn.jobstart({ vim.fn.exepath("myeditor"), "--embed", "--headless", "-i", "NONE" }, { rpc = true })
+	local child = vim.fn.jobstart({ vim.fn.exepath("rediff"), "--embed", "--headless", "-i", "NONE" }, { rpc = true })
 	assert(child > 0, "Could not start input-test editor")
 	local root
 	local function lua(code, ...)
@@ -110,16 +110,16 @@ return function(equal)
 	end
 	local ok, err = xpcall(function()
 		local channel = vim.rpcrequest(child, "nvim_get_api_info")[1]
-		_G.myeditor_input_results = {}
+		_G.rediff_input_results = {}
 		root = lua([[local root = dofile(...).create(); vim.cmd.cd(root); return root]], tests .. "/fixture.lua")
 		lua(
 			[[
 			local channel = ...
 			vim.o.timeoutlen = 10000
-			local r = require("myeditor.review")
+			local r = require("rediff.review")
 			r.open()
 			r.jump_hunk = function(direction)
-				vim.rpcnotify(channel, "nvim_exec_lua", "table.insert(_G.myeditor_input_results, ...)", {direction})
+				vim.rpcnotify(channel, "nvim_exec_lua", "table.insert(_G.rediff_input_results, ...)", {direction})
 			end
 		]],
 			channel
@@ -127,30 +127,30 @@ return function(equal)
 		local expected = {}
 		for pass = 1, 2 do
 			lua([=[
-				local r = require("myeditor.review")
+				local r = require("rediff.review")
 				r.show(1)
 				r.show(#r.state.entries) -- Markdown installs buffer-local [[ and ]].
 			]=])
 			for _, pane in ipairs({ "new_win", "old_win", "tree_win" }) do
-				lua([[vim.api.nvim_set_current_win(require("myeditor.review").state[...])]], pane)
+				lua([[vim.api.nvim_set_current_win(require("rediff.review").state[...])]], pane)
 				for _, input in ipairs({ { "[", -1, 1 }, { "]", 1, 1 }, { "3]", 1, 3 } }) do
 					for _ = 1, input[3] do
 						table.insert(expected, input[2])
 					end
 					vim.rpcnotify(child, "nvim_input", input[1])
 					local immediate = vim.wait(1000, function()
-						return #_G.myeditor_input_results == #expected
+						return #_G.rediff_input_results == #expected
 					end, 10)
 					equal(
 						true,
 						immediate,
 						input[1] .. " dispatches before timeout in " .. pane .. " on filetype pass " .. pass
 					)
-					equal(expected, _G.myeditor_input_results, "Immediate mapping preserves direction and count")
+					equal(expected, _G.rediff_input_results, "Immediate mapping preserves direction and count")
 				end
 			end
 		end
-		lua([[vim.api.nvim_set_current_win(require("myeditor.review").state.new_win)]])
+		lua([[vim.api.nvim_set_current_win(require("rediff.review").state.new_win)]])
 		for _, move in ipairs({
 			{ "<D-w>h", "old_win" },
 			{ "<D-w>h", "tree_win" },
@@ -162,7 +162,7 @@ return function(equal)
 				true,
 				vim.wait(1000, function()
 					return lua(
-						[=[return vim.api.nvim_get_current_win() == require("myeditor.review").state[...]]=],
+						[=[return vim.api.nvim_get_current_win() == require("rediff.review").state[...]]=],
 						move[2]
 					)
 				end, 10),
@@ -182,38 +182,38 @@ return function(equal)
 			)
 			equal(
 				true,
-				lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.new_win]]),
+				lua([[return vim.api.nvim_get_current_win() == require("rediff.review").state.new_win]]),
 				"Ctrl-w does not navigate windows in " .. (prefix == "" and "Normal" or "Visual") .. " mode"
 			)
 		end
 		for _, pane in ipairs({ "new_win", "old_win" }) do
-			lua([[vim.api.nvim_set_current_win(require("myeditor.review").state[...])]], pane)
+			lua([[vim.api.nvim_set_current_win(require("rediff.review").state[...])]], pane)
 			vim.rpcnotify(child, "nvim_input", ":ft<CR>")
 			equal(
 				true,
 				vim.wait(1000, function()
-					return lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.tree_win]])
+					return lua([[return vim.api.nvim_get_current_win() == require("rediff.review").state.tree_win]])
 				end, 10),
 				"Typed ft focuses Review tree from " .. pane
 			)
 		end
-		lua([[local r=require("myeditor.review"); vim.api.nvim_set_current_win(r.state.new_win); r.compose(false)]])
+		lua([[local r=require("rediff.review"); vim.api.nvim_set_current_win(r.state.new_win); r.compose(false)]])
 		line_shortcuts("Annotation")
 		word_shortcuts("Annotation")
 		vim.rpcnotify(child, "nvim_input", ":ft<CR>")
 		equal(
 			true,
 			vim.wait(1000, function()
-				return lua([[return vim.api.nvim_get_current_win() == require("myeditor.review").state.tree_win]])
+				return lua([[return vim.api.nvim_get_current_win() == require("rediff.review").state.tree_win]])
 			end, 10),
 			"Typed ft focuses Review tree from an annotation"
 		)
 		equal(
 			0,
-			lua([[return #require("myeditor.review").state.comments]]),
+			lua([[return #require("rediff.review").state.comments]]),
 			"ft neither saves nor submits an annotation"
 		)
-		lua([[require("myeditor.review").leave(); vim.cmd("edit plan.md")]])
+		lua([[require("rediff.review").leave(); vim.cmd("edit plan.md")]])
 		equal("", lua([[return vim.fn.maparg("[", "n")]]), "Ordinary Markdown has no bare Review mapping")
 		equal(
 			1,
@@ -264,7 +264,7 @@ return function(equal)
 		local function hint()
 			return lua([[
 				for _, win in ipairs(vim.api.nvim_list_wins()) do
-					if vim.wo[win].winhighlight:find("MyeditorCommandHint", 1, true) then
+					if vim.wo[win].winhighlight:find("RediffCommandHint", 1, true) then
 						return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), "\n")
 					end
 				end
@@ -324,7 +324,7 @@ return function(equal)
 	end, debug.traceback)
 	vim.fn.jobstop(child)
 	vim.fn.jobwait({ child }, 1000)
-	_G.myeditor_input_results = nil
+	_G.rediff_input_results = nil
 	if root then
 		vim.fn.delete(root, "rf")
 	end

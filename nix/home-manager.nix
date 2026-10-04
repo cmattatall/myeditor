@@ -13,37 +13,6 @@ let
   '';
 in
 {
-  imports =
-    map
-      (
-        path:
-        lib.mkRenamedOptionModule
-          (
-            [
-              "programs"
-              "myeditor"
-            ]
-            ++ path
-          )
-          (
-            [
-              "programs"
-              "rediff"
-            ]
-            ++ path
-          )
-      )
-      [
-        [ "enable" ]
-        [ "nvimAlias" ]
-        [ "package" ]
-        [
-          "ampPlugin"
-          "enable"
-        ]
-        [ "harness" ]
-        [ "feedbackCommand" ]
-      ];
   options.programs.rediff = {
     enable = lib.mkEnableOption "the isolated rediff Neovim profile";
     nvimAlias = lib.mkEnableOption "installing rediff as nvim ahead of other editors on PATH";
@@ -55,7 +24,7 @@ in
     ampPlugin.enable = lib.mkOption {
       type = lib.types.bool;
       default = cfg.harness == "amp";
-      description = "Install the anthrodiff Amp plugin from this flake. Does not install or authenticate Amp.";
+      description = "Install the rediff Amp plugin from this flake. Does not install or authenticate Amp.";
     };
     harness = lib.mkOption {
       type = lib.types.enum [
@@ -87,20 +56,10 @@ in
     home.packages = [ cfg.package ] ++ lib.optional cfg.nvimAlias nvim;
     # A store path here pins existing shells to an obsolete editor after switch.
     home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
-    home.file.".config/amp/plugins/anthrodiff.ts" = lib.mkIf cfg.ampPlugin.enable {
-      source = ./amp/anthrodiff.ts;
+    home.file.".config/amp/plugins/rediff.ts" = lib.mkIf cfg.ampPlugin.enable {
+      source = ./amp/rediff.ts;
     };
-    home.activation.checkAnthrodiffPlugin = lib.mkIf cfg.ampPlugin.enable (
-      lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
-        for legacy in "$HOME/.config/amp/plugins/revdiff.ts" "$HOME/.config/amp/plugins/revdiff"; do
-          if [ -e "$legacy" ] || [ -L "$legacy" ]; then
-            echo "Disable the old revdiff plugin before enabling anthrodiff: $legacy" >&2
-            exit 1
-          fi
-        done
-      ''
-    );
-    xdg.configFile."myeditor/settings.json".text = builtins.toJSON {
+    xdg.configFile."rediff/settings.json".text = builtins.toJSON {
       harness = cfg.harness;
       feedback_command = cfg.feedbackCommand;
     };

@@ -1,7 +1,7 @@
 local M = {}
 local api = vim.api
-local review = require("myeditor.review")
-local git = require("myeditor.git")
+local review = require("rediff.review")
+local git = require("rediff.git")
 
 function M.explorer()
 	local s = review.active()

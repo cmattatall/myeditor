@@ -1,6 +1,6 @@
 local M = {}
 local api = vim.api
-local feedback = require("myeditor.feedback")
+local feedback = require("rediff.feedback")
 local sessions = {}
 local display_cwd, display_root
 local installing = false
@@ -71,14 +71,14 @@ local function current(cached)
 			return s
 		end
 	end
-	local review = require("myeditor.review").active()
+	local review = require("rediff.review").active()
 	if review then
 		return M.get(review.root)
 	end
 	local cwd = vim.fn.getcwd()
 	if not cached or display_cwd ~= cwd then
 		display_cwd = cwd
-		local ok, root = pcall(require("myeditor.git").root)
+		local ok, root = pcall(require("rediff.git").root)
 		display_root = ok and root or nil
 	end
 	return M.get(assert(display_root, "Not in a Git worktree"))
@@ -174,7 +174,7 @@ function M.deliver(root, id, path, argv, retry, callback)
 		s.delivery = status.status
 		if status.status == "accepted" or status.status == "completed" then
 			clear_sent_message(s, path)
-			require("myeditor.review").clear_sent(root, path)
+			require("rediff.review").clear_sent(root, path)
 		elseif status.status == "failed" then
 			notify("Feedback failed: " .. (status.error or "Inspect :ReviewOutbox before retrying"), "failed")
 		else
@@ -219,7 +219,7 @@ function M.connect()
 	local s = current()
 	s.epoch = s.epoch + 1
 	local epoch = s.epoch
-	vim.system({ "myeditor-amp-live", "discover", s.root }, { cwd = s.root, text = true }, function(result)
+	vim.system({ "rediff-amp-live", "discover", s.root }, { cwd = s.root, text = true }, function(result)
 		vim.schedule(function()
 			local ok, err = pcall(function()
 				if s.epoch ~= epoch or current() ~= s then
@@ -229,7 +229,7 @@ function M.connect()
 				local matches = vim.json.decode(result.stdout)
 				assert(
 					#matches > 0,
-					"No live Amp session for this checkout; install/enable the anthrodiff Amp plugin and try again"
+					"No live Amp session for this checkout; install/enable the rediff Amp plugin and try again"
 				)
 				local function choose(index)
 					if s.epoch ~= epoch or current() ~= s then
@@ -304,7 +304,7 @@ function M.compose()
 		api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(s.message, "\n", { plain = true }))
 		vim.bo[buf].modified = false
 		vim.keymap.set("n", "<Tab>", function()
-			return require("myeditor.review").active() and "<Cmd>Explorer<CR>" or "<Tab>"
+			return require("rediff.review").active() and "<Cmd>Explorer<CR>" or "<Tab>"
 		end, { buffer = buf, expr = true, desc = "Focus Review tree" })
 		local function capture()
 			if api.nvim_buf_is_loaded(buf) then
@@ -358,25 +358,18 @@ function M.install()
 	local target = has_session and vim.deepcopy(session.target) or {}
 	local reload = target.name == "amp-live"
 	local directory = assert(vim.env.HOME, "HOME must be set") .. "/.config/amp/plugins/"
-	local legacy = vim.uv.fs_lstat(directory .. "revdiff.ts") ~= nil
-	local prompt = "Install the bundled anthrodiff Amp plugin at "
+	local prompt = "Install the bundled rediff Amp plugin at "
 		.. directory
-		.. "anthrodiff.ts?\n"
+		.. "rediff.ts?\n"
 		.. "This does not install the Amp CLI.\n"
 		.. (
 			reload and ("Ask Amp thread " .. target.session .. " to reload its plugins after installation?")
 			or "No live Amp target selected; reload plugins manually once, then :harness connect amp."
 		)
-	if legacy then
-		prompt = prompt .. "\nThe old revdiff.ts will be moved to ~/.config/amp/plugin-backups/revdiff.ts."
-	end
-	if vim.fn.confirm(prompt, (legacy and "&Replace" or "&Install") .. "\n&Cancel", 2) ~= 1 then
+	if vim.fn.confirm(prompt, "&Install\n&Cancel", 2) ~= 1 then
 		return
 	end
-	local argv = { "myeditor-install-amp-plugin" }
-	if legacy then
-		table.insert(argv, "--replace-revdiff")
-	end
+	local argv = { "rediff-install-amp-plugin" }
 	installing = true
 	local ok, err = pcall(vim.system, argv, { text = true }, function(result)
 		vim.schedule(function()
@@ -388,9 +381,9 @@ function M.install()
 				)
 				return
 			end
-			notify("Installed anthrodiff; requesting plugin reload from Amp.")
+			notify("Installed rediff; requesting plugin reload from Amp.")
 			local started, reload_err = pcall(vim.system, {
-				"myeditor-amp-live",
+				"rediff-amp-live",
 				"reload",
 				target.connection,
 				target.session,

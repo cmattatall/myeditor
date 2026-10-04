@@ -49,7 +49,7 @@ class AmpLiveTests(unittest.TestCase):
         self.home = Path(self.temp.name) / "home"
         self.root = Path(self.temp.name) / "repo"
         self.root.mkdir(mode=0o700)
-        session = self.home / ".cache/anthrodiff/amp/session-one"
+        session = self.home / ".cache/rediff/amp/session-one"
         session.mkdir(parents=True, mode=0o700)
         os.chmod(session.parent, 0o700)
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
@@ -112,6 +112,17 @@ class AmpLiveTests(unittest.TestCase):
         self.assertEqual([("GET", True, None)], Handler.requests)
         self.assertNotIn("secret", json.dumps(found))
 
+    def test_discovery_does_not_fall_back_to_old_registry(self):
+        old = self.home / ".cache/anthrodiff/amp/session-one"
+        old.mkdir(parents=True, mode=0o700)
+        os.chmod(old.parent, 0o700)
+        old_connection = old / "connection.json"
+        old_connection.write_text(json.dumps(self.descriptor))
+        os.chmod(old_connection, 0o600)
+        self.connection.unlink()
+        self.assertEqual([], self.discover())
+        self.assertEqual([], Handler.requests)
+
     def test_discovery_ignores_root_mismatch_dead_and_unsafe_entries(self):
         self.descriptor["root"] = str(Path(self.temp.name) / "other")
         self.write_descriptor()
@@ -139,7 +150,9 @@ class AmpLiveTests(unittest.TestCase):
         self.payload = Path(self.temp.name) / "message.json"
         self.payload_write(message="Please explain this", submission_id="two")
         amp_live.send(self.connection, THREAD, self.payload)
-        self.assertTrue(Handler.requests[-1][2]["content"].startswith("Please explain this"))
+        message = json.loads(Handler.requests[-1][2]["content"])
+        self.assertEqual(["rules", "repository", "message"], list(message))
+        self.assertEqual("Please explain this", message["message"])
         self.assertNotIn("fix this", Handler.requests[-1][2]["content"])
 
     def test_only_204_accepts_and_retry_reuses_id(self):
@@ -167,13 +180,15 @@ class AmpLiveTests(unittest.TestCase):
         original = self.payload.read_bytes()
         amp_live.send(self.connection, THREAD, self.payload)
         content = Handler.requests[-1][2]["content"]
-        self.assertLess(len(content.encode()), 1500)
-        self.assertIn(
-            f"{self.root}/src/space name.lua:17-19 (old; staged; snapshot changed; "
-            "block columns 17:1+2-6, 18:3-8, 19:2+1-2+3; tabstop 4)\nKeep the boundary check", content)
-        self.assertIn("Columns are 1-based bytes", content)
-        self.assertIn("an end offset is the first excluded cell", content)
-        self.assertTrue(content.endswith(str(self.payload.absolute())))
+        self.assertLess(len(content.encode()), 2048)
+        message = json.loads(content)
+        self.assertEqual(["rules", "repository", "snapshot_archive", "annotations"], list(message))
+        self.assertEqual(str(self.payload.absolute()), message["snapshot_archive"])
+        self.assertEqual([{
+            **{key: note[key] for key in ("side", "line", "line_end", "snapshot_id", "text")},
+            "file": str(self.root.resolve() / note["file"]), "comparison": "staged", "snapshot_status": "changed",
+            "selection": {key: value for key, value in note["selection"].items() if key != "text"},
+        }], message["annotations"])
         for excluded in ("OLD FILE", "NEW FILE", "FULL PATCH", "selected α", '"snapshots"', '"comments"'):
             self.assertNotIn(excluded, content)
         self.assertEqual(original, self.payload.read_bytes())

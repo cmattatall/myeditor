@@ -1,9 +1,9 @@
 local M = {}
 local api = vim.api
-local git = require("myeditor.git")
-local review = require("myeditor.review")
-local harness = require("myeditor.harness")
-local feedback = require("myeditor.feedback")
+local git = require("rediff.git")
+local review = require("rediff.review")
+local harness = require("rediff.harness")
+local feedback = require("rediff.feedback")
 local editing_tabs = {}
 
 local function root()

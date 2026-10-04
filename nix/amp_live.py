@@ -1,4 +1,4 @@
-"""Safe stdlib bridge from myeditor submissions to the anthrodiff Amp plugin."""
+"""Safe stdlib bridge from rediff submissions to the rediff Amp plugin."""
 
 import hashlib
 import http.client
@@ -11,7 +11,7 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-from harness import GUIDANCE, review_prompt
+from harness import feedback_prompt
 
 MAX_BODY = 1024 * 1024
 
@@ -70,7 +70,7 @@ def _request(desc, port, method, body=None, timeout=0.25):
 
 def discover(root):
     root = os.path.realpath(root)
-    registry = Path.home() / ".cache" / "anthrodiff" / "amp"
+    registry = Path.home() / ".cache" / "rediff" / "amp"
     try:
         if not _private(registry, True):
             return []
@@ -130,11 +130,10 @@ def send(connection_path, expected_thread, submission_path):
     if "message" in payload:
         if not isinstance(payload["message"], str) or not payload["message"]:
             raise ValueError("invalid general message")
-        content = payload["message"] + "\n\n" + GUIDANCE
     else:
         if not isinstance(payload.get("comments"), list) or not isinstance(payload.get("snapshots"), dict):
             raise ValueError("invalid review submission")
-        content = review_prompt(payload, submission_path)
+    content = feedback_prompt(payload, submission_path)
     request_id = payload["submission_id"]
     request = {"id": request_id, "content": content}
     body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
@@ -189,7 +188,7 @@ def request_reload(connection_path, expected_thread, root):
     body = json.dumps({
         "id": "reload-" + uuid.uuid4().hex,
         "content": (
-            "I just confirmed :harness install amp in myeditor and installed the updated anthrodiff plugin. "
+            "I just confirmed :harness install amp in rediff and installed the updated rediff plugin. "
             "Please call reload_plugins now to activate it. This request authorizes only that reload; "
             "do not install anything else, edit files, or change Git state. Continue any existing work afterward."
         ),
@@ -211,7 +210,7 @@ def main():
     elif len(sys.argv) == 5 and sys.argv[1] == "reload":
         print(request_reload(*sys.argv[2:]))
     else:
-        raise ValueError("usage: myeditor-amp-live discover ROOT | send CONNECTION THREAD SUBMISSION.json | reload CONNECTION THREAD ROOT")
+        raise ValueError("usage: rediff-amp-live discover ROOT | send CONNECTION THREAD SUBMISSION.json | reload CONNECTION THREAD ROOT")
 
 
 if __name__ == "__main__":

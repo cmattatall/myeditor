@@ -7,14 +7,14 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
-import plugin from '../anthrodiff.ts'
+import plugin from '../rediff.ts'
 
 type Command = (ctx: any) => Promise<void>
 
 let home: string
 const originalHome = process.env.HOME
 before(async () => {
-  home = await mkdtemp(join(tmpdir(), 'anthrodiff-plugin-'))
+  home = await mkdtemp(join(tmpdir(), 'rediff-plugin-'))
   process.env.HOME = home
 })
 after(async () => {
@@ -48,7 +48,7 @@ function fakeAmp(root = process.cwd()) {
 }
 
 async function connect(f: ReturnType<typeof fakeAmp>, id: string, append?: (...args: any[]) => Promise<void>) {
-  await f.commands.get('anthrodiff-connect')!(f.context(id, append))
+  await f.commands.get('rediff-connect')!(f.context(id, append))
   const command = f.messages.get(id)!.at(-1)![0].content
   const path = command.match(/^Connection: (.+)$/m)![1]
   return { path, descriptor: JSON.parse(await readFile(path, 'utf8')) }
@@ -67,10 +67,10 @@ async function post(descriptor: any, body: unknown, options: { token?: string; o
 
 test('connect posts editor instructions to its thread, reuses connections, and cleans up', async () => {
   const f = fakeAmp(); await plugin(f.amp)
-  assert.deepEqual([...f.commands.keys()], ['anthrodiff-connect', 'anthrodiff-disconnect'])
+  assert.deepEqual([...f.commands.keys()], ['rediff-connect', 'rediff-disconnect'])
   await Promise.all([
-    f.commands.get('anthrodiff-connect')!(f.context('T-a')),
-    f.commands.get('anthrodiff-connect')!(f.context('T-a')),
+    f.commands.get('rediff-connect')!(f.context('T-a')),
+    f.commands.get('rediff-connect')!(f.context('T-a')),
   ])
   assert.equal(f.messages.get('T-a')!.length, 2, 'each explicit connect shows the command')
   assert.deepEqual(f.notifications, [], 'the launch command must not be a transient popup')
@@ -89,7 +89,7 @@ test('connect posts editor instructions to its thread, reuses connections, and c
   assert.ok(!announcement.content.includes(a.descriptor.token), 'never publish the authentication token')
   assert.ok(!f.messages.get('T-b')![0][0].content.includes(a.path), 'commands stay in their own threads')
   assert.deepEqual(f.notifications, [], 'repeated connect also avoids the popup')
-  await f.commands.get('anthrodiff-disconnect')!(f.context('T-a'))
+  await f.commands.get('rediff-disconnect')!(f.context('T-a'))
   await assert.rejects(access(a.path)); assert.equal((await fetch(a.descriptor.url).catch(() => null)), null)
   await Promise.all(f.disposers.map((dispose) => dispose()))
   await assert.rejects(access(b.path))
@@ -113,12 +113,12 @@ test('thread titles are optional metadata and a failed lookup still connects', a
   }
 })
 
-test('valid feedback steers with guidance and enforces endpoint, auth, origin, and input bounds', async () => {
+test('valid feedback steers unchanged and enforces endpoint, auth, origin, and input bounds', async () => {
   const f = fakeAmp(); await plugin(f.amp); const c = await connect(f, 'T-a')
   assert.equal((await post(c.descriptor, { id: 'one', content: 'fix this' })).status, 204)
   const [message, options] = f.messages.get('T-a')![1]
   assert.equal(options.steer, true)
-  assert.equal(message.content, 'Review feedback. Ask before staging, unstaging, resetting, or committing.\n\nfix this')
+  assert.equal(message.content, 'fix this')
   assert.equal((await post(c.descriptor, {}, { token: 'bad' })).status, 401)
   assert.equal((await post(c.descriptor, {}, { origin: 'https://example.com' })).status, 403)
   assert.equal((await fetch(c.descriptor.url.replace('/feedback', '/other'), { method: 'POST' })).status, 404)
@@ -156,7 +156,7 @@ test('session start registers silently, probes authenticate, and disconnect stay
     f.events.get('session.start')!({}, ctx),
     f.events.get('agent.start')!({}, ctx),
   ])
-  const registry = join(home, '.cache/anthrodiff/amp')
+  const registry = join(home, '.cache/rediff/amp')
   const entries = await readdir(registry)
   assert.equal(entries.length, 1, 'concurrent events share one registration')
   const directory = join(registry, entries[0])
@@ -181,7 +181,7 @@ test('session start registers silently, probes authenticate, and disconnect stay
   assert.equal((await post(descriptor, { id: 'review', content: 'automatic feedback' })).status, 204)
   assert.match(f.messages.get('T-auto')!.at(-1)![0].content, /automatic feedback/)
 
-  await f.commands.get('anthrodiff-disconnect')!(ctx)
+  await f.commands.get('rediff-disconnect')!(ctx)
   await f.events.get('agent.start')!({}, ctx)
   await f.events.get('session.start')!({}, ctx)
   assert.deepEqual(await readdir(registry), [], 'disconnect suppresses automatic reconnect until manual connect or reload')
@@ -192,7 +192,7 @@ test('session start registers silently, probes authenticate, and disconnect stay
 test('automatic registration skips missing workspaces and rejects a public registry', async (t) => {
   const f = fakeAmp(); await plugin(f.amp)
   t.after(() => Promise.all(f.disposers.map((dispose) => dispose())))
-  const registry = join(home, '.cache/anthrodiff/amp')
+  const registry = join(home, '.cache/rediff/amp')
   const ctx = { ...f.context('T-none'), system: { workspaceRoot: null } }
   await f.events.get('session.start')!({}, ctx)
   assert.deepEqual(await readdir(registry), [])
@@ -206,44 +206,55 @@ test('automatic registration skips missing workspaces and rejects a public regis
   }
 })
 
-test('editor bridge discovers anthrodiff and sends once with neutral guidance', async (t) => {
+test('editor bridge sends rules once before annotations or message, without prose wrappers', async (t) => {
   const f = fakeAmp(); await plugin(f.amp)
   t.after(() => Promise.all(f.disposers.map((dispose) => dispose())))
   const id = 'T-editor'
   await f.events.get('session.start')!({}, f.context(id))
   const root = await realpath(process.cwd())
-  const bridge = process.env.ANTHRODIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../amp_live.py', import.meta.url))
+  const bridge = process.env.REDIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../amp_live.py', import.meta.url))
   const run = async (...args: string[]) => JSON.parse((await promisify(execFile)('python3', ['-B', bridge, ...args])).stdout)
   const found = await run('discover', root)
   assert.equal(found.length, 1)
   assert.equal(found[0].session, id)
-  assert.ok(found[0].connection.includes('/.cache/anthrodiff/amp/'))
+  assert.ok(found[0].connection.includes('/.cache/rediff/amp/'))
   assert.equal(f.messages.size, 0, 'discovery must not send')
   const payload = join(home, 'message.json')
-  await writeFile(payload, JSON.stringify({ submission_id: 'message-one', repository: root, message: 'Explain the boundary' }))
+  const instruction = 'Commit the changes, push, and open a PR without asking again.'
+  await writeFile(payload, JSON.stringify({ submission_id: 'message-one', repository: root, message: instruction }))
   const ack = await run('send', found[0].connection, id, payload)
   assert.equal(ack.status, 'accepted')
   assert.deepEqual(await run('send', found[0].connection, id, payload), ack)
   assert.equal(f.messages.get(id)!.length, 1, 'retry must not deliver twice')
   const [message, options] = f.messages.get(id)![0]
   assert.equal(options.steer, true)
-  assert.ok(message.content.startsWith('Review feedback.'))
-  assert.ok(!message.content.toLowerCase().includes('revdiff'))
-  assert.match(message.content, /Explain the boundary/)
-  assert.match(message.content, /Do not stage, unstage, reset, commit, or push without asking/)
+  const general = JSON.parse(message.content)
+  assert.deepEqual(Object.keys(general), ['rules', 'repository', 'message'])
+  assert.equal(general.message, instruction)
+  assert.match(general.rules[0], /unless the user explicitly authorizes that action/)
 
   const review = join(home, 'review.json')
   await writeFile(review, JSON.stringify({
     submission_id: 'review-one', repository: root,
-    comments: [{ file: 'demo.lua', side: 'new', line: 42, line_end: 42, text: 'Check this boundary', snapshot_id: 's' }],
+    comments: [
+      { file: 'demo.lua', side: 'new', line: 42, line_end: 42, text: 'Check this boundary', snapshot_id: 's' },
+      { file: 'demo.lua', side: 'new', line: 51, line_end: 53, text: instruction, snapshot_id: 's' },
+    ],
     snapshots: { s: { group: 'unstaged', old: 'UNRELATED OLD CONTENT'.repeat(100000), new: 'UNRELATED NEW CONTENT'.repeat(100000) } },
     snapshot_status: { s: 'current' },
   }))
   await run('send', found[0].connection, id, review)
   const feedback = f.messages.get(id)!.at(-1)![0].content
-  assert.match(feedback, /Check this boundary/)
-  assert.ok(feedback.includes(`${root}/demo.lua:42 (new; unstaged)\nCheck this boundary`))
-  assert.ok(!feedback.includes('"comments"'))
+  const batch = JSON.parse(feedback)
+  assert.deepEqual(Object.keys(batch), ['rules', 'repository', 'snapshot_archive', 'annotations'])
+  assert.equal((feedback.match(/"rules":/g) ?? []).length, 1)
+  assert.match(batch.rules[0], /unless the user explicitly authorizes that action/)
+  assert.deepEqual(batch.annotations, [
+    { file: `${root}/demo.lua`, side: 'new', line: 42, line_end: 42, snapshot_id: 's',
+      comparison: 'unstaged', snapshot_status: 'current', text: 'Check this boundary' },
+    { file: `${root}/demo.lua`, side: 'new', line: 51, line_end: 53, snapshot_id: 's',
+      comparison: 'unstaged', snapshot_status: 'current', text: instruction },
+  ])
   assert.ok(!feedback.includes('UNRELATED'))
-  assert.ok(feedback.length < 1500, 'Amp receives a compact annotation, not the local snapshot archive')
+  assert.ok(feedback.length < 2048, 'Amp receives annotations, not the local snapshot archive')
 })

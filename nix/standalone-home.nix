@@ -1,6 +1,6 @@
 # Bootstrap for users without an existing Home Manager configuration.
 {
-  flake ? builtins.getFlake (builtins.getEnv "MYEDITOR_FLAKE"),
+  flake ? builtins.getFlake (builtins.getEnv "REDIFF_FLAKE"),
   system ? builtins.currentSystem,
   username ? builtins.getEnv "USER",
   homeDirectory ? builtins.getEnv "HOME",
@@ -13,7 +13,7 @@
       home = {
         inherit username homeDirectory;
         stateVersion = "26.05";
-        file.".config/myeditor/standalone-owner".text = "myeditor-standalone-v1\n";
+        file.".config/rediff/standalone-owner".text = "rediff-standalone-v1\n";
       };
       programs.rediff = {
         enable = true;

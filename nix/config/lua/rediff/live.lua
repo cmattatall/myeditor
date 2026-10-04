@@ -4,12 +4,12 @@ local timers = {}
 
 function M.ready(s)
 	local win = api.nvim_get_current_win()
-	return require("myeditor.review").active() == s
+	return require("rediff.review").active() == s
 		and not s.composer
 		and not s.annotation_id
 		and vim.fn.mode() == "n"
 		and (win == s.tree_win or win == s.old_win or win == s.new_win)
-		and not require("myeditor.feedback").busy(s.root)
+		and not require("rediff.feedback").busy(s.root)
 end
 
 -- Porcelain v2 includes HEAD/index object IDs. Stat changed worktree paths too:
@@ -79,7 +79,7 @@ function M.start(s)
 					local ok, err = pcall(function()
 						assert(result.code == 0, vim.trim(result.stderr or "Git status failed"))
 						local signature = fingerprint(s.root, result.stdout)
-						if signature ~= previous and require("myeditor.review").refresh_live() then
+						if signature ~= previous and require("rediff.review").refresh_live() then
 							previous = signature
 						end
 					end)
