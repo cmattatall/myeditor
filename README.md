@@ -5,12 +5,12 @@ Testing
 Read diff: a human reading the agent's changes. A Nix-packaged Neovim setup
 for modal editing and agent-assisted code review.
 
-The self-contained [`nix/`](nix/) directory contains the flake, Home Manager
-module, pinned plugins, configuration, and tests. Copy that directory into
-your dotfiles or consume it as a flake input.
+The root flake packages the Home Manager module, editor configuration, and tests
+under [`nix/`](nix/), plus harness plugins under [`plugins/`](plugins/).
+Consume this repository as a flake input or vendor both directories with the flake.
 
 ```sh
-nix run path:./nix
+nix run path:.
 ```
 
 To install the Nix-built editor as `nvim` through Home Manager:
@@ -37,9 +37,9 @@ thread/session per repository with `:ReviewHarness amp T-…`; configuration
 and credentials stay separate from your portable editor setup.
 
 For live Amp steering, this repository owns the **rediff** plugin and
-installer in [`nix/amp/`](nix/amp/). Enable
+installer in [`plugins/amp/`](plugins/amp/). Enable
 `programs.rediff.ampPlugin.enable = true` in Home Manager, or run
-`:harness install amp` in the editor (shell: `bash nix/amp/install.sh`), then
+`:harness install amp` in the editor (shell: `bash plugins/amp/install.sh`), then
 restart/reload Amp and use `:harness connect amp`.
 Other plugin files are left untouched.
 

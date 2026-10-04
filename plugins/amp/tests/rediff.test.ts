@@ -212,7 +212,7 @@ test('editor bridge sends rules once before annotations or message, without pros
   const id = 'T-editor'
   await f.events.get('session.start')!({}, f.context(id))
   const root = await realpath(process.cwd())
-  const bridge = process.env.REDIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../amp_live.py', import.meta.url))
+  const bridge = process.env.REDIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../../nix/amp_live.py', import.meta.url))
   const run = async (...args: string[]) => JSON.parse((await promisify(execFile)('python3', ['-B', bridge, ...args])).stdout)
   const found = await run('discover', root)
   assert.equal(found.length, 1)

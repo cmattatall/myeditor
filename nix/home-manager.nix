@@ -57,7 +57,7 @@ in
     # A store path here pins existing shells to an obsolete editor after switch.
     home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
     home.file.".config/amp/plugins/rediff.ts" = lib.mkIf cfg.ampPlugin.enable {
-      source = ./amp/rediff.ts;
+      source = ../plugins/amp/rediff.ts;
     };
     xdg.configFile."rediff/settings.json".text = builtins.toJSON {
       harness = cfg.harness;

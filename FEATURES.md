@@ -149,7 +149,7 @@ stop the agent. An accepted ACK means queued steering, not a completed turn.
 Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate
 from `:ReviewHarness amp THREAD`, which starts an Amp CLI continuation. This
-repository owns the rediff plugin, installer, and tests under `nix/amp/`.
+repository owns the rediff plugin, installer, and tests under `plugins/amp/`.
 Home Manager can install it; Home Manager and shell installs require a manual
 reload. The registry is
 `~/.cache/rediff/amp` with no legacy discovery. Feedback uses rules-first JSON

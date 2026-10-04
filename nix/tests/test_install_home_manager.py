@@ -25,7 +25,9 @@ class InstallerTests(unittest.TestCase):
                         XDG_CONFIG_HOME=str(self.home / ".config"), ZDOTDIR=str(self.home),
                         PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
         self.executable(self.bin / "id", 'echo rediff-install-test\n')
-        self.executable(self.bin / "nix", 'printf "%s\\n" "$@" > "$HOME/build-args"\nprintf "%s\\n" "$HOME/generation"\n')
+        self.executable(self.bin / "nix", 'printf "%s\\n" "$@" > "$HOME/build-args"\n'
+                        'printf "%s\\n" "$REDIFF_FLAKE" > "$HOME/flake-path"\n'
+                        'printf "%s\\n" "$HOME/generation"\n')
         self.executable(self.generation / "activate", 'touch "$HOME/activated"\n')
 
     def executable(self, path, body):
@@ -44,6 +46,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((self.home / "build-args").read_text().splitlines(), [
             "build", "--impure", "--file", str(INSTALLER.parent / "standalone-home.nix"),
             "--no-link", "--print-out-paths"])
+        self.assertEqual((self.home / "flake-path").read_text().strip(),
+                         "path:" + str(INSTALLER.parent.parent))
 
     def test_switch_preserves_shell_and_is_repeatable(self):
         profile = self.home / ".local/state/nix/profiles/home-manager"

@@ -5,7 +5,7 @@ case "${1:---build}" in
     --build|--switch) mode=${1:---build} ;;
     --help|-h)
         echo "Usage: ./install.sh [--build | --switch]"
-        echo "Or, from a vendored nix directory: bash install-home-manager.sh [--build | --switch]"
+        echo "Or: bash nix/install-home-manager.sh [--build | --switch]"
         echo "Default: build only. --switch activates Home Manager and adds its session setup to your shell rc."
         echo "For an existing Home Manager setup, import home-manager.nix instead; see nix/README.md."
         exit 0 ;;
@@ -14,7 +14,8 @@ esac
 if [ "$#" -gt 1 ]; then echo "Expected at most one argument" >&2; exit 2; fi
 
 source_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-export REDIFF_FLAKE="path:$source_dir"
+root=$(dirname -- "$source_dir")
+export REDIFF_FLAKE="path:$root"
 export USER
 USER=$(id -un)
 : "${HOME:?HOME must be set}"

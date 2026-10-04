@@ -1,28 +1,30 @@
 # rediff: read agent diffs
 
-This directory is a self-contained flake. It packages Neovim, Git, ripgrep, difftastic,
+The repository-root flake packages Neovim, Git, ripgrep, difftastic,
 Neo-tree, Codediff (including its compiled native library), review.nvim, and
 the custom Review workspace. Nix owns dependency versions; there is no
 runtime plugin manager and no first-launch plugin/library download.
+Nix modules and editor configuration live here; harness plugins live under
+`plugins/<harness>/` at the repository root.
 
 ## Try it without changing your configuration
 
 Requires Nix with `nix-command` and `flakes` enabled. From the repository:
 
 ```sh
-nix run path:./nix
+nix run path:.
 ```
 
 Or, after these changes have been published:
 
 ```sh
-nix run 'github:cmattatall/myeditor?dir=nix'
+nix run github:cmattatall/myeditor
 ```
 
 Run from a Git worktree to review its changes. Arguments are passed to Neovim:
 
 ```sh
-nix run path:/path/to/rediff/nix -- src/main.lua
+nix run path:/path/to/rediff -- src/main.lua
 ```
 
 Interactive launches inside a Git worktree open Review automatically, focused
@@ -61,8 +63,8 @@ From the repository root:
 command -v nvim       # Should resolve to a Nix store path, not Homebrew
 ```
 
-The root installer delegates to `nix/install-home-manager.sh`; a vendored copy
-of this directory can use `bash install-home-manager.sh` with the same flags.
+The root installer delegates to `nix/install-home-manager.sh`, which uses the
+flake and lockfile at the repository root. Both scripts accept the same flags.
 Nix and flakes must already be available. No separate Home Manager CLI is needed.
 `standalone-home.nix` uses this flake's locked Home Manager/nixpkgs and reads
 only the host system, username, and home directory through impure evaluation.
@@ -99,7 +101,7 @@ configuration over a larger home configuration: Home Manager manages one profile
 Add the flake to your existing flake's inputs:
 
 ```nix
-inputs.rediff.url = "github:cmattatall/myeditor?dir=nix";
+inputs.rediff.url = "github:cmattatall/myeditor";
 ```
 
 Add its module and enable it in your Home Manager configuration:
@@ -114,6 +116,7 @@ Add its module and enable it in your Home Manager configuration:
 
 Use `programs.rediff` and `inputs.rediff` when upgrading an existing configuration.
 The GitHub URLs above retain the repository's current name until it is renamed.
+Remove `?dir=nix` from older flake inputs; the flake now lives at the root.
 `nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
 they opt in. Disable any other Home Manager `nvim` package to avoid a profile
 collision. If Home Manager does not manage your shell, source
@@ -126,15 +129,16 @@ pass it through `extraSpecialArgs` if your home module is a separate file.
 Then run your usual `home-manager switch --flake ...` (or your existing
 NixOS/nix-darwin rebuild command if Home Manager is integrated there).
 
-To vendor this instead, copy this entire directory, including `flake.lock`,
-into your dotfiles as `rediff/` and use:
+To vendor this instead, copy the root `flake.nix`, `flake.lock`, and `install.sh`
+alongside the complete `nix/` and `plugins/` directories into your dotfiles as
+`rediff/`, preserving their layout, and use:
 
 ```nix
 inputs.rediff.url = "path:./rediff";
 ```
 
 Keep copied files tracked if the enclosing flake is a Git repository.
-The module has no dependency on files outside this directory. By default
+The module needs both directories, not just `nix/`. By default
 the editor uses its own locked nixpkgs rather than following your system's,
 so changing your system's packages does not silently change this editor.
 
@@ -321,7 +325,7 @@ includes the adapters, not the agent CLIs or credentials.
 
 ### Steer a live Amp process
 
-This repository owns the **rediff** Amp plugin in `amp/rediff.ts`,
+This repository owns the **rediff** Amp plugin in `plugins/amp/rediff.ts`,
 its installer, and tests. It publishes a private live registry at
 `~/.cache/rediff/amp`. It has no runtime dependency on the revdiff fork
 and does not discover older registries. The plugin forwards the editor's
@@ -379,7 +383,7 @@ Home Manager-owned symlinks are never overwritten; update those through Home Man
 The same installer can be run from this repository's root:
 
 ```sh
-bash nix/amp/install.sh
+bash plugins/amp/install.sh
 ```
 
 The installer only writes `rediff.ts` and refuses to replace symlinks
@@ -572,18 +576,19 @@ to be sent to another agent; verify the binding before submitting.
 ## Development and updates
 
 ```sh
-nix build path:./nix
-nix flake check path:./nix
+nix build path:.
+nix flake check path:.
 ```
 
-From inside this directory, use `path:.` instead; format Nix files there with
-`nix fmt -- *.nix`. `flake check` builds a sample
+Run these commands from the repository root; from `nix/`, use `path:..` instead.
+Format Nix files from the root with `nix fmt -- flake.nix nix/*.nix`.
+`flake check` builds a sample
 Home Manager generation without activating it, runs Neovim integration tests
 against a disposable Git repository, tests the harness adapters, and exercises
 the rediff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
 It does not contact a live LLM or alter your Home Manager profile.
 
-Update nixpkgs/Home Manager with `nix flake update --flake path:./nix` and rerun
+Update nixpkgs/Home Manager with `nix flake update --flake path:.` and rerun
 checks. Codediff and review.nvim use explicit tested revisions in `flake.nix`;
 change those URLs deliberately before refreshing the lock. The custom workspace
 uses internal rendering APIs, so plugin updates require integration testing.

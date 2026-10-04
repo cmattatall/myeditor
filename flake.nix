@@ -32,7 +32,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          editor = pkgs.callPackage ./package.nix { inherit inputs; };
+          editor = pkgs.callPackage ./nix/package.nix { inherit inputs; };
         in
         {
           default = editor;
@@ -51,7 +51,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           testHome = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/review-test" else "/home/review-test";
-          standalone = import ./standalone-home.nix {
+          standalone = import ./nix/standalone-home.nix {
             flake = self;
             inherit system;
             username = "review-test";
@@ -88,7 +88,7 @@
                 printf '#!/bin/sh\nexit 1\n' > "$HOME/homebrew/bin/nvim"
                 chmod +x "$HOME/homebrew/bin/nvim"
                 export PATH="$HOME/homebrew/bin:$PATH"
-                python3 -B ${./tests/test_install_home_manager.py} ${self}/install-home-manager.sh
+                python3 -B ${./nix/tests/test_install_home_manager.py} ${self}/nix/install-home-manager.sh
                 ln -s ${standalone}/home-path "$HOME/.nix-profile"
                 sed 's|${testHome}|'"$HOME"'|g' ${standalone}/home-path/etc/profile.d/hm-session-vars.sh > "$TMPDIR/session-vars.sh"
                 unset __HM_SESS_VARS_SOURCED
@@ -118,10 +118,10 @@
               }
               ''
                 export HOME="$TMPDIR/home"
-                export REDIFF_TEST_BRIDGE=${self}/amp_live.py
+                export REDIFF_TEST_BRIDGE=${self}/nix/amp_live.py
                 mkdir -p "$HOME"
-                node --test ${./amp}/tests/rediff.test.ts
-                bash ${./amp}/tests/install.test.sh
+                node --test ${./plugins/amp}/tests/rediff.test.ts
+                bash ${./plugins/amp}/tests/install.test.sh
                 touch "$out"
               '';
           review =
@@ -136,15 +136,15 @@
               ''
                 export HOME="$TMPDIR/home"
                 mkdir -p "$HOME"
-                rediff --headless -l ${./tests}/run.lua
-                python3 -B ${./tests/test_harness.py} ${./harness.py}
-                python3 -B ${./tests/test_amp_live.py} ${self}/amp_live.py
-                python3 -B ${./tests}/test_ui.py
+                rediff --headless -l ${./nix/tests}/run.lua
+                python3 -B ${./nix/tests/test_harness.py} ${./nix/harness.py}
+                python3 -B ${./nix/tests/test_amp_live.py} ${self}/nix/amp_live.py
+                python3 -B ${./nix/tests}/test_ui.py
                 touch "$out"
               '';
         }
       );
       formatter = eachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt);
-      homeManagerModules.default = import ./home-manager.nix { inherit self; };
+      homeManagerModules.default = import ./nix/home-manager.nix { inherit self; };
     };
 }
