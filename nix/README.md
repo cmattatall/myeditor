@@ -179,8 +179,10 @@ so changing your system's packages does not silently change this editor.
    agent edits files; **Space R** refreshes immediately. **:ReviewArchive**
    archives any remaining notes.
 
-Review polls saved files and the index every three seconds by default while the
-tree, diff, or harness message has Normal-mode focus. Refresh keeps the selected
+Connected Amp tool-result hooks trigger Review refreshes after reported file edits
+in this worktree. Git determines which hunks changed since the last accepted send.
+Polling every three seconds catches other edits and index changes. Refresh runs
+with Normal-mode tree, diff, or harness-message focus and keeps the selected
 file, pane focus, and cursor/scroll positions where possible. It pauses for
 annotation editing, typing, selections, commands/pickers, and feedback delivery.
 Annotation snapshots stay unchanged. Refresh never saves buffers, stages files,
@@ -189,7 +191,7 @@ The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.
 Use **Space R** / **:ReviewRefresh** for these snapshot buffers, not `:bufdo e`.
 Outside Review, native `:checktime` checks ordinary buffers for external changes.
 
-Configure the interval in Home Manager (seconds, `0` disables automatic refresh):
+Configure fallback polling in Home Manager (seconds, `0` disables polling):
 
 ```nix
 programs.rediff.reviewRefreshInterval = 10;
@@ -199,7 +201,7 @@ Without Home Manager, merge `"review_refresh_interval": 10` into
 `~/.config/rediff/settings.json` (respecting `XDG_CONFIG_HOME`). The value must be
 a non-negative whole number; the default is `3`. Apply Home Manager changes or
 save the unmanaged JSON file, then leave and re-enter Review to use the new value.
-**Space R** / **:ReviewRefresh** remains available when polling is disabled.
+Amp file events and **Space R** / **:ReviewRefresh** still work with polling disabled.
 
 The sidebar separates **STAGED** and **UNSTAGED** with colored header rows and
 counts; empty sections remain visible. Untracked files are included in UNSTAGED.

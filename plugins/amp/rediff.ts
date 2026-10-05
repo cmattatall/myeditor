@@ -27,7 +27,7 @@ import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 
 export const description = 'Rediff: receive editor review feedback in the current Amp thread.'
 
@@ -38,17 +38,18 @@ type ActivityState = 'idle' | 'running' | 'awaiting-approval' | 'error' | 'unkno
 type ActivitySnapshot = {
   version: 1; root: string; thread: string; sequence: number
   state: ActivityState; title: string; tool: string | null
+  files_revision: number
 }
 type StreamClient = {
   response: ServerResponse; pending: string | null; heartbeat: NodeJS.Timeout
 }
 type Activity = {
   call(id: string, tool: string): void
-  result(id: string): void
+  result(id: string, filesChanged: boolean): void
   subscribe(response: ServerResponse): void
   dispose(): void
 }
-type Connection = { server: Server; directory: string; descriptor: string; activity: Activity }
+type Connection = { server: Server; directory: string; descriptor: string; root: string; activity: Activity }
 type Outcome = { content: string; result: Promise<void> }
 
 const HEARTBEAT_MS = 15_000
@@ -60,6 +61,7 @@ async function createActivity(thread: PluginThread, root: string): Promise<Activ
   let observedState = false
   let observedTitle = false
   let sequence = 0
+  let filesRevision = 0
   const tools = new Map<string, string>()
   const clients = new Set<StreamClient>()
 
@@ -67,6 +69,7 @@ async function createActivity(thread: PluginThread, root: string): Promise<Activ
     version: 1, root, thread: thread.id, sequence,
     state: state === 'awaiting-approval' || state === 'error' ? state : tools.size ? 'running' : state,
     title, tool: tools.size ? [...tools.values()].at(-1)! : null,
+    files_revision: filesRevision,
   } satisfies ActivitySnapshot) + '\n'
   const write = (client: StreamClient, value: string): void => {
     if (client.response.destroyed || client.response.writableEnded) return
@@ -99,7 +102,12 @@ async function createActivity(thread: PluginThread, root: string): Promise<Activ
   ])
   return {
     call(id, tool) { tools.set(id, tool); publish() },
-    result(id) { if (tools.delete(id)) publish() },
+    result(id, filesChanged) {
+      const tracked = tools.delete(id)
+      // Retain invalidations in every snapshot, including after stream coalescing/reconnect.
+      if (filesChanged) filesRevision++
+      if (tracked || filesChanged) publish()
+    },
     subscribe(response) {
       const client = { response, pending: null } as StreamClient
       client.heartbeat = setInterval(() => write(client, '\n'), HEARTBEAT_MS)
@@ -308,7 +316,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
         capabilities: ['activity'],
         ...(title ? { title } : {}),
       }), { mode: 0o600 })
-      connections.set(thread.id, { server, directory, descriptor, activity })
+      connections.set(thread.id, { server, directory, descriptor, root, activity })
     } catch (error) {
       activity.dispose()
       await closeServer(server)
@@ -349,7 +357,19 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
     return { action: 'allow' }
   })
   amp.on('tool.result', (event) => {
-    connections.get(event.thread.id)?.activity.result(event.toolUseID)
+    const connection = connections.get(event.thread.id)
+    if (!connection) return
+    let filesChanged = false
+    try {
+      filesChanged = (amp.helpers.filesModifiedByToolCall(event) ?? []).some((uri) => {
+        const path = relative(connection.root, amp.helpers.filePathFromURI(uri))
+        return path !== '' && path !== '..' && !path.startsWith('../') && !isAbsolute(path)
+      })
+    } catch (error) {
+      amp.logger.log('rediff file-change detection failed', error)
+    }
+    // Error/cancelled tools may have partially applied edits; Git decides what actually changed.
+    connection.activity.result(event.toolUseID, filesChanged)
   })
   amp.registerCommand('rediff-connect', {
     category: 'rediff', title: 'connect', description: 'Connect editor review feedback to this thread',

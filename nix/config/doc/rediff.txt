@@ -118,8 +118,9 @@ use the previous file at the end; hunk actions wrap to the next remaining hunk.
 An exhausted group stays empty instead of following the file into the other group.
 Git may combine nearby displayed changes into one staging hunk.
 
-Review polls saved files/index every three seconds by default with Normal-mode
-tree/diff/harness-message focus. It preserves selection/focus and pauses for
+Connected Amp file-edit events trigger refreshes in this worktree. Polling every
+three seconds catches other edits/index changes. Refresh runs with Normal-mode
+tree/diff/harness-message focus, preserves selection/focus, and pauses for
 annotation editing, typing, selections, commands, pickers and delivery.
 Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
@@ -128,9 +129,10 @@ Outside Review, :checktime checks loaded files for external changes.
 
 Set programs.rediff.reviewRefreshInterval in Home Manager, or add
 "review_refresh_interval": 10 to settings.json in stdpath('config') (normally
-~/.config/rediff). Use a whole number of seconds; 0 disables automatic refresh.
+~/.config/rediff). Use a whole number of seconds; 0 disables fallback polling.
 Apply your Home Manager configuration, or save settings.json if not managed by
-Home Manager, then leave/re-enter Review (Space q, Space r). Space R still works.
+Home Manager, then leave/re-enter Review (Space q, Space r).
+Amp file events and Space R still work with polling disabled.
 
 ==============================================================================
 AGENT HARNESSES                                               *rediff-harness*

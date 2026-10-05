@@ -156,7 +156,7 @@ class AmpLiveTests(unittest.TestCase):
     def test_activity_stream_validates_and_flushes_snapshots(self):
         snapshot = {"version": 1, "root": str(self.root.resolve()), "thread": THREAD,
                     "sequence": 0, "state": "running", "title": "Review", "tool": "shell_command"}
-        idle = dict(snapshot, sequence=1, state="idle", tool=None)
+        idle = dict(snapshot, sequence=1, state="idle", tool=None, files_revision=2)
         Handler.events = b"\n" + json.dumps(snapshot).encode() + b"\n\n" + json.dumps(idle).encode() + b"\n"
         with patch("builtins.print") as output:
             with self.assertRaisesRegex(RuntimeError, "disconnected"):
@@ -165,13 +165,20 @@ class AmpLiveTests(unittest.TestCase):
         self.assertTrue(all(call.kwargs.get("flush") for call in output.call_args_list))
         self.assertEqual([("GET", True, None)], Handler.requests)
         for invalid in (dict(snapshot, root="/wrong"), dict(snapshot, thread="T-other"),
-                        dict(snapshot, sequence=True), dict(snapshot, state="invented"), False):
+                        dict(snapshot, sequence=True), dict(snapshot, state="invented"),
+                        *(dict(snapshot, files_revision=value) for value in (-1, False, 1.5, "2")), False):
             with self.subTest(invalid=invalid):
                 Handler.events = json.dumps(invalid).encode() + b"\n"
                 with patch("builtins.print") as output:
                     with self.assertRaisesRegex(RuntimeError, "invalid Amp activity"):
                         amp_live.watch(self.connection, THREAD)
                 output.assert_not_called()
+
+        Handler.events = (json.dumps(idle) + "\n" + json.dumps(dict(idle, sequence=2, files_revision=1)) + "\n").encode()
+        with patch("builtins.print") as output:
+            with self.assertRaisesRegex(RuntimeError, "invalid Amp activity"):
+                amp_live.watch(self.connection, THREAD)
+        self.assertEqual(1, output.call_count, "File revisions cannot go backwards within a stream")
 
     def test_discovery_does_not_fall_back_to_old_registry(self):
         old = self.home / ".cache/anthrodiff/amp/session-one"

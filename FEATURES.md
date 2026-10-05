@@ -60,12 +60,12 @@ revdiff parity.
 - **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
-- Review polls saved files and the index every three seconds by default,
-  including from the harness message pane in Normal mode, preserving selection
-  and focus. Refresh pauses for annotation editing, typing, selections, commands,
-  pickers, and delivery. **Space R** also refreshes immediately.
+- Connected Amp file-edit events trigger Review refreshes. Three-second polling
+  catches other edits/index changes. Normal-mode tree/diff/harness-message focus
+  allows refresh; annotation editing, typing, selections, commands, pickers, and
+  delivery defer it. Selection and focus stay put. **Space R** refreshes immediately.
   Home Manager's `programs.rediff.reviewRefreshInterval` (JSON:
-  `review_refresh_interval`) sets whole seconds; `0` disables automatic refresh.
+  `review_refresh_interval`) sets whole seconds; `0` disables polling, not events.
   Leave and re-enter Review after changing settings.
 - Changes since the last accepted local-harness send get violet **◆** file/hunk
   indicators, with a brief tree pulse. After a changed hunk is visible for one

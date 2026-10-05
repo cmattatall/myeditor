@@ -90,7 +90,7 @@ local function start(entry)
 		return
 	end
 	assert(type(entry.connection) == "string" and entry.connection ~= "", "Amp activity target requires a connection")
-	local watcher = { buffer = "", sequence = -1, closed = false }
+	local watcher = { buffer = "", sequence = -1, files_revision = 0, closed = false }
 	watchers[entry.key] = watcher
 	local function consume(_, chunk)
 		if not chunk or chunk == "" or watcher.closed then
@@ -123,6 +123,10 @@ local function start(entry)
 					end
 					local ok, snapshot = pcall(vim.json.decode, line)
 					local sequence = ok and type(snapshot) == "table" and snapshot.sequence or nil
+					local revision = 0
+					if ok and type(snapshot) == "table" and snapshot.files_revision ~= nil then
+						revision = snapshot.files_revision
+					end
 					local valid_state = ok
 						and type(snapshot) == "table"
 						and vim.list_contains(
@@ -138,6 +142,9 @@ local function start(entry)
 						or sequence % 1 ~= 0
 						or sequence < 0
 						or sequence <= watcher.sequence
+						or type(revision) ~= "number"
+						or revision % 1 ~= 0
+						or revision < watcher.files_revision
 						or type(snapshot.title) ~= "string"
 						or (snapshot.tool ~= nil and snapshot.tool ~= vim.NIL and type(snapshot.tool) ~= "string")
 					then
@@ -149,6 +156,10 @@ local function start(entry)
 					entry.title = snapshot.title
 					entry.activity =
 						{ state = snapshot.state, tool = snapshot.tool ~= vim.NIL and snapshot.tool or nil }
+					if revision > watcher.files_revision then
+						watcher.files_revision = revision
+						require("rediff.live").changed(entry.root)
+					end
 					changed()
 				end)
 			end

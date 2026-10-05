@@ -2338,6 +2338,120 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, " R")
         self.assertIn("return 321", self.lua(editor, "return s.current.new"))
 
+    def test_harness_file_events_refresh_unseen_changes_without_polling(self):
+        editor = self.launch(self.root)
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.lua(
+            editor,
+            """
+            local f=require('rediff.feedback')
+            local config=vim.fn.stdpath('config')
+            vim.fn.mkdir(config,'p')
+            f.write(config..'/settings.json',{review_refresh_interval=0})
+            require('rediff.live').start(s)
+            local awareness=require('rediff.awareness')
+            awareness.accept(s.root, vim.deepcopy(awareness.get(s.root).current))
+            -- Test event delivery, not the focused-hunk dwell timeout.
+            awareness.stop()
+            local system=vim.system
+            local streams={}
+            vim.system=function(argv,opts,callback)
+                if argv[1] ~= 'rediff-amp-live' or argv[2] ~= 'watch' then
+                    return system(argv,opts,callback)
+                end
+                streams[argv[4]]=opts.stdout
+                return {kill=function() end}
+            end
+            local connections=require('rediff.connections')
+            for _,target in ipairs({{root=s.root,session='T-here'}, {root=s.root..'-other',session='T-other'}}) do
+                connections.connect(vim.tbl_extend('force',target,
+                    {name='amp-live',connection='/fake',capabilities={'activity'}}))
+            end
+            function _G.emit_files(thread,root,sequence,revision)
+                streams[thread](nil,vim.json.encode({version=1,root=root,thread=thread,
+                    sequence=sequence,files_revision=revision,state='running',title='',tool=vim.NIL})..'\\n')
+            end
+            """,
+        )
+        self.assertFalse(self.lua(editor, "return s.live_refresh == true"))
+        snapshot = self.lua(editor, "return s.current.id")
+        path = Path(self.root, "auth.lua")
+        path.write_text(path.read_text().replace("return true", "return 'agent edit'"))
+        self.lua(
+            editor,
+            "emit_files('T-other',s.root..'-other',0,1); emit_files('T-here',s.root,0,0)",
+        )
+        time.sleep(0.4)
+        pump(editor)
+        self.assertEqual(
+            snapshot,
+            self.lua(editor, "return s.current.id"),
+            "Other worktrees/activity cannot refresh this review",
+        )
+
+        self.keys(editor, " diKeep this note<Esc>")
+        self.lua(editor, "emit_files('T-here',s.root,1,1)")
+        time.sleep(0.4)
+        pump(editor)
+        self.assertEqual(
+            snapshot,
+            self.lua(editor, "return s.current.id"),
+            "Queue events while a note is being edited",
+        )
+        self.keys(editor, ":w<CR>")
+        self.wait_for(editor, 's.current.new:find("agent edit",1,true) ~= nil')
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.assertEqual(
+            [snapshot, "Keep this note"],
+            self.lua(editor, "return {s.comments[1].snapshot_id,s.comments[1].text}"),
+        )
+        self.assertEqual(
+            "unseen",
+            self.lua(
+                editor,
+                "local a=require('rediff.awareness');return a.file_state(a.get(s.root),'unstaged\\0auth.lua')",
+            ),
+        )
+        self.assertGreater(
+            self.lua(
+                editor,
+                "return #vim.api.nvim_buf_get_extmarks(s.new_buf,vim.api.nvim_get_namespaces()['rediff.awareness'],0,-1,{})",
+            ),
+            0,
+        )
+
+        # An edit arriving while a previous refresh finishes must trigger another pass.
+        self.lua(
+            editor,
+            """
+            local refresh=r.refresh_live
+            r.refresh_live=function()
+                r.refresh_live=refresh
+                local applied=refresh()
+                vim.fn.writefile({'return "second edit"'},s.root..'/auth.lua')
+                emit_files('T-here',s.root,3,3)
+                return applied
+            end
+            emit_files('T-here',s.root,2,2)
+            """,
+        )
+        self.wait_for(editor, "s.current.new == 'return \"second edit\"\\n'")
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.lua(
+            editor,
+            "local a=require('rediff.awareness');a.accept(s.root,vim.deepcopy(a.get(s.root).current)); emit_files('T-here',s.root,4,4)",
+        )
+        time.sleep(0.4)
+        pump(editor)
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.assertTrue(
+            self.lua(
+                editor,
+                "local a=require('rediff.awareness');return a.file_state(a.get(s.root),'unstaged\\0auth.lua')==nil",
+            ),
+            "An event without a content change must not create unseen markers",
+        )
+
     def test_live_refresh_preserves_focus_and_annotations(self):
         editor = self.launch(self.root)
         self.assertEqual(

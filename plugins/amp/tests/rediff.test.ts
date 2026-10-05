@@ -45,7 +45,7 @@ function fakeAmp(root = process.cwd()) {
   const notifications: string[] = []
   const threads = new Map<string, any>()
   const amp: any = {
-    helpers: { filePathFromURI: fileURLToPath },
+    helpers: { filePathFromURI: fileURLToPath, filesModifiedByToolCall: () => null },
     logger: { log() {} },
     on(event: string, handler: (event: unknown, ctx: any) => any) { events.set(event, handler); return { unsubscribe() {} } },
     registerCommand(id: string, _options: unknown, handler: Command) { commands.set(id, handler); return { unsubscribe() {} } },
@@ -189,7 +189,7 @@ test('activity streams full safe snapshots to multiple clients and clean up', as
   const initial = await first.next()
   assert.deepEqual(initial, {
     version: 1, root: c.descriptor.root, thread: 'T-live', sequence: 0,
-    state: 'idle', title: '', tool: null,
+    state: 'idle', title: '', tool: null, files_revision: 0,
   })
   assert.deepEqual(await second.next(), initial)
 
@@ -254,6 +254,42 @@ test('activity streams full safe snapshots to multiple clients and clean up', as
   assert.equal(thread.state.observers.size, 0)
   assert.equal(thread.title.observers.size, 0)
   await second.cancel().catch(() => {})
+})
+
+test('completed file tools invalidate only their worktree and survive reconnects', async (t) => {
+  const f = fakeAmp(); await plugin(f.amp)
+  t.after(() => Promise.all(f.disposers.map((dispose) => dispose())))
+  const c = await connect(f, 'T-files')
+  const other = await connect(f, 'T-other-files')
+  const stream = await eventStream(c.descriptor)
+  t.after(() => stream.cancel())
+  assert.equal((await stream.next()).files_revision, 0)
+  let paths: URL[] | null = [pathToFileURL(join(c.descriptor.root, 'space %.lua'))]
+  const observed: unknown[] = []
+  f.amp.helpers.filesModifiedByToolCall = (event: unknown) => { observed.push(event); return paths }
+  const call = { thread: { id: 'T-files' }, toolUseID: 'edit', tool: 'apply_patch', input: { patch: 'private source' } }
+  await f.events.get('tool.call')!(call, f.context('T-files'))
+  assert.equal((await stream.next()).files_revision, 0, 'do not refresh before the tool edits')
+  assert.deepEqual(observed, [])
+  for (const status of ['done', 'error', 'cancelled']) {
+    const result = { ...call, status, output: 'private output' }
+    await f.events.get('tool.result')!(result, f.context('T-files'))
+    const snapshot = await stream.next()
+    assert.equal(snapshot.files_revision, observed.length)
+    assert.equal(observed.at(-1), result, 'use the official helper on the terminal result')
+    assert.ok(!JSON.stringify(snapshot).includes('private'))
+    assert.ok(!JSON.stringify(snapshot).includes('space %'))
+  }
+  for (paths of [null, [], [pathToFileURL(c.descriptor.root + '-other/file.lua')]]) {
+    await f.events.get('tool.result')!(call, f.context('T-files'))
+  }
+  // A new subscriber receives the retained revision, not just transient path events.
+  const reconnected = await eventStream(c.descriptor)
+  assert.equal((await reconnected.next()).files_revision, 3)
+  await reconnected.cancel()
+  const isolated = await eventStream(other.descriptor)
+  assert.equal((await isolated.next()).files_revision, 0)
+  await isolated.cancel()
 })
 
 test('activity changes during initial reads take precedence over stale snapshots', async (t) => {

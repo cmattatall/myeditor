@@ -26,9 +26,9 @@ in
       default = 3;
       example = 10;
       description = ''
-        Seconds between background Review refresh checks. Set to 0 to disable
-        automatic refresh; Space R and :ReviewRefresh still work. Changes take
-        effect when Review is next opened.
+        Seconds between fallback Review polling checks. Set to 0 to disable
+        polling; Amp file events, Space R and :ReviewRefresh still work.
+        Changes take effect when Review is next opened.
       '';
     };
     ampPlugin.enable = lib.mkOption {

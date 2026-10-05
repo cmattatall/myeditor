@@ -120,6 +120,7 @@ def watch(connection_path, expected_thread):
             response.read(65537)
             raise RuntimeError(f"Amp activity stream failed (HTTP {response.status})")
         last_sequence = -1
+        last_revision = 0
         while True:
             line = response.readline(65538)
             if not line:
@@ -131,14 +132,17 @@ def watch(connection_path, expected_thread):
             snapshot = json.loads(line)
             valid_states = {"idle", "running", "awaiting-approval", "error", "unknown"}
             sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
+            revision = snapshot.get("files_revision", 0) if isinstance(snapshot, dict) else None
             if (not isinstance(snapshot, dict) or snapshot.get("version") != 1
                     or snapshot.get("root") != desc["root"] or snapshot.get("thread") != desc["thread"]
                     or not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0
                     or sequence <= last_sequence or snapshot.get("state") not in valid_states
+                    or not isinstance(revision, int) or isinstance(revision, bool) or revision < last_revision
                     or not isinstance(snapshot.get("title"), str)
                     or not (snapshot.get("tool") is None or isinstance(snapshot.get("tool"), str))):
                 raise RuntimeError("invalid Amp activity snapshot")
             last_sequence = sequence
+            last_revision = revision
             print(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")), flush=True)
     except (OSError, http.client.HTTPException) as error:
         raise RuntimeError("Amp activity stream disconnected") from error
