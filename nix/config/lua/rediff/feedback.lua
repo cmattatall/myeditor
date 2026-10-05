@@ -34,6 +34,14 @@ function M.settings()
 	return M.read(vim.fn.stdpath("config") .. "/settings.json") or { harness = "none", feedback_command = {} }
 end
 
+function M.provider(target)
+	return (target.name:gsub("%-live$", ""))
+end
+
+function M.is_live(target)
+	return target.name == "amp-live" or target.name == "omp-live"
+end
+
 function M.command(target, settings)
 	settings = settings or M.settings()
 	target = target or { name = settings.harness or "none" }
@@ -43,9 +51,14 @@ function M.command(target, settings)
 		local argv = settings.feedback_command or {}
 		assert(#argv > 0, "Configure feedbackCommand for the custom harness first")
 		return vim.deepcopy(argv)
-	elseif target.name == "amp-live" then
-		assert(target.connection and target.session, "Select a live session with :Harness connect amp")
-		return { "rediff-amp-live", "send", target.connection, target.session }
+	elseif M.is_live(target) then
+		assert(
+			target.connection and target.session,
+			"Select a live session with :Harness connect " .. M.provider(target)
+		)
+		return { "rediff-" .. target.name, "send", target.connection, target.session }
+	elseif target.name == "omp" then
+		error("Select a live session with :Harness connect omp")
 	end
 	assert(target.name == "amp" or target.name == "claude", "Unknown harness: " .. tostring(target.name))
 	assert(

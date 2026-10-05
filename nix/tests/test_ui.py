@@ -549,11 +549,11 @@ class EditorUI(unittest.TestCase):
             """
             local system = vim.system
             vim.system = function(argv, opts, callback)
-                if argv[1] ~= 'rediff-amp-live' then return system(argv, opts, callback) end
+                if argv[1] ~= 'rediff-live' then return system(argv, opts, callback) end
                 assert(argv[2] == 'discover' and argv[3] == '--all')
                 callback({code=0, stdout=vim.json.encode({
-                    {root=s.root, session='T-first', title='Alpha', connection='/fake/first.json'},
-                    {root=s.root, session='T-second', title='Beta', connection='/fake/second.json'},
+                    {provider='amp',root=s.root, session='T-first', title='Alpha', connection='/fake/first.json'},
+                    {provider='amp',root=s.root, session='T-second', title='Beta', connection='/fake/second.json'},
                 })})
             end
         """,
@@ -588,11 +588,11 @@ class EditorUI(unittest.TestCase):
             _G.harness_streams, _G.sent_feedback = {}, {}
             local system = vim.system
             vim.system = function(argv, opts, callback)
-                if argv[1] ~= 'rediff-amp-live' then return system(argv,opts,callback) end
+                if argv[1] ~= 'rediff-amp-live' and argv[1] ~= 'rediff-omp-live' and argv[1] ~= 'rediff-live' then return system(argv,opts,callback) end
                 if argv[2] == 'discover' then
                     callback({code=0,stdout=vim.json.encode({
-                        {root=s.root,session='T-local',title='Local review',connection='/fake/local',capabilities={'activity'}},
-                        {root=vim.g.external_root,session='T-remote',title='Remote worker',connection='/fake/remote',capabilities={'activity'}},
+                        {provider='amp',root=s.root,session='T-local',title='Local review',connection='/fake/local',capabilities={'activity'}},
+                        {provider='omp',root=vim.g.external_root,session='T-remote',title='Remote worker',connection='/fake/remote',capabilities={'activity'}},
                     })})
                 elseif argv[2] == 'watch' then
                     _G.harness_streams[argv[4]] = {stdout=opts.stdout,exit=callback}
@@ -688,12 +688,13 @@ class EditorUI(unittest.TestCase):
         self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
         sent = self.lua(editor, "return _G.sent_feedback[1]")
         self.assertEqual(remote, sent["cwd"])
+        self.assertEqual("rediff-omp-live", sent["argv"][0])
         self.assertEqual("T-remote", sent["argv"][3])
         self.assertEqual(self.root, sent["payload"]["sender"]["repository"])
         self.assertEqual(self.root, sent["payload"]["sender"]["directory"])
         self.assertTrue(sent["payload"]["sender"]["instance"])
         self.assertEqual(
-            {"provider": "amp", "id": "T-remote", "repository": remote},
+            {"provider": "omp", "id": "T-remote", "repository": remote},
             sent["payload"]["recipient"],
         )
         self.assertNotIn("comments", sent["payload"])
@@ -718,7 +719,7 @@ class EditorUI(unittest.TestCase):
         self.assertFalse(
             self.lua(
                 editor,
-                "return pcall(require('rediff.harness').select,s.root,{name='amp-live',root=vim.g.external_root,session='T-remote',connection='/fake/remote'})",
+                "return pcall(require('rediff.harness').select,s.root,{name='omp-live',root=vim.g.external_root,session='T-remote',connection='/fake/remote'})",
             )
         )
         self.lua(editor, "_G.harness_streams['T-remote'].exit({code=1})")
@@ -740,6 +741,104 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(["Retain this remote draft"], list(editor.current.buffer[:]))
         self.assertEqual(2, self.lua(editor, "return #_G.sent_feedback"))
 
+    def test_harness_panel_polls_without_overlapping_or_losing_selection(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            require('rediff.live').stop(s)
+            _G.discoveries, _G.completed = 0, 0
+            local system = vim.system
+            vim.system = function(argv, opts, callback)
+                if argv[1] ~= 'rediff-live' then return system(argv,opts,callback) end
+                assert(argv[2] == 'discover' and argv[3] == '--all')
+                discoveries = discoveries + 1
+                _G.discovery_done = callback
+            end
+            function _G.respond(rows)
+                discovery_done({code=0,stdout=vim.json.encode(rows)})
+            end
+            _G.rows = {
+                {provider='amp',root=s.root,session='T-b',title='Beta',connection='/fake/b'},
+                {provider='amp',root=s.root,session='T-c',title='Charlie',connection='/fake/c'},
+            }
+            """,
+        )
+        self.keys(editor, ":hl<CR>")
+        self.assertEqual(1, self.lua(editor, "return discoveries"))
+        self.assertEqual(
+            1000,
+            self.lua(
+                editor,
+                "return require('rediff.harness_panel').state.discovery_timer:get_repeat()",
+            ),
+        )
+        # A slow probe must not be replaced every second (or it can never finish).
+        self.lua(
+            editor,
+            "require('rediff.connections').discover(function() completed=completed+1 end)",
+        )
+        time.sleep(1.2)
+        pump(editor)
+        self.assertEqual(1, self.lua(editor, "return discoveries"))
+        self.lua(editor, "respond(rows)")
+        self.wait_for(
+            editor,
+            "completed == 1 and #require('rediff.harness_panel').state.entries == 2",
+        )
+        self.keys(editor, "j")
+        self.wait_for(editor, "discoveries == 2")
+        self.lua(
+            editor,
+            "table.insert(rows,1,{provider='amp',root=s.root,session='T-a',title='Alpha',connection='/fake/a'}); respond(rows)",
+        )
+        self.wait_for(editor, "#require('rediff.harness_panel').state.entries == 3")
+        self.assertEqual(
+            "T-c",
+            self.lua(
+                editor,
+                "local p=require('rediff.harness_panel').state; return p.entries[p.selected].session",
+            ),
+        )
+        self.keys(editor, "/Charlie")
+        self.wait_for(editor, "discoveries == 3")
+        self.lua(editor, "respond(rows)")
+        self.wait_for(editor, "not require('rediff.harness_panel').state.refreshing")
+        self.assertEqual("i", editor.api.get_mode()["mode"])
+        self.assertEqual(["Charlie"], list(editor.current.buffer[:]))
+        self.assertEqual(
+            1, self.lua(editor, "return #require('rediff.harness_panel').state.entries")
+        )
+        # Removing a session takes effect without R; the filter remains intact.
+        self.keys(editor, "<CR>")
+        self.wait_for(editor, "discoveries == 4")
+        self.lua(editor, "table.remove(rows,3); respond(rows)")
+        self.wait_for(editor, "#require('rediff.harness_panel').state.entries == 0")
+        self.wait_for(editor, "discoveries == 5")
+        self.lua(
+            editor,
+            "_G.poll_timer=require('rediff.harness_panel').state.discovery_timer",
+        )
+        self.keys(editor, "q:hl<CR>")
+        self.assertTrue(self.lua(editor, "return poll_timer:is_closing()"))
+        self.assertEqual(
+            5, self.lua(editor, "return discoveries"), "Reopen shares the pending probe"
+        )
+        self.lua(editor, "respond(rows)")
+        self.wait_for(editor, "not require('rediff.harness_panel').state.refreshing")
+        self.assertEqual(
+            2, self.lua(editor, "return #require('rediff.harness_panel').state.entries")
+        )
+        self.keys(editor, "q")
+        count = self.lua(editor, "return discoveries")
+        time.sleep(1.2)
+        pump(editor)
+        self.assertEqual(
+            count,
+            self.lua(editor, "return discoveries"),
+            "Closing stops discovery polling",
+        )
+
     def test_harness_stream_lifecycle_and_alias_persistence(self):
         editor = self.launch(self.root)
         self.lua(
@@ -749,14 +848,18 @@ class EditorUI(unittest.TestCase):
             _G.streams = {}
             local system = vim.system
             vim.system = function(argv, opts, callback)
-                if argv[1] ~= 'rediff-amp-live' then return system(argv,opts,callback) end
+                if argv[1] ~= 'rediff-amp-live' and argv[1] ~= 'rediff-live' then return system(argv,opts,callback) end
+                if argv[2] == 'discover' then
+                    callback({code=0,stdout=vim.json.encode({target})})
+                    return
+                end
                 assert(argv[2] == 'watch')
                 local stream = {out=opts.stdout,exit=callback,killed=false}
                 table.insert(streams,stream)
                 return {kill=function() stream.killed=true end}
             end
             _G.registry = require('rediff.connections')
-            _G.target = {name='amp-live',root=s.root,session='T-stream',connection='/fake/stream',capabilities={'activity'}}
+            _G.target = {provider='amp',name='amp-live',root=s.root,session='T-stream',connection='/fake/stream',capabilities={'activity'}}
             _G.key = registry.connect(target).key
             registry.rename(key,'test-worker')
             registry.disconnect(key)
@@ -781,6 +884,18 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(
             {"state": "running"}, self.lua(editor, "return registry.get(key).activity")
         )
+        self.lua(
+            editor,
+            "target.title='Old descriptor title'; registry.discover(function() end)",
+        )
+        pump(editor)
+        self.assertEqual(
+            2,
+            self.lua(editor, "return #streams"),
+            "Discovery preserves the activity stream",
+        )
+        self.assertEqual("Working", self.lua(editor, "return registry.get(key).title"))
+        self.assertFalse(self.lua(editor, "return streams[2].killed"))
         self.lua(editor, "streams[2].out(nil,'false\\n')")
         pump(editor)
         self.assertTrue(
@@ -799,6 +914,30 @@ class EditorUI(unittest.TestCase):
         )
         pump(editor)
         self.assertFalse(self.lua(editor, "return registry.get(key).online"))
+        self.lua(editor, "registry.discover(function() end)")
+        pump(editor)
+        self.assertEqual(
+            4,
+            self.lua(editor, "return #streams"),
+            "Discovery reconnects a failed stream",
+        )
+        self.lua(
+            editor,
+            "target.connection='/fake/reloaded'; registry.discover(function() end)",
+        )
+        pump(editor)
+        self.assertEqual(
+            5,
+            self.lua(editor, "return #streams"),
+            "A changed descriptor starts a new stream",
+        )
+        self.assertTrue(self.lua(editor, "return streams[4].killed"))
+        self.lua(editor, "streams[4].exit({code=1})")
+        pump(editor)
+        self.assertTrue(
+            self.lua(editor, "return registry.get(key).online"),
+            "Old stream exit cannot mark the new one offline",
+        )
         fresh = self.launch(self.root, headless=True)
         self.assertEqual(
             "test-worker",

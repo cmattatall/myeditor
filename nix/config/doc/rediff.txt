@@ -141,10 +141,21 @@ Amp file events and Space R still work with polling disabled.
 AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
+For oh-my-pi (OMP), use :harness install omp, then /restart in OMP and
+:harness connect omp. Home Manager can manage the CLI (programs.harnesses.omp.enable)
+and extension (programs.rediff.ompPlugin.enable) independently. Upstream pi is not
+supported. OMP feedback is admitted asynchronously, not acknowledged as completed.
+Session switches replace its connection; select the new session in rediff.
+After a cancelled switch, /rediff-connect in OMP resumes feedback delivery.
 Use :harness use amp to select Amp and connect in this worktree. Connecting sends
-nothing. :hc opens the connection panel (Amp); :hl / :harness list opens the same
+nothing. :harness use omp selects OMP. :hc opens the connection panel;
+:hl / :harness list opens the same
 searchable panel for all available sessions. Each row shows its worktree directory;
 long paths are shortened in the list, with the full path in the selected details.
+The open panel discovers sessions every second; closing it stops polling.
+Amp may run in another terminal emulator or tmux session on this machine under
+the same user account. Load the rediff plugin in each Amp instance. Remote
+machines and orbs are not discoverable through this local connection.
   /           Filter by alias, provider, title, ID, worktree, or activity
   Enter       Connect/disconnect; connecting locally selects the annotation target
   s / r / d   Message / rename locally / disconnect selected harness
@@ -190,7 +201,7 @@ its submission ID. See nix/README.md for installation and receiver details.
 WORKTREES                                                  *rediff-worktrees*
 
 :worktree list or :worktree switch opens a chooser. Supply a branch/path to switch
-directly. :harness use amp|claude selects the launch type for this worktree.
+directly. :harness use amp|omp|claude selects the launch type for this worktree.
 
 :worktree new [branch [path]] creates from current HEAD and starts that harness in
 a terminal tab. Omitted branch prompts; omitted path uses a sibling directory.
@@ -270,9 +281,9 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :ReviewOutbox               Browse payloads and receipts
   :ReviewArchive              Clear round/drafts after confirmation
   :Harness status             Show connection and delivery receipt
-  :Harness use amp|claude     Select type; Amp also discovers live sessions
-  :Harness install amp        Install bridge and request reload
-  :Harness connect [amp]      Discover/select live session
+  :Harness use amp|omp|claude Select type; Amp/OMP discover live sessions
+  :Harness install amp|omp    Install bridge; OMP needs an explicit /restart
+  :Harness connect [amp|omp]  Discover/select live session
   :Harness list               Search and manage harnesses across worktrees
   :Harness panel              Same panel with live activity
   :Harness rename ID ALIAS     Set a local alias, without renaming the agent thread

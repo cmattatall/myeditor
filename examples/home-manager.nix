@@ -24,7 +24,7 @@ in
         file.".config/rediff/standalone-owner".text = "rediff-standalone-v1\n";
       };
       programs.harnesses.amp.enable = true;
-      programs.harnesses.pi.enable = true;
+      programs.harnesses.omp.enable = true;
       programs.rediff = {
         enable = true;
         nvimAlias = true;

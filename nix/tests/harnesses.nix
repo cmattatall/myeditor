@@ -2,7 +2,7 @@
 let
   inherit (pkgs) lib;
   amp = pkgs.writeShellScriptBin "amp" "exit 0";
-  pi = pkgs.writeShellScriptBin "pi" "exit 0";
+  omp = pkgs.writeShellScriptBin "omp" "exit 0";
   custom = pkgs.writeShellScriptBin "custom-amp" "exit 0";
   existing = pkgs.emptyDirectory;
   packages =
@@ -10,7 +10,7 @@ let
     (lib.evalModules {
       specialArgs.pkgs = {
         amp-cli = amp;
-        pi-coding-agent = pi;
+        inherit omp;
       };
       modules = [
         module
@@ -36,19 +36,19 @@ assert
   ];
 assert
   paths (packages {
-    pi.enable = true;
+    omp.enable = true;
   }) == paths [
     existing
-    pi
+    omp
   ];
 assert
   paths (packages {
     amp.enable = true;
-    pi.enable = true;
+    omp.enable = true;
   }) == paths [
     existing
     amp
-    pi
+    omp
   ];
 assert
   paths (packages {
@@ -60,8 +60,8 @@ assert
   ];
 assert
   paths (packages {
-    pi.enable = true;
-    pi.package = custom;
+    omp.enable = true;
+    omp.package = custom;
   }) == paths [
     existing
     custom

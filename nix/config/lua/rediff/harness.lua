@@ -57,18 +57,19 @@ function M.get(root)
 			root = root,
 			directory = directory,
 			target = target,
-			provider = saved.provider or (target.name == "amp-live" and "amp" or target.name),
+			provider = saved.provider or feedback.provider(target),
 			message = "", -- Draft text belongs only to this editor process, including legacy saved drafts.
 			last = saved.last,
 			epoch = 0,
 		}
 		sessions[root].delivery = delivery_status(sessions[root])
-		if target.name == "amp-live" and target.session then
+		if feedback.is_live(target) and target.session then
 			local s = sessions[root]
 			s.restoring = true
 			s.delivery = "checking connection"
-			s.connection_error =
-				"The previous Amp session is unavailable. Select a live harness, then run :harness send."
+			s.connection_error = "The previous "
+				.. feedback.provider(target)
+				.. " session is unavailable. Select a live harness, then run :harness send."
 			local function restored(result)
 				vim.schedule(function()
 					if s.epoch ~= 0 then
@@ -111,7 +112,7 @@ function M.get(root)
 			end
 			local ok = pcall(
 				vim.system,
-				{ "rediff-amp-live", "discover", root },
+				{ "rediff-" .. target.name, "discover", root },
 				{ text = true, timeout = 5000 },
 				restored
 			)
@@ -175,7 +176,7 @@ function M.statusline(root)
 	local id = s.target.session
 	if id then
 		label = label .. " · " .. (#id > 12 and ("…" .. id:sub(-8)) or id)
-	elseif s.target.name == "amp" or s.target.name == "claude" then
+	elseif s.target.name == "amp" or s.target.name == "omp" or s.target.name == "claude" then
 		label = label .. " · no session"
 	end
 	return "harness: " .. vim.fn.strtrans(label .. " · " .. s.delivery):gsub("%%", "%%%%")
@@ -201,8 +202,8 @@ function M.select(root, target)
 	for key, value in pairs(target) do
 		s.target[key] = value
 	end
-	if target.name == "amp-live" or target.name == "amp" or target.name == "claude" then
-		s.provider = target.name == "amp-live" and "amp" or target.name
+	if feedback.is_live(target) or target.name == "amp" or target.name == "claude" then
+		s.provider = feedback.provider(target)
 	end
 	s.epoch = s.epoch + 1
 	s.restoring, s.connection_error, s.compose_after_restore = nil, nil, nil
@@ -215,10 +216,10 @@ function M.select(root, target)
 end
 
 function M.use(name, root)
-	assert(name == "amp" or name == "claude", "Usage: Harness use amp|claude")
+	assert(name == "amp" or name == "omp" or name == "claude", "Usage: Harness use amp|omp|claude")
 	local s = M.get(root or current().root)
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before switching harnesses")
-	local bound = s.target.name == "amp-live" and "amp" or s.target.name
+	local bound = feedback.provider(s.target)
 	if bound ~= name then
 		M.select(s.root, { name = "none" })
 	end
@@ -229,7 +230,7 @@ end
 
 function M.launch_command(root)
 	local name = M.get(root).provider
-	assert(name == "amp" or name == "claude", "Select a harness first: :harness use amp|claude")
+	assert(name == "amp" or name == "omp" or name == "claude", "Select a harness first: :harness use amp|omp|claude")
 	local executable = vim.fn.exepath(name)
 	assert(executable ~= "", "Install/authenticate the " .. name .. " CLI and put it on PATH first")
 	return { executable }
@@ -256,7 +257,7 @@ end
 
 function M.deliver(root, id, path, argv, retry, callback, owner)
 	local s = owner or M.get(root)
-	assert(not s.restoring, "Checking the saved Amp session. Try again shortly.")
+	assert(not s.restoring, "Checking the saved harness session. Try again shortly.")
 	assert(not s.connection_error, s.connection_error)
 	assert(not feedback.busy(root), "A feedback delivery is already running for this repository")
 	s.last = { id = id, path = path, argv = vim.deepcopy(argv) }
@@ -307,7 +308,8 @@ function M.status()
 	)
 end
 
-function M.connect()
+function M.connect(provider)
+	provider = provider or "amp"
 	local s = M.get(current().root)
 	if s.restoring then
 		s.restoring, s.compose_after_restore = nil, nil
@@ -325,17 +327,25 @@ function M.connect()
 			return
 		end
 		local matches = vim.tbl_filter(function(entry)
-			return entry.name == "amp-live" and entry.root == s.root and entry.online
+			return entry.name == provider .. "-live" and entry.root == s.root and entry.online
 		end, connections.items())
 		if #matches == 0 then
-			notify("No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp.")
+			if provider == "amp" then
+				notify(
+					"No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp."
+				)
+			else
+				notify(
+					"No live oh-my-pi session found for this checkout. Install with :harness install omp, restart OMP, then run :harness connect omp."
+				)
+			end
 		elseif #matches == 1 then
 			local ok, failure = pcall(M.select, s.root, matches[1])
 			if not ok then
 				notify(tostring(failure), "failed")
 			end
 		else
-			M.panel("connect")
+			M.panel("connect", provider)
 		end
 	end)
 end
@@ -365,12 +375,13 @@ function M.disconnect(entry)
 	end
 end
 
-function M.panel(purpose)
+function M.panel(purpose, provider)
 	local root, directory = current().root, vim.fn.getcwd()
 	local source = M.get(root)
 	local epoch = source.epoch
 	return require("rediff.harness_panel").open({
 		root = root,
+		provider = provider,
 		purpose = purpose or "manage",
 		on_select = function(entry)
 			if purpose == "connect" and source.epoch ~= epoch then
@@ -545,7 +556,7 @@ function M.compose(target, root, directory)
 				end
 				local recipient = s.target.session
 						and {
-							provider = s.target.name == "amp-live" and "amp" or s.target.name,
+							provider = feedback.provider(s.target),
 							id = s.target.session,
 							repository = s.target.root or s.root,
 						}
@@ -573,11 +584,13 @@ function M.compose(target, root, directory)
 	):gsub("%%", "%%%%")
 end
 
-function M.install()
+function M.install(provider)
+	provider = provider or "amp"
+	assert(provider == "amp" or provider == "omp", "Usage: Harness install amp|omp")
 	assert(not installing, "Plugin installation is already running")
 	local has_session, session = pcall(current)
 	local target = has_session and vim.deepcopy(session.target) or {}
-	local reload = target.name == "amp-live"
+	local reload = provider == "amp" and target.name == "amp-live"
 	local directory = assert(vim.env.HOME, "HOME must be set") .. "/.config/amp/plugins/"
 	local prompt = "Install the bundled rediff Amp plugin at "
 		.. directory
@@ -587,10 +600,15 @@ function M.install()
 			reload and ("Ask Amp thread " .. target.session .. " to reload its plugins after installation?")
 			or "No live Amp target selected; reload plugins manually once, then :harness connect amp."
 		)
+	if provider == "omp" then
+		prompt = "Install the bundled rediff.ts extension for oh-my-pi?\n"
+			.. "Uses OMP's profile/directory settings (default ~/.omp/agent/extensions).\n"
+			.. "This does not install the OMP CLI. Run /restart in OMP after installation."
+	end
 	if vim.fn.confirm(prompt, "&Install\n&Cancel", 2) ~= 1 then
 		return
 	end
-	local argv = { "rediff-install-amp-plugin" }
+	local argv = { "rediff-install-" .. provider .. "-plugin" }
 	installing = true
 	local ok, err = pcall(vim.system, argv, { text = true }, function(result)
 		vim.schedule(function()
@@ -634,17 +652,21 @@ function M.setup()
 	api.nvim_create_user_command("Harness", function(opts)
 		local ok, err = pcall(function()
 			local args = opts.fargs
-			if args[1] == "connect" and (#args == 1 or (#args == 2 and args[2] == "amp")) then
-				M.panel("connect")
+			if args[1] == "connect" and (#args == 1 or (#args == 2 and (args[2] == "amp" or args[2] == "omp"))) then
+				if args[2] then
+					M.connect(args[2])
+				else
+					M.panel("connect")
+				end
 			elseif #args == 1 and (args[1] == "list" or args[1] == "panel") then
 				M.panel("manage")
 			elseif #args == 2 and args[1] == "use" then
 				M.use(args[2])
-				if args[2] == "amp" then
-					M.connect()
+				if args[2] == "amp" or args[2] == "omp" then
+					M.connect(args[2])
 				end
-			elseif #args == 2 and args[1] == "install" and args[2] == "amp" then
-				M.install()
+			elseif #args == 2 and args[1] == "install" and (args[2] == "amp" or args[2] == "omp") then
+				M.install(args[2])
 			elseif #args == 0 or (#args == 1 and args[1] == "status") then
 				M.status()
 			elseif #args <= 2 and args[1] == "send" then
@@ -666,7 +688,7 @@ function M.setup()
 				end
 			else
 				error(
-					"Usage: Harness list | connect amp | use amp|claude | send [alias] | rename ID ALIAS | disconnect [alias] | status | retry | install amp"
+					"Usage: Harness list | connect [amp|omp] | use amp|omp|claude | send [alias] | rename ID ALIAS | disconnect [alias] | status | retry | install amp|omp"
 				)
 			end
 		end)
@@ -691,9 +713,9 @@ function M.setup()
 					"retry",
 				}
 			elseif #args == 3 and args[2] == "use" then
-				return { "amp", "claude" }
+				return { "amp", "omp", "claude" }
 			elseif #args == 3 and (args[2] == "connect" or args[2] == "install") then
-				return { "amp" }
+				return { "amp", "omp" }
 			elseif #args == 3 and (args[2] == "send" or args[2] == "disconnect" or args[2] == "rename") then
 				return vim.tbl_map(function(entry)
 					return entry.alias or entry.session

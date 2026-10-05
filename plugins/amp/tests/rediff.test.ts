@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, fork } from 'node:child_process'
+import { once } from 'node:events'
 import { access, chmod, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -380,6 +381,56 @@ test('automatic registration skips missing workspaces and rejects a public regis
   } finally {
     await chmod(registry, 0o700)
   }
+})
+
+test('discovers and sends across independent terminal hosts and worktrees', { timeout: 15000 }, async (t) => {
+  const root = await realpath(process.cwd())
+  const otherRoot = await realpath(await mkdtemp(join(home, 'other-worktree-')))
+  const hosts = []
+  for (const [id, directory, terminal] of [
+    ['T-terminal-one', root, 'Apple_Terminal'],
+    ['T-terminal-two', otherRoot, 'iTerm.app'],
+  ]) {
+    const child = fork(fileURLToPath(new URL('./terminal-host.ts', import.meta.url)), [directory, id], {
+      cwd: directory,
+      env: { ...process.env, HOME: home, TERM_PROGRAM: terminal, TMUX: `/different-${id}`, XDG_CACHE_HOME: join(home, id) },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    })
+    t.after(async () => {
+      if (child.exitCode !== null) return
+      const exited = once(child, 'exit')
+      child.send('dispose')
+      await exited
+    })
+    const [ready] = await once(child, 'message')
+    assert.equal(ready.ready, true)
+    hosts.push(child)
+  }
+  const bridge = process.env.REDIFF_TEST_BRIDGE ?? fileURLToPath(new URL('../../../nix/amp_live.py', import.meta.url))
+  const run = async (...args: string[]) => JSON.parse((await promisify(execFile)('python3', ['-B', bridge, ...args], {
+    cwd: root, env: { ...process.env, HOME: home, TERM_PROGRAM: 'WezTerm', TMUX: '', XDG_CACHE_HOME: join(home, 'editor-cache') },
+  })).stdout)
+  const all = await run('discover', '--all')
+  assert.deepEqual(all.map((entry: any) => entry.session).sort(), ['T-terminal-one', 'T-terminal-two'])
+  assert.deepEqual((await run('discover', root)).map((entry: any) => entry.session), ['T-terminal-one'])
+  const target = all.find((entry: any) => entry.session === 'T-terminal-two')
+  const payload = join(home, 'cross-terminal.json')
+  await writeFile(payload, JSON.stringify({
+    submission_id: 'cross-terminal', repository: root, message: 'Review your own checkout.',
+    sender: { instance: 'editor-one', pid: process.pid, app: 'rediff', directory: root, repository: root },
+    recipient: { provider: 'amp', id: target.session, repository: otherRoot },
+  }))
+  const received = once(hosts[1], 'message')
+  assert.equal((await run('send', target.connection, target.session, payload)).status, 'accepted')
+  const [{ message }] = await received
+  const content = JSON.parse(message.content)
+  assert.equal(content.sender.directory, root)
+  assert.equal(content.recipient.repository, otherRoot)
+  assert.equal(content.message, 'Review your own checkout.')
+  const exited = once(hosts[1], 'exit')
+  hosts[1].send('dispose')
+  await exited
+  assert.deepEqual((await run('discover', '--all')).map((entry: any) => entry.session), ['T-terminal-one'])
 })
 
 test('editor bridge sends rules once before annotations or message, without prose wrappers', async (t) => {

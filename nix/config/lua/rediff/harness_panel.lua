@@ -29,6 +29,10 @@ local function close()
 		s.timer:stop()
 		s.timer:close()
 	end
+	if s.discovery_timer then
+		s.discovery_timer:stop()
+		s.discovery_timer:close()
+	end
 	if s.augroup then
 		pcall(api.nvim_del_augroup_by_id, s.augroup)
 	end
@@ -122,7 +126,11 @@ local function refresh_items(s)
 	local all = s.registry.items() or {}
 	s.entries = {}
 	for _, entry in ipairs(all) do
-		if (not s.connected_only or entry.connected) and matches(entry, s.filter) then
+		if
+			(not s.provider or entry.name == s.provider .. "-live")
+			and (not s.connected_only or entry.connected)
+			and matches(entry, s.filter)
+		then
 			table.insert(s.entries, entry)
 		end
 	end
@@ -269,6 +277,7 @@ function M.open(opts)
 	local s = {
 		registry = registry,
 		root = opts.root,
+		provider = opts.provider,
 		purpose = purpose,
 		connected_only = purpose == "send" or opts.connected_only == true,
 		filter = "",
@@ -280,6 +289,22 @@ function M.open(opts)
 		opts = opts,
 	}
 	M.state = s
+	local function discover(manual)
+		if M.state ~= s or s.refreshing then
+			return
+		end
+		s.refreshing = true
+		registry.discover(function(err)
+			s.refreshing = false
+			if M.state ~= s then
+				return
+			end
+			if err and (manual or err ~= s.discovery_error) then
+				notify(tostring(err), vim.log.levels.ERROR)
+			end
+			s.discovery_error = err
+		end)
+	end
 	s.buf = api.nvim_create_buf(false, true)
 	s.filter_buf = api.nvim_create_buf(false, true)
 	vim.bo[s.buf].bufhidden = "wipe"
@@ -377,11 +402,7 @@ function M.open(opts)
 		end
 	end, "Toggle connected harnesses")
 	map(s.buf, "R", function()
-		registry.discover(function(err)
-			if err then
-				notify(tostring(err), vim.log.levels.ERROR)
-			end
-		end)
+		discover(true)
 	end, "Discover harnesses")
 	map(s.filter_buf, "q", close, "Close harness panel")
 	map(s.filter_buf, "<Esc>", close, "Close harness panel")
@@ -458,13 +479,15 @@ function M.open(opts)
 		end)
 	)
 	render()
-	if purpose ~= "send" then
-		registry.discover(function(err)
-			if err then
-				notify(tostring(err), vim.log.levels.ERROR)
-			end
+	discover(false)
+	s.discovery_timer = vim.uv.new_timer()
+	s.discovery_timer:start(
+		1000,
+		1000,
+		vim.schedule_wrap(function()
+			discover(false)
 		end)
-	end
+	)
 	return s
 end
 

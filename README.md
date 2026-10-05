@@ -91,7 +91,7 @@ in your module list to opt into the independent harness installer, then add:
 
 ```nix
 programs.harnesses.amp.enable = true;
-programs.harnesses.pi.enable = true;
+programs.harnesses.omp.enable = true;
 nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
 ```
 
@@ -101,8 +101,8 @@ Amp bridge plugin. Conversely, installing the editor does not require harnesses.
 
 `lib` is a Home Manager module argument. If you supply an already configured/global
 `pkgs`, allow Amp in that nixpkgs instance instead. Authenticate
-the CLIs separately; credentials do not belong in the Nix configuration. Pi's CLI
-can be installed, but rediff does not yet have a native pi feedback adapter.
+the CLIs separately; credentials do not belong in the Nix configuration.
+`omp` is [oh-my-pi](https://omp.sh), not upstream pi.
 
 ## Install Home Manager for the first time
 
@@ -129,8 +129,8 @@ configuration and want the editor plus harness CLIs, run from this checkout:
 ```
 
 This explicitly opts into [`examples/home-manager.nix`](examples/home-manager.nix).
-It installs rediff as `nvim`, plus `amp` and `pi`, allowing only Amp's unfree
-package. It leaves your Neovim configuration, agent credentials, and Amp plugins
+It installs rediff as `nvim`, plus `amp` and `omp`, allowing only Amp's unfree
+package. It leaves your Neovim configuration, agent credentials, and agent plugins
 alone. No separate Home Manager CLI installation is required.
 
 The script refuses to replace an unrelated Home Manager/NixOS/nix-darwin profile.
@@ -167,7 +167,13 @@ plugins, then run `:harness connect amp`. `:harness list` shows available and
 connected sessions, their worktrees, and activity. Multiple connections are
 supported; annotations stay associated with their originating worktree.
 
-Amp, Claude Code, and custom feedback receivers are supported. Agent selection,
+For **oh-my-pi**, enable `programs.harnesses.omp.enable` to install the CLI.
+Separately, enable `programs.rediff.ompPlugin.enable` or run
+`:harness install omp` to install the rediff extension. Start OMP (or run
+`/restart` in an existing session), then `:harness connect omp` in rediff.
+Amp and OMP sessions can share the panel and stay connected simultaneously.
+
+Amp, oh-my-pi, Claude Code, and custom feedback receivers are supported. Agent selection,
 authentication, and sending feedback are explicit actions, not installation steps.
 Read the [agent integration guide](nix/README.md#connect-an-agent-amp-claude-code-or-a-custom-harness),
 [editor help](nix/config/doc/rediff.txt), or [feature list](FEATURES.md) for details.
@@ -178,7 +184,7 @@ Press **?** in the editor for help.
 - [`nix/package.nix`](nix/package.nix): reusable editor derivation.
 - [`nix/config/`](nix/config/): Neovim configuration and Review implementation.
 - [`nix/home-manager.nix`](nix/home-manager.nix): optional module, not a home profile.
-- [`programs/harnesses.nix`](programs/harnesses.nix): independent opt-in Amp/pi CLI module.
+- [`programs/harnesses.nix`](programs/harnesses.nix): independent opt-in Amp/OMP CLI module.
 - [`examples/home-manager.nix`](examples/home-manager.nix): opinionated bootstrap
   profile used only by the install script and its tests.
 - [`plugins/`](plugins/): harness plugins, including the Amp bridge.

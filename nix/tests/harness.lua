@@ -45,7 +45,22 @@ return function(root, equal, fails, keys)
 		end))
 		equal(true, notices[1]:find("Home Manager", 1, true) ~= nil, "Installer failures are visible")
 		equal("link", vim.uv.fs_lstat(plugin).type, "Home Manager symlink is preserved")
-		equal({ "amp" }, vim.fn.getcompletion("Harness install ", "cmdline"), "Install provider completion")
+		equal({ "amp", "omp" }, vim.fn.getcompletion("Harness install ", "cmdline"), "Install provider completion")
+		local omp_plugin = install_home .. "/.omp/agent/extensions/rediff.ts"
+		choice = 2
+		vim.cmd("Harness install omp")
+		equal(0, vim.fn.filereadable(omp_plugin), "Cancelling OMP installation writes nothing")
+		choice, notices = 1, {}
+		vim.cmd("Harness install omp")
+		assert(vim.wait(5000, function()
+			return #notices > 0
+		end))
+		equal(
+			vim.fn.readfile(vim.env.REDIFF_RUNTIME .. "/omp/rediff.ts"),
+			vim.fn.readfile(omp_plugin),
+			"OMP extension is bundled"
+		)
+		equal(true, notices[1]:find("/restart", 1, true) ~= nil, "OMP restart is explicit, not sent to an agent")
 	end, debug.traceback)
 	vim.env.HOME, vim.fn.confirm, vim.notify = home, confirm, notify
 	vim.fn.delete(install_home, "rf")
@@ -116,12 +131,19 @@ return function(root, equal, fails, keys)
 		}
 	end
 	vim.system = function(argv, opts, callback)
-		equal({ "rediff-amp-live", "discover", "--all" }, argv, "Discovery lists sessions across worktrees")
+		equal({ "rediff-live", "discover", "--all" }, argv, "Discovery lists sessions across worktrees")
 		equal(true, opts.text, "Discovery returns JSON text asynchronously")
 		discover = callback
 	end
-	local matches =
-		{ { root = root, session = thread, connection = "/fake/session-one/connection.json", title = "one" } }
+	local matches = {
+		{
+			provider = "amp",
+			root = root,
+			session = thread,
+			connection = "/fake/session-one/connection.json",
+			title = "one",
+		},
+	}
 	local function respond(value)
 		discover({ code = 0, stderr = "", stdout = vim.json.encode(value) })
 		vim.wait(10)
@@ -146,7 +168,13 @@ return function(root, equal, fails, keys)
 	respond(matches)
 	equal("none", s.harness.name, "Late discovery cannot undo disconnect")
 	vim.cmd("Harness use amp")
-	matches[2] = { root = root, session = "T-second", connection = "/fake/session-two/connection.json", title = "two" }
+	matches[2] = {
+		provider = "amp",
+		root = root,
+		session = "T-second",
+		connection = "/fake/session-two/connection.json",
+		title = "two",
+	}
 	respond(matches)
 	equal(2, #picker.items, "Multiple sessions require a picker")
 	equal("none", s.harness.name, "Opening picker does not bind or send")
@@ -192,6 +220,43 @@ return function(root, equal, fails, keys)
 	picker.opts.on_select(picker.items[2])
 	equal(false, connections.get(picker.items[2].key).connected, "Enter disconnects an already connected harness")
 	picker.opts.on_select(connections.get(picker.items[2].key))
+	local amp_target = vim.deepcopy(s.harness)
+	local omp = {
+		provider = "omp",
+		root = root,
+		session = "11111111-2222-4333-8444-555555555555",
+		connection = "/fake/omp/connection.json",
+		title = "OMP",
+	}
+	vim.cmd("Harness use omp")
+	respond({ matches[1], matches[2], omp })
+	equal("omp", session.provider, "OMP is the worktree launch type")
+	equal("omp-live", s.harness.name, "Only the matching provider autoconnects in a mixed worktree")
+	equal(omp.session, s.harness.session, "OMP keeps its own session identifier")
+	equal(
+		{ "rediff-omp-live", "send", omp.connection, omp.session },
+		feedback.command(s.harness),
+		"OMP uses its own transport"
+	)
+	fails(function()
+		feedback.command({ name = "omp" })
+	end, "connect omp")
+	panel.open = function(opts)
+		picker = { opts = opts }
+	end
+	vim.cmd("Harness connect omp")
+	respond({
+		omp,
+		vim.tbl_extend("force", omp, { session = "second", connection = "/fake/omp-two/connection.json" }),
+		matches[1],
+	})
+	equal("omp", picker.opts.provider, "OMP chooser excludes Amp sessions")
+	for _, entry in ipairs(connections.connected()) do
+		if entry.provider == "omp" then
+			harness.disconnect(entry)
+		end
+	end
+	harness.select(root, amp_target)
 	vim.system, panel.open = system, panel_open
 	vim.api.nvim_set_current_tabpage(s.previous_tab)
 	equal(

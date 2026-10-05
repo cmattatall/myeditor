@@ -100,9 +100,9 @@
                 test "$(command -v nvim)" = "$HOME/.nix-profile/bin/nvim"
                 test "$(realpath "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/rediff"
                 test "$(command -v amp)" = "$HOME/.nix-profile/bin/amp"
-                test "$(command -v pi)" = "$HOME/.nix-profile/bin/pi"
+                test "$(command -v omp)" = "$HOME/.nix-profile/bin/omp"
                 amp --version
-                pi --version
+                omp --version
                 test ! -e "$HOME/.nix-profile/bin/myeditor"
                 nvim --headless -i NONE -c 'lua if vim.env.NVIM_APPNAME ~= "rediff" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' -c 'qa!'
                 # A profile switch must update nvim in this same shell, without
@@ -114,6 +114,7 @@
                 test "$(nvim)" = updated-editor
                 test "$(cat ${standalone}/home-files/.config/rediff/standalone-owner)" = rediff-standalone-v1
                 test ! -e ${standalone}/home-files/.config/amp/plugins/rediff.ts
+                test ! -e ${standalone}/home-files/.omp/agent/extensions/rediff.ts
                 touch "$out"
               '';
           rediff-amp =
@@ -130,6 +131,24 @@
                 mkdir -p "$HOME"
                 node --test ${./plugins/amp}/tests/rediff.test.ts
                 bash ${./plugins/amp}/tests/install.test.sh
+                touch "$out"
+              '';
+          rediff-omp =
+            pkgs.runCommand "rediff-omp-tests"
+              {
+                nativeBuildInputs = [
+                  pkgs.nodejs
+                  pkgs.python3
+                  pkgs.omp
+                ];
+              }
+              ''
+                export HOME="$TMPDIR/home"
+                export REDIFF_TEST_BRIDGE=${self}/nix/amp_live.py
+                mkdir -p "$HOME"
+                node --test ${./plugins/omp}/tests/rediff.test.ts
+                bash ${./plugins/omp}/tests/install.test.sh
+                node --test ${./plugins/omp}/tests/omp-rpc.smoke.test.ts
                 touch "$out"
               '';
           review =

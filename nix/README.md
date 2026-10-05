@@ -75,11 +75,11 @@ Nix and flakes must already be available. No separate Home Manager CLI is needed
 only the host system, username, and home directory through impure evaluation.
 Repeat `--switch` after changing the checkout to rebuild and install updates.
 
-Activation installs rediff, its `nvim` wrapper, Amp (`amp`), and pi (`pi`) through
-Home Manager. CLI versions come from the pinned `amp-cli` and `pi-coding-agent`
+Activation installs rediff, its `nvim` wrapper, Amp (`amp`), and oh-my-pi (`omp`) through
+Home Manager. CLI versions come from the pinned `amp-cli` and `omp`
 nixpkgs packages; no curl/npm installer runs. Only `amp-cli` is allowed as an
-unfree package. Log in to each CLI separately. Installing pi does not add a
-native rediff feedback adapter for it; use a custom receiver for integration.
+unfree package. Log in to each CLI separately. Agent extensions are separate
+opt-ins; the bootstrap profile does not install them.
 The installer backs up an existing regular shell rc and appends the standard
 `hm-session-vars.sh` source line once: `.zshrc` (respecting `ZDOTDIR`), `.bashrc`
 on Linux, or `.bash_profile` for macOS Bash login shells. Home Manager puts
@@ -128,12 +128,12 @@ The editor module does not install harness CLIs. Import the independent
 
 ```nix
 programs.harnesses.amp.enable = true;
-programs.harnesses.pi.enable = true;
+programs.harnesses.omp.enable = true;
 nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
 ```
 
 The harness module lives in `programs/harnesses.nix` and works without the editor
-module. Both options default to false; `.amp.package` and `.pi.package` can
+module. Both options default to false; `.amp.package` and `.omp.package` can
 override the nixpkgs packages. It does not install plugins or manage credentials.
 If Home Manager uses an externally configured `pkgs` (such as nix-darwin's
 global packages), set the unfree predicate on that nixpkgs instance instead.
@@ -368,8 +368,8 @@ Scripts use uppercase `:Worktree` / `:Harness`, not the typed abbreviations.
 
 ## Connect an agent: Amp, Claude Code, or a custom harness
 
-The editor is harness-independent. Built-in adapters support **Amp** and
-**Claude Code**; other harnesses can implement the receiver protocol below.
+The editor is harness-independent. Built-in adapters support **Amp**, **oh-my-pi**,
+and **Claude Code**; other harnesses can implement the receiver protocol below.
 Install and authenticate the chosen agent CLI separately. The Nix package
 includes the adapters, not the agent CLIs or credentials.
 
@@ -461,9 +461,15 @@ filters aliases, titles, providers, IDs, directories, and activity. Enter toggle
 the selected harness's connection without stopping its agent or discarding drafts;
 `r` assigns a local alias, `d` disconnects, `c` shows connected sessions, and `R`
 rediscovers. `use amp` selects the launch type and connects to the only live match
-in this checkout, or opens the panel for multiple matches. Apart from validating
-a saved binding at startup, discovery runs only when requested. Connecting sends
-nothing and does not start an agent.
+in this checkout, or opens the panel for multiple matches. While open, the panel
+discovers sessions every second without overlapping probes or restarting healthy
+activity streams. Closing it stops polling. Connecting sends nothing and does
+not start an agent.
+
+Amp can run in another terminal window, emulator, or tmux session on the same
+machine and user account. Each Amp instance must load the rediff plugin; discovery
+uses `~/.cache/rediff/amp`, not terminal environment variables. Remote machines
+and orbs do not share this local registry or loopback connection.
 
 Multiple harnesses can remain connected. `:Harness send` asks which recipient
 when there is more than one, or `:Harness send ALIAS` selects directly. Drafts
@@ -477,8 +483,8 @@ filesystem sandbox: an existing agent retains its own filesystem permissions.
 The panel receives authenticated Amp activity snapshots asynchronously: running,
 idle, awaiting approval, error, and active tool name, without tool inputs/outputs.
 A running agent has a spinner. Multiple editor instances can subscribe to the
-same agent. Lost connections show offline; `R` rediscovers and reconnects their
-streams without resending feedback. Providers without live activity show unknown.
+same agent. Lost connections show offline; panel polling or `R` reconnects their
+streams when available, without resending feedback. Providers without live activity show unknown.
 Aliases persist locally; live subscriptions end when the editor exits.
 
 On startup, a saved live Amp binding is checked asynchronously against the live
@@ -520,6 +526,41 @@ generation; reconnecting does not make an uncertain delivery safe to resend.
 For interactive typing, lowercase `:harness` and `:hs` abbreviate `:Harness`
 and `:Harness send`. Plugins/scripts must use uppercase because Neovim custom
 commands are uppercase. Credentials never belong in Nix or Git.
+
+### Steer a live oh-my-pi process
+
+The `omp` provider targets **oh-my-pi 18.4.4**, the version in the pinned nixpkgs,
+not upstream pi. Import the harness module to install its CLI independently:
+
+```nix
+programs.harnesses.omp.enable = true;
+programs.rediff.ompPlugin.enable = true; # Requires the editor module; optional
+```
+
+The editor option manages `~/.omp/agent/extensions/rediff.ts` for the default
+profile. It also defaults to true with `programs.rediff.harness = "omp"`.
+Without Home Manager, `:harness install omp` confirms installation of only the
+bundled extension. That installer honors OMP's `OMP_PROFILE`/`PI_PROFILE`,
+`PI_CONFIG_DIR`, and `PI_CODING_AGENT_DIR` settings inherited by the editor;
+it refuses Home Manager-owned symlinks. Neither method starts or authenticates OMP.
+
+Start `omp`, or run **`/restart`** in an existing OMP session to load the extension.
+Then run `:harness connect omp` in rediff. `:harness use omp` also selects OMP for
+new worktrees. `:hl` shows both Amp and OMP sessions; its search, aliases, activity,
+disconnect, and one-second discovery refresh work for both providers.
+
+Feedback goes to the live session without launching another agent process.
+`accepted` means admitted: an idle agent starts a turn, a running agent receives
+steering, and any later model error is reported by OMP. It does not mean the turn
+finished. Tool activity invalidates changed files so Review can refresh unseen
+markers; shell/subagent tools invalidate conservatively, with Git checking the diff.
+
+Session changes (`/new`, `/resume`, `/fork`, `/branch`) replace the connection;
+select the new session in rediff. If another extension cancels a session switch,
+run `/rediff-connect` in OMP to resume delivery. `/rediff-disconnect` stops the
+bridge without stopping OMP. Connections use a private loopback registry under
+`~/.cache/rediff/omp`; they work across terminals on the same machine/user.
+Annotations remain local to their worktree, including with mixed Amp/OMP connections.
 
 ### Continue an Amp CLI thread
 

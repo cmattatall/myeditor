@@ -1,8 +1,9 @@
 local M = {}
+local feedback = require("rediff.feedback")
 local entries = {}
 local watchers = {}
 local listeners = {}
-local discovery_generation = 0
+local discovering
 local closed = false
 local MAX_LINE = 65536
 
@@ -32,7 +33,7 @@ local function identity(target)
 	assert(type(target.root) == "string" and target.root ~= "", "Connection target requires a root")
 	assert(type(target.session) == "string" and target.session ~= "", "Connection target requires a session")
 	local name = assert(target.name, "Connection target requires a name")
-	local provider = target.provider or (name == "amp-live" and "amp" or name)
+	local provider = target.provider or feedback.provider(target)
 	assert(type(name) == "string" and name ~= "", "Connection target requires a name")
 	assert(type(provider) == "string" and provider ~= "", "Connection target requires a provider")
 	return provider, name
@@ -48,7 +49,7 @@ local function copy(entry)
 end
 
 local function has_activity(entry)
-	if entry.name ~= "amp-live" or type(entry.capabilities) ~= "table" then
+	if not feedback.is_live(entry) or type(entry.capabilities) ~= "table" then
 		return false
 	end
 	for _, capability in ipairs(entry.capabilities) do
@@ -85,12 +86,18 @@ local function stream_failed(key, watcher)
 end
 
 local function start(entry)
-	stop(entry.key)
 	if closed or not entry.connected or not has_activity(entry) then
+		stop(entry.key)
 		return
 	end
-	assert(type(entry.connection) == "string" and entry.connection ~= "", "Amp activity target requires a connection")
-	local watcher = { buffer = "", sequence = -1, files_revision = 0, closed = false }
+	local previous = watchers[entry.key]
+	if previous and previous.connection == entry.connection then
+		-- Discovery only checks liveness. Keep the stream and its revision watermark.
+		return
+	end
+	stop(entry.key)
+	assert(type(entry.connection) == "string" and entry.connection ~= "", "Live activity target requires a connection")
+	local watcher = { connection = entry.connection, buffer = "", sequence = -1, files_revision = 0, closed = false }
 	watchers[entry.key] = watcher
 	local function consume(_, chunk)
 		if not chunk or chunk == "" or watcher.closed then
@@ -170,7 +177,7 @@ local function start(entry)
 			end)
 		end
 	end
-	local ok, child = pcall(vim.system, { "rediff-amp-live", "watch", entry.connection, entry.session }, {
+	local ok, child = pcall(vim.system, { "rediff-" .. entry.name, "watch", entry.connection, entry.session }, {
 		text = true,
 		stdout = consume,
 	}, function()
@@ -187,6 +194,8 @@ end
 
 local function merge(target, connect)
 	local key = M.key(target)
+	local watcher = watchers[key]
+	local live_title = watcher and watcher.connection == target.connection and watcher.sequence >= 0
 	local entry = entries[key]
 		or {
 			key = key,
@@ -195,11 +204,11 @@ local function merge(target, connect)
 			online = false,
 		}
 	for _, field in ipairs({ "name", "provider", "session", "root", "connection", "title", "capabilities" }) do
-		if target[field] ~= nil then
+		if target[field] ~= nil and not (field == "title" and live_title) then
 			entry[field] = vim.deepcopy(target[field])
 		end
 	end
-	entry.provider = entry.provider or (entry.name == "amp-live" and "amp" or entry.name)
+	entry.provider = entry.provider or feedback.provider(entry)
 	entry.alias = aliases[key]
 	if connect ~= nil then
 		entry.connected = connect
@@ -234,7 +243,7 @@ end
 function M.connect(target)
 	local entry = merge(target, true)
 	entry.online = true
-	if entry.name ~= "amp-live" then
+	if not feedback.is_live(entry) then
 		entry.activity = { state = "unknown" }
 	end
 	start(entry)
@@ -278,27 +287,41 @@ end
 
 function M.discover(callback)
 	assert(type(callback) == "function", "Discovery requires a callback")
-	discovery_generation = discovery_generation + 1
-	local generation = discovery_generation
-	local ok, err = pcall(vim.system, { "rediff-amp-live", "discover", "--all" }, { text = true }, function(result)
+	if closed then
+		return
+	end
+	if discovering then
+		table.insert(discovering, callback)
+		return
+	end
+	discovering = { callback }
+	local function finish(err)
+		local callbacks = discovering
+		discovering = nil
+		for _, done in ipairs(callbacks) do
+			done(err)
+		end
+	end
+	local ok, err = pcall(vim.system, { "rediff-live", "discover", "--all" }, { text = true }, function(result)
 		vim.schedule(function()
-			if generation ~= discovery_generation or closed then
+			if closed then
 				return
 			end
 			if result.code ~= 0 then
 				local message = vim.trim(result.stderr or "")
-				callback(message ~= "" and message or "Amp discovery failed")
+				finish(message ~= "" and message or "Harness discovery failed")
 				return
 			end
 			local decoded, rows = pcall(vim.json.decode, result.stdout or "")
 			if not decoded or type(rows) ~= "table" or not vim.islist(rows) then
-				callback("Amp discovery returned invalid data")
+				finish("Harness discovery returned invalid data")
 				return
 			end
 			local seen = {}
 			for _, row in ipairs(rows) do
 				if
 					type(row) == "table"
+					and (row.provider == "amp" or row.provider == "omp")
 					and type(row.root) == "string"
 					and row.root ~= ""
 					and type(row.session) == "string"
@@ -307,7 +330,7 @@ function M.discover(callback)
 					and row.connection ~= ""
 				then
 					row = vim.deepcopy(row)
-					row.name, row.provider = "amp-live", "amp"
+					row.name = row.provider .. "-live"
 					local entry = merge(row)
 					entry.online = true
 					seen[entry.key] = true
@@ -317,7 +340,7 @@ function M.discover(callback)
 				end
 			end
 			for key, entry in pairs(entries) do
-				if entry.name == "amp-live" and not seen[key] then
+				if feedback.is_live(entry) and not seen[key] then
 					stop(key)
 					if entry.connected then
 						entry.online = false
@@ -328,13 +351,13 @@ function M.discover(callback)
 				end
 			end
 			changed()
-			callback(nil)
+			finish(nil)
 		end)
 	end)
 	if not ok then
 		vim.schedule(function()
-			if generation == discovery_generation then
-				callback(tostring(err))
+			if not closed then
+				finish(tostring(err))
 			end
 		end)
 	end
@@ -351,7 +374,6 @@ end
 vim.api.nvim_create_autocmd("VimLeavePre", {
 	callback = function()
 		closed = true
-		discovery_generation = discovery_generation + 1
 		for key in pairs(watchers) do
 			stop(key)
 		end

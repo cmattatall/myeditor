@@ -36,10 +36,16 @@ in
       default = cfg.harness == "amp";
       description = "Install the rediff Amp plugin from this flake. Does not install or authenticate Amp.";
     };
+    ompPlugin.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = cfg.harness == "omp";
+      description = "Install the rediff oh-my-pi extension for the default ~/.omp/agent profile. Does not install or authenticate OMP.";
+    };
     harness = lib.mkOption {
       type = lib.types.enum [
         "none"
         "amp"
+        "omp"
         "claude"
         "custom"
       ];
@@ -47,8 +53,8 @@ in
       example = "amp";
       description = ''
         Default harness for repositories without a saved binding. Built-in
-        harnesses require an explicit per-repository thread/session selected
-        with :ReviewHarness. None keeps feedback in the local outbox.
+        live harnesses connect with :Harness connect amp|omp. CLI continuation
+        uses :ReviewHarness. None keeps feedback in the local outbox.
       '';
     };
     feedbackCommand = lib.mkOption {
@@ -68,6 +74,9 @@ in
     home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
     home.file.".config/amp/plugins/rediff.ts" = lib.mkIf cfg.ampPlugin.enable {
       source = ../plugins/amp/rediff.ts;
+    };
+    home.file.".omp/agent/extensions/rediff.ts" = lib.mkIf cfg.ompPlugin.enable {
+      source = ../plugins/omp/rediff.ts;
     };
     xdg.configFile."rediff/settings.json".text = builtins.toJSON {
       harness = cfg.harness;

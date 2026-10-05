@@ -116,6 +116,44 @@ class AmpLiveTests(unittest.TestCase):
         self.assertEqual([("GET", True, None)], Handler.requests)
         self.assertNotIn("secret", json.dumps(found))
 
+    def test_omp_discovery_delivery_routing_and_activity(self):
+        session = "11111111-2222-4333-8444-555555555555"
+        self.connection.unlink()
+        self.connection = self.home / ".cache/rediff/omp/session-one/connection.json"
+        self.connection.parent.mkdir(parents=True, mode=0o700)
+        os.chmod(self.connection.parent.parent, 0o700)
+        self.descriptor.update(provider="omp", thread=session)
+        Handler.descriptor = dict(self.descriptor)
+        self.write_descriptor()
+        with patch.dict(os.environ, {"HOME": str(self.home)}):
+            self.assertEqual([], amp_live.discover(self.root))
+            self.assertEqual(session, amp_live.discover(self.root, "omp")[0]["session"])
+            with patch.object(sys, "argv", ["bridge", "--provider", "all", "discover", "--all"]), patch("builtins.print") as output:
+                amp_live.main()
+            rows = json.loads(output.call_args.args[0])
+            self.assertEqual(["omp"], [row["provider"] for row in rows])
+        with self.assertRaisesRegex(ValueError, "descriptor"):
+            amp_live._load(self.connection, "amp")
+        recipient = {"provider": "omp", "id": session, "repository": str(self.root.resolve())}
+        self.payload_write(recipient=dict(recipient, provider="amp"))
+        with self.assertRaisesRegex(ValueError, "recipient"):
+            amp_live.send(self.connection, session, self.payload, "omp")
+        self.payload_write(recipient=recipient)
+        ack = amp_live.send(self.connection, session, self.payload, "omp")
+        self.assertEqual("omp-live", ack["harness"])
+        self.assertEqual("accepted", ack["status"])
+        self.assertTrue(Path(str(self.payload) + ".omp-live-receipt.json").exists())
+        self.assertFalse(Path(str(self.payload) + ".amp-live-receipt.json").exists())
+        before = len(Handler.requests)
+        self.assertEqual(ack, amp_live.send(self.connection, session, self.payload, "omp"))
+        self.assertEqual(before, len(Handler.requests), "Accepted delivery is not repeated")
+        snapshot = {"version": 1, "root": str(self.root.resolve()), "thread": session,
+                    "sequence": 1, "state": "running", "title": "OMP", "tool": "edit", "files_revision": 3}
+        Handler.events = (json.dumps(snapshot) + "\n").encode()
+        with patch("builtins.print") as output, self.assertRaisesRegex(RuntimeError, "disconnected"):
+            amp_live.watch(self.connection, session, "omp")
+        self.assertEqual(snapshot, json.loads(output.call_args.args[0]))
+
     def test_discovery_all_includes_other_worktrees(self):
         self.descriptor["root"] = str((self.home / "other").resolve())
         Handler.descriptor = dict(self.descriptor)

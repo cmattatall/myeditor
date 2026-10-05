@@ -79,12 +79,22 @@ stdenv.mkDerivation {
     cp ${./amp_live.py} "$out/share/rediff/amp_live.py"
     makeWrapper ${python3}/bin/python3 "$out/bin/rediff-amp-live" \
       --add-flags "$out/share/rediff/amp_live.py"
+    makeWrapper ${python3}/bin/python3 "$out/bin/rediff-omp-live" \
+      --add-flags "$out/share/rediff/amp_live.py" --add-flags '--provider omp'
+    makeWrapper ${python3}/bin/python3 "$out/bin/rediff-live" \
+      --add-flags "$out/share/rediff/amp_live.py" --add-flags '--provider all'
     mkdir -p "$out/share/rediff/amp"
     cp ${../plugins/amp/rediff.ts} "$out/share/rediff/amp/rediff.ts"
     cp ${../plugins/amp/install.sh} "$out/share/rediff/amp/install.sh"
     makeWrapper ${bash}/bin/bash "$out/bin/rediff-install-amp-plugin" \
       --prefix PATH : ${lib.makeBinPath [ coreutils ]} \
       --add-flags "$out/share/rediff/amp/install.sh"
+    mkdir -p "$out/share/rediff/omp"
+    cp ${../plugins/omp/rediff.ts} "$out/share/rediff/omp/rediff.ts"
+    cp ${../plugins/omp/install.sh} "$out/share/rediff/omp/install.sh"
+    makeWrapper ${bash}/bin/bash "$out/bin/rediff-install-omp-plugin" \
+      --prefix PATH : ${lib.makeBinPath [ coreutils ]} \
+      --add-flags "$out/share/rediff/omp/install.sh"
   '';
   meta = {
     description = "Read agent diffs with a portable modal review editor";
