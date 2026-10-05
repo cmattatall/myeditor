@@ -63,7 +63,62 @@ function M.get(root)
 			epoch = 0,
 		}
 		sessions[root].delivery = delivery_status(sessions[root])
-		if target.session then
+		if target.name == "amp-live" and target.session then
+			local s = sessions[root]
+			s.restoring = true
+			s.delivery = "checking connection"
+			s.connection_error =
+				"The previous Amp session is unavailable. Select a live harness, then run :harness send."
+			local function restored(result)
+				vim.schedule(function()
+					if s.epoch ~= 0 then
+						return -- An explicit selection supersedes startup discovery.
+					end
+					s.restoring = false
+					local ok, matches = pcall(vim.json.decode, result.stdout or "")
+					if result.code == 0 and ok and type(matches) == "table" then
+						local local_matches, selected = {}, nil
+						for _, match in ipairs(matches) do
+							if
+								type(match) == "table"
+								and match.root == root
+								and type(match.session) == "string"
+								and type(match.connection) == "string"
+							then
+								table.insert(local_matches, match)
+								if match.session == target.session then
+									selected = match
+								end
+							end
+						end
+						selected = selected or (#local_matches == 1 and local_matches[1])
+						if selected then
+							target.session, target.connection, target.title, target.capabilities =
+								selected.session, selected.connection, selected.title, selected.capabilities
+							target.root = root
+							connections.connect(target)
+							s.connection_error = nil
+							save(s)
+						end
+					end
+					s.delivery = s.connection_error and "disconnected" or delivery_status(s)
+					local compose = s.compose_after_restore
+					s.compose_after_restore = nil
+					if compose then
+						compose()
+					end
+				end)
+			end
+			local ok = pcall(
+				vim.system,
+				{ "rediff-amp-live", "discover", root },
+				{ text = true, timeout = 5000 },
+				restored
+			)
+			if not ok then
+				restored({ code = 1 })
+			end
+		elseif target.session then
 			connections.connect(vim.tbl_extend("force", target, { root = root }))
 		end
 	end
@@ -138,6 +193,7 @@ function M.select(root, target)
 		s.provider = target.name == "amp-live" and "amp" or target.name
 	end
 	s.epoch = s.epoch + 1
+	s.restoring, s.connection_error, s.compose_after_restore = nil, nil, nil
 	s.delivery = delivery_status(s)
 	save(s)
 	if target.session then
@@ -188,6 +244,8 @@ end
 
 function M.deliver(root, id, path, argv, retry, callback, owner)
 	local s = owner or M.get(root)
+	assert(not s.restoring, "Checking the saved Amp session. Try again shortly.")
+	assert(not s.connection_error, s.connection_error)
 	assert(not feedback.busy(root), "A feedback delivery is already running for this repository")
 	s.last = { id = id, path = path, argv = vim.deepcopy(argv) }
 	save(s)
@@ -239,6 +297,10 @@ end
 
 function M.connect()
 	local s = M.get(current().root)
+	if s.restoring then
+		s.restoring, s.compose_after_restore = nil, nil
+		s.delivery = "disconnected"
+	end
 	s.epoch = s.epoch + 1
 	local epoch = s.epoch
 	connections.discover(function(err)
@@ -361,6 +423,30 @@ function M.compose(target, root, directory)
 	root = root or current().root
 	directory = directory or vim.fn.getcwd()
 	if not target then
+		local source = M.get(root)
+		if source.restoring then
+			local win, buf = api.nvim_get_current_win(), api.nvim_get_current_buf()
+			source.compose_after_restore = function()
+				local ok, context = pcall(current)
+				if
+					ok
+					and context.root == root
+					and api.nvim_get_current_win() == win
+					and api.nvim_get_current_buf() == buf
+				then
+					local opened, err = pcall(M.compose, nil, root, directory)
+					if not opened then
+						notify(tostring(err), "failed")
+					end
+				end
+			end
+			return
+		end
+		if source.connection_error then
+			notify(source.connection_error)
+			M.panel("connect")
+			return
+		end
 		local connected = connections.connected()
 		if #connected > 1 then
 			M.panel("send")

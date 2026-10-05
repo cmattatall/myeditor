@@ -190,6 +190,8 @@ return function(root, equal, fails, keys)
 	harness.connect()
 	respond(matches)
 	picker.opts.on_select(picker.items[2])
+	equal(false, connections.get(picker.items[2].key).connected, "Enter disconnects an already connected harness")
+	picker.opts.on_select(connections.get(picker.items[2].key))
 	vim.system, panel.open = system, panel_open
 	vim.api.nvim_set_current_tabpage(s.previous_tab)
 	equal(

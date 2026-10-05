@@ -56,7 +56,9 @@ class EditorUI(unittest.TestCase):
         os.environ.update(self.environment)
         self.directory.cleanup()
 
-    def launch(self, directory, headless=False, file=None, columns=132):
+    def launch(
+        self, directory, headless=False, file=None, columns=132, before_init=None
+    ):
         args = [
             EDITOR,
             "--embed",
@@ -70,6 +72,8 @@ class EditorUI(unittest.TestCase):
                 "callback=function() vim.g.test_review_ready=true end})"
             ),
         ]
+        if before_init:
+            args.extend(["--cmd", "lua " + before_init])
         if headless:
             args.append("--headless")
         if file:
@@ -108,6 +112,138 @@ class EditorUI(unittest.TestCase):
         while not self.lua(editor, "return " + condition):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
+
+    def test_saved_amp_connection_is_rediscovered_before_sending(self):
+        for outcome in ("renewed", "replacement", "gone", "superseded"):
+            with self.subTest(outcome=outcome):
+                self.fixture.exec_lua(
+                    """
+                    local root = ...
+                    local feedback = require('rediff.feedback')
+                    feedback.write(feedback.directory(root)..'/harness.json', {
+                        target={name='amp-live',session='T-saved',connection='/deleted/session/connection.json'},
+                        provider='amp',
+                    })
+                    """,
+                    self.root,
+                )
+                editor = self.launch(
+                    self.root,
+                    headless=True,
+                    before_init="""
+                    local root = vim.fn.getcwd()
+                    _G.bridge_calls = {}
+                    local system = vim.system
+                    vim.system = function(argv, opts, callback)
+                        if argv[1] ~= 'rediff-amp-live' then return system(argv,opts,callback) end
+                        table.insert(bridge_calls,argv)
+                        if argv[2] == 'discover' and argv[3] == root then
+                            _G.restore_reply = callback
+                        elseif argv[2] == 'discover' then
+                            callback({code=0,stdout='[]'})
+                        elseif argv[2] == 'send' then
+                            local payload = require('rediff.feedback').read(argv[#argv])
+                            callback({code=0,stdout=vim.json.encode({submission_id=payload.submission_id,status='accepted'})})
+                        else error('Unexpected bridge command') end
+                    end
+                """,
+                )
+                editor.exec_lua(
+                    "_G.saved_session = require('rediff.harness').get(...)", self.root
+                )
+                editor.command("Harness send")
+                self.assertTrue(editor.exec_lua("return saved_session.restoring"))
+                self.assertEqual(
+                    0,
+                    editor.exec_lua(
+                        "return #require('rediff.connections').connected()"
+                    ),
+                )
+                self.assertNotEqual("acwrite", editor.current.buffer.options["buftype"])
+                if outcome == "superseded":
+                    editor.exec_lua(
+                        "require('rediff.harness').select(saved_session.root,{name='none'})"
+                    )
+                editor.exec_lua(
+                    """
+                    local outcome = ...
+                    local rows = {
+                        {root=saved_session.root,session='T-another',connection='/other/connection.json'},
+                        {root=saved_session.root..'/other',session='T-saved',connection='/wrong-root/connection.json'},
+                    }
+                    if outcome == 'gone' then
+                        table.insert(rows,{root=saved_session.root,session='T-second',connection='/second/connection.json'})
+                    elseif outcome ~= 'replacement' then
+                        table.insert(rows,{root=saved_session.root,session='T-saved',connection='/renewed/connection.json'})
+                    end
+                    restore_reply({code=0,stdout=vim.json.encode(rows)})
+                """,
+                    outcome,
+                )
+                pump(editor)
+                if outcome in ("renewed", "replacement"):
+                    expected_connection, expected_thread = (
+                        ("/renewed/connection.json", "T-saved")
+                        if outcome == "renewed"
+                        else ("/other/connection.json", "T-another")
+                    )
+                    self.assertEqual(
+                        expected_connection,
+                        editor.exec_lua("return saved_session.target.connection"),
+                    )
+                    self.assertEqual(
+                        "acwrite", editor.current.buffer.options["buftype"]
+                    )
+                    self.assertEqual([""], list(editor.current.buffer[:]))
+                    self.assertEqual(1, editor.exec_lua("return #bridge_calls"))
+                    editor.current.buffer[:] = ["Send to the selected local thread"]
+                    editor.command("write")
+                    pump(editor)
+                    self.assertEqual(
+                        [
+                            "rediff-amp-live",
+                            "send",
+                            expected_connection,
+                            expected_thread,
+                        ],
+                        editor.exec_lua("return vim.list_slice(bridge_calls[2],1,4)"),
+                    )
+                elif outcome == "gone":
+                    self.assertEqual(
+                        "connect",
+                        editor.exec_lua(
+                            "return require('rediff.harness_panel').state.purpose"
+                        ),
+                    )
+                    self.assertFalse(
+                        editor.exec_lua(
+                            "return pcall(require('rediff.harness').deliver,saved_session.root,'never','/missing',{})"
+                        )
+                    )
+                    self.assertEqual(
+                        0,
+                        editor.exec_lua(
+                            "return #require('rediff.connections').connected()"
+                        ),
+                    )
+                    self.assertTrue(
+                        editor.exec_lua(
+                            "for _,argv in ipairs(bridge_calls) do if argv[2]~='discover' then return false end end return true"
+                        )
+                    )
+                else:
+                    self.assertEqual(
+                        "none", editor.exec_lua("return saved_session.target.name")
+                    )
+                    self.assertNotEqual(
+                        "acwrite", editor.current.buffer.options["buftype"]
+                    )
+                    self.assertEqual(
+                        0,
+                        editor.exec_lua(
+                            "return #require('rediff.connections').connected()"
+                        ),
+                    )
 
     def test_harness_delivery_keeps_editor_responsive(self):
         editor = self.launch(self.root)

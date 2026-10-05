@@ -318,6 +318,15 @@ class AmpLiveTests(unittest.TestCase):
             amp_live.send(self.connection, THREAD, self.payload)
         self.assertEqual([], Handler.requests)
 
+    def test_missing_connection_reports_recovery_without_sending(self):
+        self.payload_write()
+        self.connection.unlink()
+        self.connection.parent.rmdir()
+        with self.assertRaisesRegex(ValueError, ":harness connect amp") as caught:
+            amp_live.send(self.connection, THREAD, self.payload)
+        self.assertNotIn("No such file", str(caught.exception))
+        self.assertEqual([], Handler.requests)
+
     def test_failed_receipt_replacement_retains_uncertain_retry_state(self):
         self.payload_write()
         with patch.object(amp_live.os, "replace", side_effect=OSError("disk error")):

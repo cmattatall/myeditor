@@ -164,5 +164,8 @@ repository owns the rediff plugin, installer, and tests under `plugins/amp/`.
 Home Manager can install it; Home Manager and shell installs require a manual
 reload. The registry is
 `~/.cache/rediff/amp` with no legacy discovery. Feedback uses rules-first JSON
-without a prose prefix or epilogue. Harness discovery is manual, no real sends
-occur merely by connecting, and credentials never belong in Nix or Git.
+without a prose prefix or epilogue. Startup revalidates a saved live Amp binding
+by thread ID and worktree, replacing expired endpoint paths without sending.
+If that session is gone, one live match in the current worktree connects
+automatically; otherwise `:harness send` opens the connection picker. Other
+discovery is manual, and credentials never belong in Nix or Git.

@@ -39,9 +39,12 @@ def _endpoint(value):
 
 def _load(path):
     path = Path(path).absolute()
-    if not _private(path.parent, True) or not _private(path):
-        raise ValueError("unsafe Amp connection descriptor")
-    raw = path.read_bytes()
+    try:
+        if not _private(path.parent, True) or not _private(path):
+            raise ValueError("unsafe Amp connection descriptor")
+        raw = path.read_bytes()
+    except FileNotFoundError as error:
+        raise ValueError("This Amp connection has closed. Run :harness connect amp to select a live session. Nothing was sent by this attempt.") from error
     data = json.loads(raw)
     if not isinstance(data, dict):
         raise ValueError("invalid Amp connection descriptor")

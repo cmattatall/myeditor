@@ -415,8 +415,9 @@ filters aliases, titles, providers, IDs, directories, and activity. Enter toggle
 the selected harness's connection without stopping its agent or discarding drafts;
 `r` assigns a local alias, `d` disconnects, `c` shows connected sessions, and `R`
 rediscovers. `use amp` selects the launch type and connects to the only live match
-in this checkout, or opens the panel for multiple matches. Discovery runs only
-when requested. Connecting sends nothing and does not start an agent.
+in this checkout, or opens the panel for multiple matches. Apart from validating
+a saved binding at startup, discovery runs only when requested. Connecting sends
+nothing and does not start an agent.
 
 Multiple harnesses can remain connected. `:Harness send` asks which recipient
 when there is more than one, or `:Harness send ALIAS` selects directly. Drafts
@@ -433,6 +434,13 @@ A running agent has a spinner. Multiple editor instances can subscribe to the
 same agent. Lost connections show offline; `R` rediscovers and reconnects their
 streams without resending feedback. Providers without live activity show unknown.
 Aliases persist locally; live subscriptions end when the editor exits.
+
+On startup, a saved live Amp binding is checked asynchronously against the live
+registry. The same thread in the same worktree can acquire a new endpoint after
+a plugin reload. If it is gone, a single live session in the current worktree
+connects automatically. With multiple matches (or none), `:harness send` opens
+the connection picker. Sessions in other worktrees are never selected as an
+automatic fallback. Failed feedback is never resent by reconnecting.
 
 `:Harness send` opens a general-message `acwrite` buffer with normal Vim editing: `:w` submits and
 stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
