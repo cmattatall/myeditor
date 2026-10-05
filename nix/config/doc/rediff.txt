@@ -122,6 +122,7 @@ Connected Amp file-edit events trigger refreshes in this worktree. Polling every
 three seconds catches other edits/index changes. Refresh runs with Normal-mode
 tree/diff/harness-message focus, preserves selection/focus, and pauses for
 annotation editing, typing, selections, commands, pickers and delivery.
+Typing in the harness send pane does not pause refresh or interrupt the draft.
 Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
 Use it instead of :bufdo e: Review panes are snapshots, not ordinary file buffers.

@@ -185,6 +185,7 @@ Polling every three seconds catches other edits and index changes. Refresh runs
 with Normal-mode tree, diff, or harness-message focus and keeps the selected
 file, pane focus, and cursor/scroll positions where possible. It pauses for
 annotation editing, typing, selections, commands/pickers, and feedback delivery.
+Typing in the harness send pane is allowed without interrupting the draft.
 Annotation snapshots stay unchanged. Refresh never saves buffers, stages files,
 or sends feedback.
 The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.

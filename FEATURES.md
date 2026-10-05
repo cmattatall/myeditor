@@ -64,6 +64,7 @@ revdiff parity.
   catches other edits/index changes. Normal-mode tree/diff/harness-message focus
   allows refresh; annotation editing, typing, selections, commands, pickers, and
   delivery defer it. Selection and focus stay put. **Space R** refreshes immediately.
+  Typing in the harness send pane does not pause refresh or interrupt the draft.
   Home Manager's `programs.rediff.reviewRefreshInterval` (JSON:
   `review_refresh_interval`) sets whole seconds; `0` disables polling, not events.
   Leave and re-enter Review after changing settings.

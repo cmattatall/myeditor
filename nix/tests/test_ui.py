@@ -2569,10 +2569,9 @@ class EditorUI(unittest.TestCase):
         )
         self.assertEqual(0, self.lua(editor, "return #s.entries"))
         self.keys(editor, ":harness send<CR>iKeep this unsent draft<Esc>")
-        buf, win, cursor = (
+        buf, win = (
             editor.current.buffer.number,
             editor.current.window.handle,
-            editor.current.window.cursor,
         )
         self.assertTrue(self.lua(editor, "return require('rediff.live').ready(s)"))
         self.assertFalse(
@@ -2583,23 +2582,50 @@ class EditorUI(unittest.TestCase):
         path = Path(self.root, "new file.txt")
         path.write_text("first\n")
         self.wait_for(editor, '#s.entries == 1 and s.current.new == "first\\n"')
-        for mode in ("i", "v"):
+        for mode in ("i", "R"):
             self.keys(editor, mode)
-            self.assertFalse(self.lua(editor, "return require('rediff.live').ready(s)"))
+            position = editor.current.window.cursor
+            self.assertEqual(mode, self.lua(editor, "return vim.fn.mode()"))
+            self.assertTrue(self.lua(editor, "return require('rediff.live').ready(s)"))
             path.write_text(mode + "\n")
-            snapshot = self.lua(editor, "return s.current.id")
-            time.sleep(1.2)
-            pump(editor)
-            self.assertEqual(snapshot, self.lua(editor, "return s.current.id"))
-            self.keys(editor, "<Esc>")
             self.wait_for(editor, f's.current.new == "{mode}\\n"')
+            self.assertEqual(mode, self.lua(editor, "return vim.fn.mode()"))
+            self.assertEqual(position, editor.current.window.cursor)
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.assertEqual(win, editor.current.window.handle)
+            self.assertEqual(["Keep this unsent draft"], editor.current.buffer[:])
+            self.keys(editor, "<Esc>")
+        # Visual selections still defer refresh rather than being cancelled by it.
+        self.keys(editor, "v")
+        self.assertFalse(self.lua(editor, "return require('rediff.live').ready(s)"))
+        path.write_text("visual\n")
+        snapshot = self.lua(editor, "return s.current.id")
+        time.sleep(1.2)
+        pump(editor)
+        self.assertEqual(snapshot, self.lua(editor, "return s.current.id"))
+        self.assertEqual("v", self.lua(editor, "return vim.fn.mode()"))
+        self.keys(editor, "<Esc>")
+        self.wait_for(editor, 's.current.new == "visual\\n"')
+
+        # The same draft must allow file events with fallback polling disabled.
+        self.lua(
+            editor,
+            "local f=require('rediff.feedback'); "
+            "f.write(vim.fn.stdpath('config')..'/settings.json',{review_refresh_interval=0}); "
+            "require('rediff.live').start(s)",
+        )
+        self.keys(editor, "A")
+        cursor = editor.current.window.cursor
         Path(self.root, "auth.lua").write_text("return 'edited externally'\n")
+        self.lua(editor, "require('rediff.live').changed(s.root)")
         self.wait_for(editor, "#s.entries == 2")
         self.assertEqual(buf, editor.current.buffer.number)
         self.assertEqual(win, editor.current.window.handle)
-        # Insert/Escape moves one column left; refresh itself must not move it.
-        self.assertEqual((cursor[0], cursor[1] - 1), editor.current.window.cursor)
+        self.assertEqual(cursor, editor.current.window.cursor)
+        self.assertEqual("i", self.lua(editor, "return vim.fn.mode()"))
         self.assertEqual(["Keep this unsent draft"], editor.current.buffer[:])
+        self.keys(editor, " intact<Esc>")
+        self.assertEqual(["Keep this unsent draft intact"], editor.current.buffer[:])
         self.assertTrue(editor.current.buffer.options["modified"])
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])

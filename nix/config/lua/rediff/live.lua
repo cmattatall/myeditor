@@ -4,11 +4,14 @@ local watchers = {}
 
 function M.ready(s)
 	local win = api.nvim_get_current_win()
+	local message = require("rediff.harness").in_message(s.root)
+	local mode = vim.fn.mode()
 	return require("rediff.review").active() == s
 		and not s.composer
 		and not s.annotation_id
-		and vim.fn.mode() == "n"
-		and (win == s.tree_win or win == s.old_win or win == s.new_win or require("rediff.harness").in_message(s.root))
+		-- Harness drafts are separate from the diff buffers being refreshed.
+		and (mode == "n" or (message and (mode == "i" or mode == "R")))
+		and (win == s.tree_win or win == s.old_win or win == s.new_win or message)
 		and not require("rediff.feedback").busy(s.root)
 end
 
