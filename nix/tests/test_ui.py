@@ -88,7 +88,7 @@ class EditorUI(unittest.TestCase):
         if not headless:
             editor.ui_attach(columns, 32, rgb=True, ext_linegrid=True)
         pump(editor)
-        if not headless and Path(directory, ".git").exists():
+        if not headless and not file and Path(directory, ".git").exists():
             deadline = time.monotonic() + 5
             while not editor.exec_lua(
                 "return vim.g.test_review_ready or vim.g.startup_notice ~= nil"
@@ -1341,7 +1341,7 @@ class EditorUI(unittest.TestCase):
 
     def test_startup_and_lock(self):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
-        editor = self.launch(self.root, file="plan.md")
+        editor = self.launch(self.root)
         self.assertTrue(self.lua(editor, "return r.active() ~= nil"))
         self.assertTrue(
             self.lua(
@@ -1369,7 +1369,7 @@ class EditorUI(unittest.TestCase):
         )
         self.keys(editor, " q")
         self.assertEqual(
-            "plan.md",
+            "",
             self.lua(
                 editor, 'return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t")'
             ),
@@ -1388,8 +1388,37 @@ class EditorUI(unittest.TestCase):
         )
         outside = self.launch(self.directory.name)
         self.assertTrue(
-            self.lua(outside, "return s == nil and #vim.api.nvim_list_wins() == 2")
+            self.lua(outside, "return s == nil and #vim.api.nvim_list_wins() == 1")
         )
+
+    def test_file_arguments_open_for_editing(self):
+        outside_file = Path(self.directory.name, "plain file.txt")
+        outside_file.write_text("Ordinary file outside Git\n")
+        for directory, filename in (
+            (self.root, "auth.lua"),
+            (self.root, "new file.txt"),
+            (self.directory.name, str(outside_file)),
+            (self.directory.name, str(Path(self.root, "plan.md"))),
+        ):
+            with self.subTest(directory=directory, file=filename):
+                path = Path(directory, filename).resolve()
+                editor = self.launch(directory, file=filename)
+                self.assertTrue(
+                    self.lua(editor, "return s == nil and vim.g.startup_notice == nil")
+                )
+                self.assertEqual(str(path), editor.current.buffer.name)
+                self.assertEqual(1, len(editor.windows))
+                self.assertEqual(1, len(editor.tabpages))
+                self.assertTrue(editor.current.buffer.options["modifiable"])
+                self.assertEqual(
+                    path.read_text().splitlines() if path.exists() else [""],
+                    editor.current.buffer[:],
+                )
+                if filename == "auth.lua":
+                    self.keys(editor, " r")
+                    self.assertTrue(self.lua(editor, "return r.active() ~= nil"))
+                    self.keys(editor, " q")
+                    self.assertEqual(str(path), editor.current.buffer.name)
 
     def test_split_balances_on_resize(self):
         editor = self.launch(self.root, columns=80)
@@ -2702,7 +2731,7 @@ class EditorUI(unittest.TestCase):
         os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
         os.environ["HARNESS_TEST_LOG"] = str(marker)
         editor = self.launch(self.root, file="auth.lua")
-        self.keys(editor, "<Tab>")
+        self.keys(editor, " r<Tab>")
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         self.keys(editor, ":harness use amp<CR>")
         self.assertEqual(
@@ -2991,6 +3020,9 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "S")
 
         def exhausted(group):
+            # Key input returns before slow Git work finishes. Capture the index
+            # only after the final file has actually left this group.
+            self.wait_for(editor, "s.current == nil and s.index == nil")
             index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
             # Both polling and manual refresh must preserve the empty group,
             # not select the file that just moved to the other group.

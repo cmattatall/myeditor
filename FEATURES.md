@@ -8,8 +8,9 @@ revdiff parity.
 
 ## Navigation and review progress
 
-- Interactive launches inside Git open Review automatically; **Space q** returns
-  to ordinary editing. Outside Git, startup opens the filesystem tree instead.
+- Interactive launches inside Git without file arguments open Review automatically;
+  **Space q** returns to editing. File arguments open directly for editing.
+  Outside Git, startup stays in ordinary editing without a sidebar.
   Review starts focused on the file tree, with the first diff previewed;
   **Tab** moves into the diff for hunk navigation and staging.
   Headless runs open neither. Startup does not send feedback or change the index.

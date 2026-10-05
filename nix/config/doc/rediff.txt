@@ -49,9 +49,11 @@ TOPICS
 ==============================================================================
 REVIEW AND ANNOTATIONS                                          *rediff-review*
 
-Interactive startup opens Review inside Git, with tree focus and a diff preview.
+Interactive startup without file arguments opens Review inside Git, with tree
+focus and a diff preview. File arguments open directly for editing.
 Moving onto a file previews it; Tab enters the diff. Space q returns to editing.
-Outside Git, startup opens the filesystem tree. Headless runs open neither.
+Outside Git, startup stays in ordinary editing without a sidebar.
+Headless runs open neither Review nor the tree. Space r enters Review manually.
 The bottom bar shows the branch (or detached @short-SHA), harness and delivery.
 
 Source panes are protected snapshots. Editing commands open a note instead of

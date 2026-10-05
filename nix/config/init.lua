@@ -108,16 +108,15 @@ require("neo-tree").setup({
 vim.api.nvim_create_autocmd("VimEnter", {
 	once = true,
 	callback = vim.schedule_wrap(function()
-		if #vim.api.nvim_list_uis() > 0 then
-			if pcall(require("rediff.git").root) then
-				local ok, err = pcall(require("rediff.review").open)
-				if ok then
-					return
-				end
-				vim.notify("Could not open Review: " .. tostring(err), vim.log.levels.WARN)
-			end
-			require("neo-tree.command").execute({ action = "show", source = "filesystem", position = "left" })
+		if #vim.api.nvim_list_uis() == 0 or vim.fn.argc() > 0 or not pcall(require("rediff.git").root) then
+			return
 		end
+		local ok, err = pcall(require("rediff.review").open)
+		if ok then
+			return
+		end
+		vim.notify("Could not open Review: " .. tostring(err), vim.log.levels.WARN)
+		require("neo-tree.command").execute({ action = "show", source = "filesystem", position = "left" })
 	end),
 })
 

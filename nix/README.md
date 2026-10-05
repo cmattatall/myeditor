@@ -27,11 +27,11 @@ Run from a Git worktree to review its changes. Arguments are passed to Neovim:
 nix run path:/path/to/rediff -- src/main.lua
 ```
 
-Interactive launches inside a Git worktree open Review automatically, focused
-on the file tree with the first diff previewed. **Space q** returns to the editing tab, retaining
-any file arguments; **Space r** re-enters Review. **Space R** refreshes snapshots.
-Outside Git, the filesystem tree opens on the left with focus in the editor.
-**Space e** or **:ft** focuses it, **Space d** returns to the editor, and
+Interactive launches with no file arguments inside a Git worktree open Review,
+focused on the tree with the first diff previewed. File arguments open directly
+for editing. Outside Git, startup stays in ordinary editing without a sidebar.
+**Space q** leaves Review; **Space r** enters it. **Space R** refreshes snapshots.
+**Space e** or **:ft** opens/focuses the tree, **Space d** returns to the editor, and
 **Space E** toggles it. Headless runs open neither Review nor the tree.
 If Review is locked by another editor or cannot open, startup reports the
 reason and leaves ordinary editing available. Startup never sends feedback.
@@ -145,7 +145,7 @@ so changing your system's packages does not silently change this editor.
 ## Review workflow
 
 1. Save ordinary file edits; Review reads saved files and the Git index.
-2. Review opens automatically on startup inside Git. From ordinary editing,
+2. Review opens automatically inside Git when no file arguments are given. Otherwise,
    press **Space r** (`:Review`) to enter it. A separate tab contains the Git
    changes sidebar and protected old/new snapshots. The original editing tab,
    sidebar, buffers, and unsaved edits are retained.
