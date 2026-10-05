@@ -12,10 +12,23 @@ local annotation_ns = api.nvim_create_namespace("rediff.annotations")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 local saved_guicursor
 
+local function highlight_tree_headers(s)
+	local cursor = api.nvim_win_get_cursor(s.tree_win)[1]
+	for group, row in pairs(s.group_rows or {}) do
+		local highlight = group == "staged" and "ReviewStaged" or "ReviewUnstaged"
+		if vim.wo[s.tree_win].cursorline and cursor == row then
+			highlight = "ReviewTreeSelection"
+		end
+		-- Header backgrounds override CursorLine, including on closed folds.
+		api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 0, { id = row, line_hl_group = highlight })
+	end
+end
+
 local function tree_focus(focused)
 	local s = M.state
 	if s and s.tree_win and api.nvim_win_is_valid(s.tree_win) then
 		vim.wo[s.tree_win].cursorline = focused
+		highlight_tree_headers(s)
 	end
 	if focused then
 		saved_guicursor = saved_guicursor or vim.o.guicursor
@@ -298,9 +311,35 @@ local function mark_hunk(index)
 	end
 end
 
-local function focus_hunk(index)
+local function select_tree_file(keep_fold)
+	local s = state()
+	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
+	for row, item in pairs(s.rows) do
+		if item == s.index then
+			local entry = s.entries[item]
+			local group = entry.group == "staged" and "staged" or "unstaged"
+			if not keep_fold or not s.collapsed[group] then
+				s.tree_selection[group] = entry_key(entry)
+			end
+			if not keep_fold and s.collapsed[group] then
+				s.collapsed[group] = nil
+				api.nvim_win_call(s.tree_win, function()
+					vim.cmd(row .. "foldopen!")
+				end)
+			end
+			api.nvim_buf_set_extmark(s.tree_buf, active_ns, row - 1, 0, {
+				line_hl_group = "ReviewActiveFile",
+			})
+			api.nvim_win_set_cursor(s.tree_win, { s.collapsed[group] and s.group_rows[group] or row, 0 })
+			break
+		end
+	end
+end
+
+local function focus_hunk(index, keep_fold)
 	local s = state()
 	mark_hunk(index)
+	select_tree_file(keep_fold)
 	local panes = { { s.new_win, s.new_buf, "new" } }
 	if s.old_win then
 		table.insert(panes, 1, { s.old_win, s.old_buf, "old" })
@@ -326,7 +365,7 @@ local function focus_hunk(index)
 	end
 end
 
-function M.show(index, snapshot)
+function M.show(index, snapshot, keep_fold)
 	local s = state()
 	snapshot = snapshot or git.snapshot(s.root, assert(s.entries[index], "No changed file selected"))
 	s.index, s.current = index, snapshot
@@ -377,17 +416,9 @@ function M.show(index, snapshot)
 	api.nvim_set_current_win(s.new_win)
 	mark_hunk(nil)
 	if #s.diff.changes > 0 then
-		focus_hunk(1)
-	end
-	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
-	for row, item in pairs(s.rows) do
-		if item == index then
-			api.nvim_buf_set_extmark(s.tree_buf, active_ns, row - 1, 0, {
-				line_hl_group = "ReviewActiveFile",
-			})
-			api.nvim_win_set_cursor(s.tree_win, { row, 0 })
-			break
-		end
+		focus_hunk(1, keep_fold)
+	else
+		select_tree_file(keep_fold)
 	end
 	awareness.render()
 end
@@ -467,10 +498,16 @@ end
 
 function M.refresh(preferred, changes)
 	local s = state()
+	local heading
+	for group, row in pairs(s.group_rows or {}) do
+		if api.nvim_win_get_cursor(s.tree_win)[1] == row then
+			heading = group
+		end
+	end
 	changes = changes or read_changes(s, preferred)
 	s.annotation_id = nil
 	s.entries, s.reference = changes.entries, changes.reference
-	local lines, rows, headings = { " REVIEW · Git changes", "" }, {}, {}
+	local lines, rows = { " REVIEW · Git changes", "" }, {}
 	s.group_rows = {}
 	for _, group in ipairs({ "staged", "unstaged" }) do
 		local count = 0
@@ -479,8 +516,7 @@ function M.refresh(preferred, changes)
 				count = count + 1
 			end
 		end
-		table.insert(lines, string.format(" %s (%d)", group:upper(), count))
-		headings[#lines] = group == "staged" and "ReviewStaged" or "ReviewUnstaged"
+		table.insert(lines, string.format(" ▾ %s (%d)", group:upper(), count))
 		s.group_rows[group] = #lines
 		for i, entry in ipairs(s.entries) do
 			if (entry.group == "staged") == (group == "staged") then
@@ -497,13 +533,21 @@ function M.refresh(preferred, changes)
 	set_lines(s.tree_buf, lines)
 	api.nvim_buf_clear_namespace(s.tree_buf, tree_ns, 0, -1)
 	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
-	for row, highlight in pairs(headings) do
-		api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 0, { line_hl_group = highlight })
-	end
+	api.nvim_win_call(s.tree_win, function()
+		vim.cmd("normal! zE")
+		for _, group in ipairs({ "staged", "unstaged" }) do
+			local first = s.group_rows[group]
+			local last = group == "staged" and s.group_rows.unstaged - 2 or #lines - 1
+			vim.cmd(string.format("%d,%dfold", first, last))
+			if not s.collapsed[group] then
+				vim.cmd(first .. "foldopen!")
+			end
+		end
+	end)
 	if changes.index and s.entries[changes.index] then
 		local ok, err = false, changes.error
 		if not err then
-			ok, err = pcall(M.show, changes.index, changes.snapshot)
+			ok, err = pcall(M.show, changes.index, changes.snapshot, true)
 		end
 		if not ok then
 			s.current = nil
@@ -532,8 +576,57 @@ function M.refresh(preferred, changes)
 			end
 		end
 	end
+	if heading then
+		api.nvim_win_set_cursor(s.tree_win, { s.group_rows[heading], 0 })
+	end
+	highlight_tree_headers(s)
 	awareness.scan(s.root)
 	save()
+end
+
+function M.tree_fold(collapsed)
+	local s = state()
+	local row = api.nvim_win_get_cursor(s.tree_win)[1]
+	local group = row >= s.group_rows.unstaged and "unstaged" or "staged"
+	if (s.collapsed[group] == true) == collapsed then
+		return
+	end
+	s.collapsed[group] = collapsed
+	if collapsed then
+		local entry = s.entries[s.rows[row] or 0]
+		if entry then
+			s.tree_selection[group] = entry_key(entry)
+		end
+		vim.cmd(s.group_rows[group] .. "foldclose")
+		api.nvim_win_set_cursor(s.tree_win, { s.group_rows[group], 0 })
+	else
+		vim.cmd(s.group_rows[group] .. "foldopen!")
+		local first, selected
+		for i, entry in ipairs(s.entries) do
+			if (entry.group == "staged") == (group == "staged") then
+				first = first or i
+				if entry_key(entry) == s.tree_selection[group] then
+					selected = i
+				end
+			end
+		end
+		if selected or first then
+			local index = selected or first
+			if index == s.index and s.current then
+				for file_row, item in pairs(s.rows) do
+					if item == index then
+						api.nvim_win_set_cursor(s.tree_win, { file_row, 0 })
+						break
+					end
+				end
+			else
+				M.show(index)
+			end
+			api.nvim_set_current_win(s.tree_win)
+		else
+			s.exhausted_group = group
+		end
+	end
 end
 
 function M.refresh_live()
@@ -1237,6 +1330,8 @@ function M.open()
 		id = string.format("%.0f", vim.uv.hrtime()),
 		delivery = "draft",
 		layout = "split",
+		collapsed = {},
+		tree_selection = {},
 	}
 	M.state = s
 	reviews[root] = s
@@ -1259,9 +1354,27 @@ function M.open()
 	vim.wo[s.tree_win].winfixwidth = true
 	vim.wo[s.tree_win].cursorlineopt = "line"
 	vim.wo[s.tree_win].winhighlight = "CursorLine:ReviewTreeSelection"
+	vim.wo[s.tree_win].foldmethod = "manual"
+	vim.wo[s.tree_win].foldenable = true
+	vim.wo[s.tree_win].foldminlines = 0
+	vim.wo[s.tree_win].foldcolumn = "0"
+	vim.wo[s.tree_win].foldtext = "substitute(getline(v:foldstart), '▾', '▸', '')"
+	api.nvim_win_call(s.tree_win, function()
+		vim.opt_local.fillchars:append({ fold = " " })
+	end)
 	api.nvim_win_set_width(s.tree_win, math.min(28, math.floor(vim.o.columns / 5)))
 	vim.cmd("wincmd =")
 	map(s.tree_buf, "n", "q", M.leave, "Leave Review")
+	for _, key in ipairs({ "h", "<Left>" }) do
+		map(s.tree_buf, "n", key, function()
+			M.tree_fold(true)
+		end, "Collapse Git group")
+	end
+	for _, key in ipairs({ "l", "<Right>" }) do
+		map(s.tree_buf, "n", key, function()
+			M.tree_fold(false)
+		end, "Expand Git group and restore selection")
+	end
 	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
 		for _, key in ipairs({
 			"i",
@@ -1413,32 +1526,32 @@ function M.setup()
 			if buf == s.tree_buf then
 				local cursor = api.nvim_win_get_cursor(0)
 				local index = s.rows[cursor[1]]
-				-- Keep the intentional empty-group stop after staging, but ordinary
-				-- motions must land on files rather than headings or separator rows.
+				-- Closed and empty groups are selectable; hidden files and separators are not.
+				local function selectable(row)
+					local closed = vim.fn.foldclosed(row)
+					local header = row == s.group_rows.staged or row == s.group_rows.unstaged
+					return closed == row or (closed == -1 and (s.rows[row] ~= nil or (header and not s.rows[row + 1])))
+				end
 				local empty_group = s.exhausted_group and cursor[1] == s.group_rows[s.exhausted_group]
-				if not index and not empty_group then
-					local previous = cursor[1]
-					for row, item in pairs(s.rows) do
-						if item == s.index then
-							previous = row
-							break
-						end
-					end
+				if not selectable(cursor[1]) and not empty_group then
+					local previous = s.tree_cursor or cursor[1]
 					local step = cursor[1] < previous and -1 or 1
 					for _, direction in ipairs({ step, -step }) do
 						local boundary = direction > 0 and api.nvim_buf_line_count(buf) or 1
 						for row = cursor[1] + direction, boundary, direction do
-							if s.rows[row] then
+							if selectable(row) then
 								cursor[1], index = row, s.rows[row]
 								break
 							end
 						end
-						if index then
+						if selectable(cursor[1]) then
 							break
 						end
 					end
 				end
 				api.nvim_win_set_cursor(0, { cursor[1], 0 })
+				s.tree_cursor = cursor[1]
+				highlight_tree_headers(s)
 				if index and (index ~= s.index or not s.current) then
 					local entry = s.entries[index]
 					local ok, snapshot = pcall(git.snapshot, s.root, entry)

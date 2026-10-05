@@ -8,7 +8,7 @@ function M.ready(s)
 		and not s.composer
 		and not s.annotation_id
 		and vim.fn.mode() == "n"
-		and (win == s.tree_win or win == s.old_win or win == s.new_win)
+		and (win == s.tree_win or win == s.old_win or win == s.new_win or require("rediff.harness").in_message(s.root))
 		and not require("rediff.feedback").busy(s.root)
 end
 

@@ -23,6 +23,7 @@ REVIEW QUICK REFERENCE
   Tab                 Switch tree/diff focus
   Space e / Space d   Focus tree / diff or editor
   Space j / Space k   Next/previous changed file
+  h / l in tree       Collapse/expand group (also Left/Right); restore selection
   ] / [               Next/previous hunk within the current Git group
   :fs / :fu           Focus STAGED / UNSTAGED
   s / S               Stage/unstage hunk / whole file
@@ -79,7 +80,11 @@ GIT AND REFRESH                                                    *rediff-git*
 
 STAGED compares HEAD/index; UNSTAGED compares index/worktree and includes untracked
 files. Badges: M modified, U untracked, R rename, A added, D deleted. Partially
-staged files appear in both groups. Tree motions stay on file rows.
+staged files appear in both groups. h/Left collapses a group (▸); l/Right expands
+it (▾) and restores its selected file. j/k or Up/Down moves between visible files
+and collapsed or empty group headers, skipping blank rows. The selected header
+is highlighted. Refresh preserves collapsed groups;
+:fs/:fu and hunk navigation reveal their target file.
 
 Change awareness (automatic, for this editor session):
   Violet ◆       Changed since the last accepted send, not yet seen; pulses for 2s
@@ -112,8 +117,9 @@ An exhausted group stays empty instead of following the file into the other grou
 Git may combine nearby displayed changes into one staging hunk.
 
 Review polls saved files/index every three seconds by default with Normal-mode
-tree/diff focus. It preserves selection/focus and pauses for composition, selections,
-command input, pickers and delivery. Notes keep their original snapshots.
+tree/diff/harness-message focus. It preserves selection/focus and pauses for
+annotation editing, typing, selections, commands, pickers and delivery.
+Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
 Use it instead of :bufdo e: Review panes are snapshots, not ordinary file buffers.
 Outside Review, :checktime checks loaded files for external changes.

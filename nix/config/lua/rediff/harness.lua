@@ -125,7 +125,7 @@ function M.get(root)
 	return sessions[root]
 end
 
-local function current(cached)
+local function current_message()
 	for _, s in pairs(messages) do
 		if s.buf == api.nvim_get_current_buf() then
 			return s
@@ -135,6 +135,18 @@ local function current(cached)
 		if s.buf == api.nvim_get_current_buf() then
 			return s
 		end
+	end
+end
+
+function M.in_message(root)
+	local s = current_message()
+	return s ~= nil and s.root == root
+end
+
+local function current(cached)
+	local message = current_message()
+	if message then
+		return message
 	end
 	local review = require("rediff.review").active()
 	if review then

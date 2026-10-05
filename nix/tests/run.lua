@@ -174,17 +174,17 @@ local function test()
 	equal(changed, vim.api.nvim_buf_get_lines(s.new_buf, 0, -1, false), "Stale picker leaves displayed snapshot intact")
 	vim.fn.writefile(changed, root .. "/auth.lua")
 	vim.notify, fzf.fzf_exec = notify, exec
-	equal(true, vim.list_contains(sidebar(), " STAGED (0)"), "Empty staged section stays visible")
-	equal(true, vim.list_contains(sidebar(), " UNSTAGED (3)"), "Unstaged count includes untracked files")
+	equal(true, vim.list_contains(sidebar(), " ▾ STAGED (0)"), "Empty staged section stays visible")
+	equal(true, vim.list_contains(sidebar(), " ▾ UNSTAGED (3)"), "Unstaged count includes untracked files")
 	equal(false, table.concat(sidebar(), "\n"):find("UNTRACKED", 1, true) ~= nil, "No separate untracked section")
 	equal(true, vim.list_contains(sidebar(), " U plan.md"), "Untracked files have a U badge")
 	equal({
 		" REVIEW · Git changes",
 		"",
-		" STAGED (0)",
+		" ▾ STAGED (0)",
 		"   (none)",
 		"",
-		" UNSTAGED (3)",
+		" ▾ UNSTAGED (3)",
 		" M auth.lua",
 		" D removed.lua",
 		" U plan.md",
@@ -541,7 +541,7 @@ local function test()
 	equal(baseline, git.lines(staged.old), "Staged old side is HEAD")
 	equal(changed, vim.fn.readfile(root .. "/auth.lua"), "Staging leaves worktree unchanged")
 	review.refresh()
-	equal(true, vim.list_contains(sidebar(), " STAGED (1)"), "Staging updates visible count")
+	equal(true, vim.list_contains(sidebar(), " ▾ STAGED (1)"), "Staging updates visible count")
 	equal("unstaged", s.current.group, "Hunk staging keeps the remaining unstaged comparison selected")
 	local notify, notice = vim.notify, nil
 	vim.notify = function(message)

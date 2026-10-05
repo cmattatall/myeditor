@@ -20,10 +20,13 @@ revdiff parity.
   or oversized files retain ordinary text highlights.
 - The sidebar has **STAGED** and **UNSTAGED** sections. Untracked files appear in
   UNSTAGED with `U`; `M`, `R`, `A`, and `D` identify modified, Git-detected renamed,
-  added, and deleted paths. Staging/unstaging a sidebar file advances to the next
+  added, and deleted paths. **h/Left** collapses a section (**▸**); **l/Right**
+  expands it (**▾**) and restores its selected file. **j/k** and **Up/Down** skip
+  hidden files and stop on collapsed or empty headers, highlighting the selection.
+  Staging/unstaging advances to the next
   entry in the same group, or the previous one at the end. An exhausted group
   keeps header focus through refresh; further **S** presses change nothing.
-  Tree navigation skips headers and blank rows, clamping to the first/last file.
+  Tree navigation skips nonempty expanded headers and blank rows.
   Moving onto a file row immediately displays its diff while retaining tree focus.
   The full-row highlight follows that file; normal cursor styling returns on exit.
 - **Space e** / `:ft` / `:Explorer` focuses the Git sidebar in Review and Neo-tree
@@ -57,8 +60,9 @@ revdiff parity.
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
 - Review polls saved files and the index every three seconds by default,
-  preserving file selection and pane focus. Refresh pauses during composition, selections,
-  command input, pickers, and delivery. **Space R** also refreshes immediately.
+  including from the harness message pane in Normal mode, preserving selection
+  and focus. Refresh pauses for annotation editing, typing, selections, commands,
+  pickers, and delivery. **Space R** also refreshes immediately.
   Home Manager's `programs.rediff.reviewRefreshInterval` (JSON:
   `review_refresh_interval`) sets whole seconds; `0` disables automatic refresh.
   Leave and re-enter Review after changing settings.

@@ -180,10 +180,11 @@ so changing your system's packages does not silently change this editor.
    archives any remaining notes.
 
 Review polls saved files and the index every three seconds by default while the
-tree or diff has Normal-mode focus. Refresh keeps the selected file, pane focus,
-and cursor/scroll positions where possible. It pauses for annotations/messages,
-selections, commands/pickers, and feedback delivery. Annotation snapshots stay
-unchanged. Refresh never saves buffers, stages files, or sends feedback.
+tree, diff, or harness message has Normal-mode focus. Refresh keeps the selected
+file, pane focus, and cursor/scroll positions where possible. It pauses for
+annotation editing, typing, selections, commands/pickers, and feedback delivery.
+Annotation snapshots stay unchanged. Refresh never saves buffers, stages files,
+or sends feedback.
 The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.
 Use **Space R** / **:ReviewRefresh** for these snapshot buffers, not `:bufdo e`.
 Outside Review, native `:checktime` checks ordinary buffers for external changes.
@@ -207,8 +208,12 @@ Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
 same group, or the previous one at the end. With none left, focus stays on that
 group's header, including after refresh; further **S** presses change nothing.
 Focused tree navigation highlights a full row instead of a character cursor;
-motions skip headers/blank rows and clamp at the first/last file. Moving onto
-a file immediately displays its diff without leaving the tree.
+**h/Left** collapses a group (**▸**); **l/Right** expands it (**▾**) and restores
+its selected file. **j/k** or **Up/Down** visits visible files and collapsed
+or empty group headers, skipping blank rows. The selected header is highlighted.
+Refresh preserves collapsed groups; **:fs/:fu**
+and hunk navigation reveal their target file. Moving onto a file immediately
+displays its diff without leaving the tree.
 Tab focuses that diff. Normal cursor styling returns when focus leaves the tree.
 A partially staged file appears in both comparisons. **] / [** jump between changes,
 cycling across visible files within the current STAGED or UNSTAGED group.

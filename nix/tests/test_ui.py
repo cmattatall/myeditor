@@ -1526,9 +1526,7 @@ class EditorUI(unittest.TestCase):
             ("k", "auth.lua"),
             ("<Up>", "auth.lua"),
             ("j", "removed.lua"),
-            ("h", "removed.lua"),
             ("l", "removed.lua"),
-            ("<Left>", "removed.lua"),
             ("<Right>", "removed.lua"),
             ("<Up>", "auth.lua"),
             ("<Down>", "removed.lua"),
@@ -1554,6 +1552,167 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
+
+    def test_tree_groups_collapse_and_restore_file_selection(self):
+        # Two staged and two unstaged entries, with different remembered files.
+        subprocess.run(
+            ["git", "-C", self.root, "add", "auth.lua", "removed.lua"], check=True
+        )
+        path = Path(self.root, "auth.lua")
+        path.write_text(path.read_text().replace("M.timeout = 30", "M.timeout = 60"))
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+
+        def heading(group):
+            self.assertTrue(
+                self.lua(editor, "return vim.api.nvim_get_current_win()==s.tree_win")
+            )
+            self.assertEqual(
+                self.lua(editor, f"return s.group_rows.{group}"),
+                editor.current.window.cursor[0],
+            )
+            self.assertTrue(self.lua(editor, f"return s.collapsed.{group}==true"))
+            self.assertEqual(
+                "ReviewTreeSelection",
+                self.lua(
+                    editor,
+                    f"return vim.api.nvim_buf_get_extmark_by_id(s.tree_buf, "
+                    f"vim.api.nvim_create_namespace('rediff.tree'), s.group_rows.{group}, "
+                    "{details=true})[3].line_hl_group",
+                ),
+            )
+            self.assertTrue(
+                editor.eval("foldtextresult(line('.'))").startswith(
+                    f" ▸ {group.upper()}"
+                )
+            )
+
+        def selected(group, path):
+            self.assertEqual(
+                [group, path, True],
+                self.lua(
+                    editor,
+                    "return {s.current.group,s.current.path, "
+                    "s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]]==s.index}",
+                ),
+            )
+            self.assertEqual(-1, editor.eval("foldclosed(line('.'))"))
+
+        self.keys(editor, "j")
+        selected("staged", "removed.lua")
+        tick = self.lua(editor, "return vim.api.nvim_buf_get_changedtick(s.new_buf)")
+        for left, right in (("h", "l"), ("<Left>", "<Right>")):
+            for _ in range(2):
+                self.keys(editor, left + left)
+                heading("staged")
+                self.keys(editor, right)
+                selected("staged", "removed.lua")
+                self.assertEqual(
+                    tick,
+                    self.lua(
+                        editor, "return vim.api.nvim_buf_get_changedtick(s.new_buf)"
+                    ),
+                )
+        self.keys(editor, "hjj")
+        selected("untracked", "plan.md")
+        self.keys(editor, "h")
+        heading("unstaged")
+        self.keys(editor, "k")
+        heading("staged")
+        self.keys(editor, "j")
+        heading("unstaged")
+        self.keys(editor, "<Up>")
+        heading("staged")
+        self.keys(editor, "<Down>")
+        heading("unstaged")
+
+        # Refresh can shift row numbers, but must preserve both folds and focus.
+        Path(self.root, "aaa-new.lua").write_text("return 1\n")
+        self.lua(editor, "r.refresh_live()")
+        heading("unstaged")
+        self.assertTrue(self.lua(editor, "return s.collapsed.staged"))
+        self.keys(editor, "l")
+        selected("untracked", "plan.md")
+        self.keys(editor, "hk<Right>")
+        selected("staged", "removed.lua")
+
+        # Explicit group navigation reveals its target even when folded.
+        self.keys(editor, ":fu<CR>")
+        selected("unstaged", "auth.lua")
+        self.assertIn(" ▾ UNSTAGED (3)", editor.current.buffer[:])
+        self.keys(editor, "h:fs<CR>h")
+        heading("staged")
+        self.keys(editor, "]")
+        self.assertFalse(self.lua(editor, "return s.collapsed.staged==true"))
+
+        # A vanished remembered file falls back to a remaining file, not a blank.
+        self.keys(editor, ":fu<CR>jjh")
+        Path(self.root, "plan.md").unlink()
+        self.lua(editor, "r.refresh_live()")
+        heading("unstaged")
+        self.keys(editor, "l")
+        self.assertTrue(
+            self.lua(
+                editor, "return s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]]~=nil"
+            )
+        )
+        self.assertNotEqual("plan.md", self.lua(editor, "return s.current.path"))
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
+    def test_collapsed_tree_navigation_reaches_empty_groups(self):
+        for empty, populated, away, back in (
+            ("staged", "unstaged", "<Up>", "<Down>"),
+            ("unstaged", "staged", "<Down>", "<Up>"),
+        ):
+            with self.subTest(empty=empty):
+                if empty == "unstaged":
+                    subprocess.run(["git", "-C", self.root, "add", "."], check=True)
+                index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+                editor = self.launch(self.root)
+                self.lua(editor, "require('rediff.live').stop(s)")
+
+                def heading(editor, group):
+                    self.assertEqual(
+                        self.lua(editor, f"return s.group_rows.{group}"),
+                        editor.current.window.cursor[0],
+                    )
+                    self.assertEqual("ReviewTreeSelection", highlight(editor, group))
+
+                def highlight(editor, group):
+                    return self.lua(
+                        editor,
+                        f"return vim.api.nvim_buf_get_extmark_by_id(s.tree_buf, "
+                        f"vim.api.nvim_create_namespace('rediff.tree'), s.group_rows.{group}, "
+                        "{details=true})[3].line_hl_group",
+                    )
+
+                self.keys(editor, "h")
+                heading(editor, populated)
+                self.keys(editor, away)
+                heading(editor, empty)
+                self.lua(editor, "r.refresh_live()")
+                heading(editor, empty)
+                self.keys(editor, "<Tab>")
+                self.assertNotEqual("ReviewTreeSelection", highlight(editor, empty))
+                self.keys(editor, "<Tab>")
+                heading(editor, empty)
+                self.keys(editor, back)
+                heading(editor, populated)
+                self.keys(editor, "l")
+                self.assertTrue(
+                    self.lua(
+                        editor,
+                        "return s.rows[vim.api.nvim_win_get_cursor(s.tree_win)[1]]==s.index",
+                    )
+                )
+                self.assertEqual(
+                    index,
+                    subprocess.check_output(["git", "-C", self.root, "write-tree"]),
+                )
+                self.lua(editor, "r.leave()")
 
     def test_tab_focuses_diff_for_hunk_staging(self):
         editor = self.launch(self.root)
@@ -1706,13 +1865,13 @@ class EditorUI(unittest.TestCase):
                 "return s.current == nil and vim.api.nvim_get_current_win() == s.tree_win",
             )
         )
-        self.assertEqual(" UNSTAGED (0)", editor.current.line)
+        self.assertEqual(" ▾ UNSTAGED (0)", editor.current.line)
         self.assertIn("No file selected", self.lua(editor, "return r.statusline()"))
         self.lua(editor, "r.refresh_live()")
         self.keys(editor, " R")
         self.keys(editor, "]")
         self.assertTrue(self.lua(editor, "return s.current == nil"))
-        self.assertEqual(" UNSTAGED (0)", editor.current.line)
+        self.assertEqual(" ▾ UNSTAGED (0)", editor.current.line)
         path.write_text(path.read_text() + "-- agent made another change\n")
         self.wait_for(editor, 's.current ~= nil and s.current.group == "unstaged"')
         self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
@@ -2216,6 +2375,58 @@ class EditorUI(unittest.TestCase):
             self.lua(editor, "return s == nil and left_review.live_refresh == nil")
         )
 
+    def test_live_refresh_from_harness_message_preserves_draft_and_focus(self):
+        # Begin with an empty tree, as in the reported stale-list failure.
+        subprocess.run(["git", "-C", self.root, "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-m", "Clean fixture"], check=True
+        )
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            "local f=require('rediff.feedback'); local p=vim.fn.stdpath('config'); "
+            "vim.fn.mkdir(p,'p'); f.write(p..'/settings.json',{review_refresh_interval=1}); "
+            "require('rediff.live').start(s)",
+        )
+        self.assertEqual(0, self.lua(editor, "return #s.entries"))
+        self.keys(editor, ":harness send<CR>iKeep this unsent draft<Esc>")
+        buf, win, cursor = (
+            editor.current.buffer.number,
+            editor.current.window.handle,
+            editor.current.window.cursor,
+        )
+        self.assertTrue(self.lua(editor, "return require('rediff.live').ready(s)"))
+        self.assertFalse(
+            self.lua(
+                editor, "return require('rediff.harness').in_message('/other/worktree')"
+            )
+        )
+        path = Path(self.root, "new file.txt")
+        path.write_text("first\n")
+        self.wait_for(editor, '#s.entries == 1 and s.current.new == "first\\n"')
+        for mode in ("i", "v"):
+            self.keys(editor, mode)
+            self.assertFalse(self.lua(editor, "return require('rediff.live').ready(s)"))
+            path.write_text(mode + "\n")
+            snapshot = self.lua(editor, "return s.current.id")
+            time.sleep(1.2)
+            pump(editor)
+            self.assertEqual(snapshot, self.lua(editor, "return s.current.id"))
+            self.keys(editor, "<Esc>")
+            self.wait_for(editor, f's.current.new == "{mode}\\n"')
+        Path(self.root, "auth.lua").write_text("return 'edited externally'\n")
+        self.wait_for(editor, "#s.entries == 2")
+        self.assertEqual(buf, editor.current.buffer.number)
+        self.assertEqual(win, editor.current.window.handle)
+        # Insert/Escape moves one column left; refresh itself must not move it.
+        self.assertEqual((cursor[0], cursor[1] - 1), editor.current.window.cursor)
+        self.assertEqual(["Keep this unsent draft"], editor.current.buffer[:])
+        self.assertTrue(editor.current.buffer.options["modified"])
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_live_refresh_interval_setting_and_disable(self):
         editor = self.launch(self.root)
 
@@ -2578,7 +2789,7 @@ class EditorUI(unittest.TestCase):
             self.lua(editor, "r.refresh_live()")
             self.keys(editor, " R")
             self.assertEqual(
-                f" {group} (0)",
+                f" ▾ {group} (0)",
                 self.lua(editor, "return vim.api.nvim_get_current_line()"),
             )
             self.assertTrue(
