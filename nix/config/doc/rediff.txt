@@ -63,9 +63,10 @@ v/V/Ctrl-v, then a (also i or Space c). The harness receives the selection's ran
 and character/block columns, not just the cursor line.
 
 The note editor floats below the selected range without resizing the diff panes.
-Notes use normal Neovim editing. Esc returns to Normal mode:
+Notes use normal Neovim editing. Esc while typing returns to Normal mode;
+press Esc again to close the panel and discard unsaved edits.
   :w / :wq    Save locally and close; never send
-  :q / :q!    Discard unsaved edits and close; keep any previously saved note
+  Esc / :q / :q!  Discard unsaved edits and close; keep any previously saved note
 
 Saved notes appear as orange text under their source range. Orange >> in the gutter
 marks notes at the cursor. @ searches filenames and note text; Enter jumps, Esc

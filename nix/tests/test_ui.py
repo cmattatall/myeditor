@@ -1053,13 +1053,22 @@ class EditorUI(unittest.TestCase):
                             "return vim.api.nvim_get_current_win() == s.composer_win",
                         )
                     )
-                self.keys(editor, ":q<CR>")
+                self.keys(editor, "<Esc>")
                 self.wait_for(editor, "s.composer == nil")
+                self.assertEqual(0, self.lua(editor, "return #s.comments"))
                 self.assertTrue(
                     self.lua(
                         editor, f"return vim.api.nvim_get_current_win() == s.{side}_win"
                     )
                 )
+        self.keys(editor, "iSaved note<Esc>:w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.keys(editor, "iUnsaved edit<Esc>")
+        self.assertIsNotNone(self.lua(editor, "return s.composer"))
+        self.keys(editor, "<Esc>")
+        self.wait_for(editor, "s.composer == nil")
+        self.assertEqual("Saved note", self.lua(editor, "return s.comments[1].text"))
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
         self.assertEqual(original, Path(self.root, "auth.lua").read_bytes())
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])

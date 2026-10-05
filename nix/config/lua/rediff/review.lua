@@ -1006,6 +1006,7 @@ function M.compose(visual, keys, comment)
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
 	s.composer = composer
 	vim.bo[composer].filetype = "markdown"
+	vim.keymap.set("n", "<Esc>", "<Cmd>quit<CR>", { buffer = composer, desc = "Discard note edits and close" })
 	s.composer_win = api.nvim_open_win(composer, true, composer_config(s))
 	vim.wo[s.composer_win].wrap = true
 	vim.wo[s.composer_win].linebreak = true
