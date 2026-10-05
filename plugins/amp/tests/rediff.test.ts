@@ -11,6 +11,20 @@ import plugin from '../rediff.ts'
 
 type Command = (ctx: any) => Promise<void>
 
+class ObservableMock<T> {
+  readonly observers = new Set<(value: T) => void>()
+  private value: T
+  private readonly failure?: Error
+  constructor(value: T, failure?: Error) { this.value = value; this.failure = failure }
+  async get(): Promise<T> { if (this.failure) throw this.failure; return this.value }
+  subscribe(observer: ((value: T) => void) | { next?: (value: T) => void }) {
+    const next = typeof observer === 'function' ? observer : (value: T) => observer.next?.(value)
+    this.observers.add(next)
+    return { unsubscribe: () => this.observers.delete(next) }
+  }
+  emit(value: T) { this.value = value; for (const observer of this.observers) observer(value) }
+}
+
 let home: string
 const originalHome = process.env.HOME
 before(async () => {
@@ -25,26 +39,29 @@ after(async () => {
 
 function fakeAmp(root = process.cwd()) {
   const commands = new Map<string, Command>()
-  const events = new Map<string, (event: unknown, ctx: any) => Promise<void>>()
+  const events = new Map<string, (event: any, ctx: any) => any>()
   const disposers: Array<() => Promise<void>> = []
   const messages = new Map<string, any[]>()
   const notifications: string[] = []
+  const threads = new Map<string, any>()
   const amp: any = {
     helpers: { filePathFromURI: fileURLToPath },
     logger: { log() {} },
-    on(event: string, handler: (event: unknown, ctx: any) => Promise<void>) { events.set(event, handler); return { unsubscribe() {} } },
+    on(event: string, handler: (event: unknown, ctx: any) => any) { events.set(event, handler); return { unsubscribe() {} } },
     registerCommand(id: string, _options: unknown, handler: Command) { commands.set(id, handler); return { unsubscribe() {} } },
     onDispose(handler: () => Promise<void>) { disposers.push(handler); return { unsubscribe() {} } },
   }
   const context = (id: string, append?: (...args: any[]) => Promise<void>) => ({
-    thread: { id, title: { get: async (): Promise<string | null> => null }, appendUserMessage: async (...args: any[]) => {
+    thread: threads.get(id) ?? threads.set(id, {
+      id, title: new ObservableMock<string | null>(null), state: new ObservableMock('idle'), appendUserMessage: async (...args: any[]) => {
       (messages.get(id) ?? messages.set(id, []).get(id)!).push(args)
       if (args[1]?.steer) await append?.(...args)
-    } },
+      },
+    }).get(id),
     system: { workspaceRoot: pathToFileURL(root) },
     ui: { notify: async (value: string) => { notifications.push(value) } },
   })
-  return { amp, commands, events, disposers, messages, notifications, context }
+  return { amp, commands, events, disposers, messages, notifications, threads, context }
 }
 
 async function connect(f: ReturnType<typeof fakeAmp>, id: string, append?: (...args: any[]) => Promise<void>) {
@@ -65,6 +82,34 @@ async function post(descriptor: any, body: unknown, options: { token?: string; o
   })
 }
 
+async function eventStream(descriptor: any) {
+  const response = await fetch(descriptor.url.replace('/feedback', '/events'), {
+    headers: { authorization: `Bearer ${descriptor.token}` },
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/x-ndjson')
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ''
+  return {
+    async next() {
+      while (true) {
+        const newline = buffered.indexOf('\n')
+        if (newline >= 0) {
+          const value = buffered.slice(0, newline)
+          buffered = buffered.slice(newline + 1)
+          if (value) return JSON.parse(value)
+          continue
+        }
+        const chunk = await reader.read()
+        assert.equal(chunk.done, false, 'activity stream closed unexpectedly')
+        buffered += decoder.decode(chunk.value, { stream: true })
+      }
+    },
+    cancel: () => reader.cancel(),
+  }
+}
+
 test('connect posts editor instructions to its thread, reuses connections, and cleans up', async () => {
   const f = fakeAmp(); await plugin(f.amp)
   assert.deepEqual([...f.commands.keys()], ['rediff-connect', 'rediff-disconnect'])
@@ -82,7 +127,8 @@ test('connect posts editor instructions to its thread, reuses connections, and c
   assert.equal(options, undefined, 'setup is not steering feedback')
   const a = await connect(f, 'T-a'); const b = await connect(f, 'T-b')
   assert.notEqual(a.path, b.path); assert.notEqual(a.descriptor.token, b.descriptor.token)
-  assert.deepEqual(Object.keys(a.descriptor), ['version', 'url', 'token', 'root', 'thread'])
+  assert.deepEqual(Object.keys(a.descriptor), ['version', 'url', 'token', 'root', 'thread', 'capabilities'])
+  assert.deepEqual(a.descriptor.capabilities, ['activity'])
   assert.equal(a.descriptor.thread, 'T-a'); assert.equal((await stat(a.path)).mode & 0o777, 0o600)
   const again = await connect(f, 'T-a'); assert.equal(again.path, a.path)
   assert.equal(f.messages.get('T-a')!.at(-1)![0].content, announcement.content)
@@ -128,6 +174,100 @@ test('valid feedback steers unchanged and enforces endpoint, auth, origin, and i
   assert.equal((await post(c.descriptor, {}, { raw: '{' })).status, 400)
   assert.equal((await post(c.descriptor, {}, { raw: 'x'.repeat(1024 * 1024 + 1) })).status, 413)
   await Promise.all(f.disposers.map((dispose) => dispose()))
+})
+
+test('activity streams full safe snapshots to multiple clients and clean up', async () => {
+  const f = fakeAmp(); await plugin(f.amp); const c = await connect(f, 'T-live')
+  const eventsURL = c.descriptor.url.replace('/feedback', '/events')
+  assert.equal((await fetch(eventsURL)).status, 401)
+  assert.equal((await fetch(eventsURL, {
+    headers: { authorization: `Bearer ${c.descriptor.token}`, origin: 'https://example.com' },
+  })).status, 403)
+
+  const first = await eventStream(c.descriptor)
+  const second = await eventStream(c.descriptor)
+  const initial = await first.next()
+  assert.deepEqual(initial, {
+    version: 1, root: c.descriptor.root, thread: 'T-live', sequence: 0,
+    state: 'idle', title: '', tool: null,
+  })
+  assert.deepEqual(await second.next(), initial)
+
+  const thread = f.threads.get('T-live')
+  thread.title.emit('Live review')
+  assert.equal((await first.next()).title, 'Live review')
+  assert.equal((await second.next()).title, 'Live review')
+  thread.state.emit('awaiting-approval')
+  assert.equal((await first.next()).state, 'awaiting-approval')
+  assert.equal((await second.next()).state, 'awaiting-approval')
+
+  const secret = 'do-not-stream-this-input-or-output'
+  const ctx = f.context('T-live')
+  assert.deepEqual(await f.events.get('tool.call')!({
+    thread: { id: 'T-live' }, toolUseID: 'one', tool: 'shell_command', input: { secret },
+  }, ctx), { action: 'allow' })
+  const approvalTool = await first.next()
+  await second.next()
+  assert.equal(approvalTool.state, 'awaiting-approval')
+  assert.equal(approvalTool.tool, 'shell_command')
+  assert.ok(!JSON.stringify(approvalTool).includes(secret))
+  thread.state.emit('running')
+  await first.next(); await second.next()
+  await f.events.get('tool.call')!({
+    thread: { id: 'T-live' }, toolUseID: 'two', tool: 'read_file', input: { secret },
+  }, ctx)
+  await first.next(); await second.next()
+  await f.events.get('tool.result')!({
+    thread: { id: 'T-live' }, toolUseID: 'two', tool: 'read_file', status: 'done', output: secret,
+  }, ctx)
+  const stillRunning = await first.next()
+  await second.next()
+  assert.equal(stillRunning.state, 'running', 'another outstanding tool keeps the agent running')
+  assert.equal(stillRunning.tool, 'shell_command')
+  assert.ok(!JSON.stringify(stillRunning).includes(secret))
+  await f.events.get('tool.result')!({
+    thread: { id: 'T-live' }, toolUseID: 'one', tool: 'shell_command', status: 'done', output: secret,
+  }, ctx)
+  const noTool = await first.next(); await second.next()
+  assert.equal(noTool.state, 'running', 'tool completion does not invent an idle state')
+  assert.equal(noTool.tool, null)
+  thread.state.emit('idle')
+  assert.equal((await first.next()).state, 'idle')
+  assert.equal((await second.next()).state, 'idle')
+
+  await f.events.get('tool.call')!({
+    thread: { id: 'T-live' }, toolUseID: 'cancelled', tool: 'shell_command', input: {},
+  }, ctx)
+  await first.next(); await second.next()
+  thread.state.emit('error')
+  const failed = await first.next(); await second.next()
+  assert.equal(failed.state, 'error')
+  assert.equal(failed.tool, null, 'a failed turn clears tools without terminal result events')
+  thread.state.emit('idle')
+  assert.equal((await first.next()).state, 'idle')
+  assert.equal((await second.next()).tool, null)
+
+  await first.cancel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(thread.state.observers.size, 1, 'one shared thread subscription remains for all clients')
+  await f.commands.get('rediff-disconnect')!(ctx)
+  assert.equal(thread.state.observers.size, 0)
+  assert.equal(thread.title.observers.size, 0)
+  await second.cancel().catch(() => {})
+})
+
+test('activity changes during initial reads take precedence over stale snapshots', async (t) => {
+  const f = fakeAmp(); await plugin(f.amp)
+  t.after(() => Promise.all(f.disposers.map((dispose) => dispose())))
+  const ctx = f.context('T-starting')
+  ctx.thread.state.get = async () => {
+    ctx.thread.state.emit('running')
+    return 'idle'
+  }
+  const c = await connect(f, 'T-starting')
+  const stream = await eventStream(c.descriptor)
+  assert.equal((await stream.next()).state, 'running')
+  await stream.cancel()
 })
 
 test('deduplicates concurrent feedback, detects conflicts, and caches ambiguous failures', async () => {

@@ -21,13 +21,14 @@ class Handler(BaseHTTPRequestHandler):
     requests = []
     descriptor = None
     post_status = 204
+    events = b""
 
     def _auth(self):
         return self.headers.get("Authorization") == "Bearer secret"
 
     def do_GET(self):
         type(self).requests.append(("GET", self._auth(), None))
-        body = json.dumps(type(self).descriptor).encode()
+        body = type(self).events if self.path == "/events" else json.dumps(type(self).descriptor).encode()
         self.send_response(200 if self._auth() else 401)
         self.end_headers()
         self.wfile.write(body)
@@ -58,10 +59,12 @@ class AmpLiveTests(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         self.connection = session / "connection.json"
         self.descriptor = {"version": 1, "url": f"http://127.0.0.1:{self.server.server_port}/feedback",
-                           "token": "secret", "root": str(self.root.resolve()), "thread": THREAD, "title": "Review"}
+                           "token": "secret", "root": str(self.root.resolve()), "thread": THREAD,
+                           "title": "Review", "capabilities": ["activity"]}
         Handler.descriptor = dict(self.descriptor)
         Handler.requests = []
         Handler.post_status = 204
+        Handler.events = b""
         self.write_descriptor()
         self.payload = Path(self.temp.name) / "submission.json"
 
@@ -108,9 +111,67 @@ class AmpLiveTests(unittest.TestCase):
 
     def test_discovery_is_authenticated_get_only_and_returns_no_secret(self):
         found = self.discover()
-        self.assertEqual([{"connection": str(self.connection.absolute()), "session": THREAD, "title": "Review"}], found)
+        self.assertEqual([{"root": str(self.root.resolve()), "connection": str(self.connection.absolute()),
+                           "session": THREAD, "title": "Review", "capabilities": ["activity"]}], found)
         self.assertEqual([("GET", True, None)], Handler.requests)
         self.assertNotIn("secret", json.dumps(found))
+
+    def test_discovery_all_includes_other_worktrees(self):
+        self.descriptor["root"] = str((self.home / "other").resolve())
+        Handler.descriptor = dict(self.descriptor)
+        self.write_descriptor()
+        self.assertEqual([], self.discover())
+        with patch.dict(os.environ, {"HOME": str(self.home)}):
+            found = amp_live.discover(None)
+        self.assertEqual(self.descriptor["root"], found[0]["root"])
+        self.assertEqual(THREAD, found[0]["session"])
+        self.assertNotIn("token", found[0])
+
+    def test_cross_worktree_messages_require_exact_routing_and_refuse_annotations(self):
+        source = str(self.home.resolve())
+        sender = {"instance": "editor-one", "pid": 123, "app": "rediff",
+                  "directory": source + "/src", "repository": source}
+        recipient = {"provider": "amp", "id": THREAD, "repository": str(self.root.resolve())}
+        message = {"submission_id": "external", "repository": source, "message": "Inspect your tests",
+                   "sender": sender, "recipient": recipient}
+        invalid = [dict(message, sender=None), dict(message, recipient=None),
+                   dict(message, recipient=dict(recipient, id="T-wrong")),
+                   dict(message, sender=dict(sender, repository=str(self.root.resolve()))),
+                   dict(message, comments=[]), dict(message, snapshots={})]
+        for value in invalid:
+            with self.subTest(value=value):
+                self.payload.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    amp_live.send(self.connection, THREAD, self.payload)
+        self.assertEqual([], Handler.requests, "Invalid routing cannot even probe the recipient")
+        self.payload.write_text(json.dumps(message))
+        self.assertEqual("accepted", amp_live.send(self.connection, THREAD, self.payload)["status"])
+        prompt = json.loads(Handler.requests[-1][2]["content"])
+        self.assertEqual(sender, prompt["sender"])
+        self.assertEqual(recipient, prompt["recipient"])
+        self.assertEqual(message["message"], prompt["message"])
+        self.assertIn("must not modify the sender repository/worktree", prompt["rules"][-1])
+        self.assertNotIn("annotations", prompt)
+
+    def test_activity_stream_validates_and_flushes_snapshots(self):
+        snapshot = {"version": 1, "root": str(self.root.resolve()), "thread": THREAD,
+                    "sequence": 0, "state": "running", "title": "Review", "tool": "shell_command"}
+        idle = dict(snapshot, sequence=1, state="idle", tool=None)
+        Handler.events = b"\n" + json.dumps(snapshot).encode() + b"\n\n" + json.dumps(idle).encode() + b"\n"
+        with patch("builtins.print") as output:
+            with self.assertRaisesRegex(RuntimeError, "disconnected"):
+                amp_live.watch(self.connection, THREAD)
+        self.assertEqual([snapshot, idle], [json.loads(call.args[0]) for call in output.call_args_list])
+        self.assertTrue(all(call.kwargs.get("flush") for call in output.call_args_list))
+        self.assertEqual([("GET", True, None)], Handler.requests)
+        for invalid in (dict(snapshot, root="/wrong"), dict(snapshot, thread="T-other"),
+                        dict(snapshot, sequence=True), dict(snapshot, state="invented"), False):
+            with self.subTest(invalid=invalid):
+                Handler.events = json.dumps(invalid).encode() + b"\n"
+                with patch("builtins.print") as output:
+                    with self.assertRaisesRegex(RuntimeError, "invalid Amp activity"):
+                        amp_live.watch(self.connection, THREAD)
+                output.assert_not_called()
 
     def test_discovery_does_not_fall_back_to_old_registry(self):
         old = self.home / ".cache/anthrodiff/amp/session-one"

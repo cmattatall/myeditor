@@ -91,8 +91,15 @@ Outside Review, :checktime checks loaded files for external changes.
 AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
-Use :harness use amp to select Amp and connect too. Multiple matches open a picker.
-Connecting sends nothing. :hs opens a general-message buffer:
+Use :harness use amp to select Amp and connect in this worktree. Connecting sends
+nothing. :harness list opens the same searchable panel for all available sessions:
+  /           Filter by alias, provider, title, ID, worktree, or activity
+  Enter       Connect/disconnect; connecting locally selects the annotation target
+  s / r / d   Message / rename locally / disconnect selected harness
+  c / R / q   Connected-only filter / rediscover / close
+
+Multiple harnesses can stay connected. :hs asks which one when there is more than
+one; :harness send ALIAS chooses directly. Each recipient has its own message draft:
   :w          Send; keep panel open
   :wq         Send and close
   :q / :q!    Close without sending; retain draft until editor exit
@@ -101,6 +108,14 @@ Accepted/completed delivery clears sent text, preserving newer edits. Failed,
 pending and local-only messages remain drafts. In Normal mode, Tab returns to
 the Review tree without closing/sending; Insert-mode Tab remains text input.
 :hs takes no inline message argument. General messages never include review notes.
+
+Annotations only go to this worktree's selected harness. General messages may go
+to another worktree and include sender directory, Neovim instance, and recipient.
+External recipients are instructed not to edit the sender's worktree. This is
+agent policy, not a filesystem sandbox. Separate editors can watch the same agent.
+Amp streams running/idle/approval/error state and active tool names to the panel.
+Offline or unsupported activity is shown as such, never inferred from an ACK.
+Aliases persist locally; connection subscriptions end when this editor exits.
 
 Plugin installation asks for confirmation, preserves Home Manager symlinks, and
 does not install/authenticate the Amp CLI. With a live target, it also requests
@@ -205,9 +220,12 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :Harness use amp|claude     Select type; Amp also discovers live sessions
   :Harness install amp        Install bridge and request reload
   :Harness connect amp        Discover/select live session
-  :Harness send               Compose a general message
+  :Harness list               Search and manage harnesses across worktrees
+  :Harness panel              Same panel with live activity
+  :Harness rename ID ALIAS     Set a local alias, without renaming the agent thread
+  :Harness send [alias]       Choose recipient and compose a general message
   :Harness retry              Retry last delivery, not edited drafts
-  :Harness disconnect         Keep drafts; do not stop the agent
+  :Harness disconnect [alias] Disconnect chosen harness; do not stop the agent
   :Worktree list              Choose a worktree
   :Worktree switch [target]   Switch by branch/path, or choose
   :Worktree new [branch [path]] Create worktree and launch harness

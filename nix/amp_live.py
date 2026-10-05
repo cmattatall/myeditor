@@ -49,18 +49,21 @@ def _load(path):
     if (data.get("version") != 1 or not isinstance(data.get("token"), str) or not data["token"]
             or any(not 33 <= ord(char) <= 126 for char in data["token"])
             or not isinstance(data.get("root"), str) or not isinstance(data.get("thread"), str)
-            or not data["thread"].startswith("T-") or not isinstance(data.get("title", ""), str)):
+            or not data["thread"].startswith("T-") or not isinstance(data.get("title", ""), str)
+            or ("capabilities" in data and
+                (not isinstance(data["capabilities"], list)
+                 or any(not isinstance(value, str) for value in data["capabilities"])))):
         raise ValueError("invalid Amp connection descriptor")
     return path, data, port, hashlib.sha256(raw).hexdigest()
 
 
-def _request(desc, port, method, body=None, timeout=0.25):
+def _request(desc, port, method, body=None, timeout=0.25, path="/feedback"):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     headers = {"Authorization": "Bearer " + desc["token"]}
     if body is not None:
         headers["Content-Type"] = "application/json"
     try:
-        connection.request(method, "/feedback", body=body, headers=headers)
+        connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         content = response.read(65537)
         return response.status, content
@@ -69,7 +72,7 @@ def _request(desc, port, method, body=None, timeout=0.25):
 
 
 def discover(root):
-    root = os.path.realpath(root)
+    root = os.path.realpath(root) if root is not None else None
     registry = Path.home() / ".cache" / "rediff" / "amp"
     try:
         if not _private(registry, True):
@@ -83,7 +86,7 @@ def discover(root):
             if not session_dir.name.startswith("session-") or not _private(session_dir, True):
                 continue
             path, desc, port, _ = _load(session_dir / "connection.json")
-            if os.path.realpath(desc["root"]) != root:
+            if root is not None and os.path.realpath(desc["root"]) != root:
                 continue
             status, body = _request(desc, port, "GET")
             if status != 200 or len(body) > 65536:
@@ -91,10 +94,82 @@ def discover(root):
             identity = json.loads(body)
             if not isinstance(identity, dict) or any(identity.get(key) != desc[key] for key in ("version", "root", "thread")):
                 continue
-            found.append({"connection": str(path), "session": desc["thread"], "title": desc.get("title", "")})
+            entry = {"root": desc["root"], "connection": str(path), "session": desc["thread"],
+                     "title": desc.get("title", "")}
+            if "capabilities" in desc:
+                entry["capabilities"] = desc["capabilities"]
+            found.append(entry)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, http.client.HTTPException):
             continue
     return found
+
+
+def watch(connection_path, expected_thread):
+    """Print authenticated activity snapshots until the stream disconnects."""
+    _, desc, port, _ = _load(connection_path)
+    if desc["thread"] != expected_thread:
+        raise ValueError("Amp connection identity does not match")
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    try:
+        connection.request("GET", "/events", headers={"Authorization": "Bearer " + desc["token"]})
+        response = connection.getresponse()
+        if response.status != 200:
+            response.read(65537)
+            raise RuntimeError(f"Amp activity stream failed (HTTP {response.status})")
+        last_sequence = -1
+        while True:
+            line = response.readline(65538)
+            if not line:
+                raise RuntimeError("Amp activity stream disconnected")
+            if len(line) > 65537 or (len(line) == 65537 and not line.endswith(b"\n")):
+                raise RuntimeError("invalid Amp activity snapshot size")
+            if not line.strip():
+                continue
+            snapshot = json.loads(line)
+            valid_states = {"idle", "running", "awaiting-approval", "error", "unknown"}
+            sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
+            if (not isinstance(snapshot, dict) or snapshot.get("version") != 1
+                    or snapshot.get("root") != desc["root"] or snapshot.get("thread") != desc["thread"]
+                    or not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0
+                    or sequence <= last_sequence or snapshot.get("state") not in valid_states
+                    or not isinstance(snapshot.get("title"), str)
+                    or not (snapshot.get("tool") is None or isinstance(snapshot.get("tool"), str))):
+                raise RuntimeError("invalid Amp activity snapshot")
+            last_sequence = sequence
+            print(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")), flush=True)
+    except (OSError, http.client.HTTPException) as error:
+        raise RuntimeError("Amp activity stream disconnected") from error
+    finally:
+        connection.close()
+
+
+def _validate_routing(payload, desc):
+    source = payload.get("repository")
+    if not isinstance(source, str) or source != os.path.realpath(source):
+        raise ValueError("submission repository is not canonical")
+    target = os.path.realpath(desc["root"])
+    sender = payload.get("sender")
+    recipient = payload.get("recipient")
+    if sender is not None:
+        if (not isinstance(sender, dict) or not isinstance(sender.get("instance"), str)
+                or not sender["instance"] or not isinstance(sender.get("pid"), int)
+                or isinstance(sender.get("pid"), bool) or sender["pid"] <= 0
+                or not isinstance(sender.get("directory"), str) or not os.path.isabs(sender["directory"])
+                or sender.get("repository") != source or sender.get("repository") != os.path.realpath(sender.get("repository", ""))
+                or sender.get("app") not in ("rediff", "nvim")):
+            raise ValueError("malformed sender metadata")
+    if recipient is not None:
+        if (not isinstance(recipient, dict) or recipient != {"provider": "amp", "id": desc["thread"],
+                                                              "repository": target}):
+            raise ValueError("mismatched recipient metadata")
+    cross_root = source != target
+    if cross_root:
+        if "message" not in payload or "comments" in payload or "snapshots" in payload:
+            raise ValueError("cross-root annotation submission repository is refused")
+        if sender is None or recipient is None:
+            raise ValueError("cross-root messages require sender and recipient metadata")
+    elif recipient is not None and recipient["repository"] != target:
+        raise ValueError("mismatched recipient metadata")
 
 
 def _write_private(path, value, exclusive=False):
@@ -125,8 +200,7 @@ def send(connection_path, expected_thread, submission_path):
     if (not isinstance(payload, dict) or not isinstance(payload.get("submission_id"), str)
             or not 1 <= len(payload["submission_id"]) <= 256):
         raise ValueError("invalid submission")
-    if payload.get("repository") != canonical_root:
-        raise ValueError("submission repository does not match the canonical connection root")
+    _validate_routing(payload, desc)
     if "message" in payload:
         if not isinstance(payload["message"], str) or not payload["message"]:
             raise ValueError("invalid general message")
@@ -204,13 +278,15 @@ def request_reload(connection_path, expected_thread, root):
 
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "discover":
-        print(json.dumps(discover(sys.argv[2])))
+        print(json.dumps(discover(None if sys.argv[2] == "--all" else sys.argv[2])))
+    elif len(sys.argv) == 4 and sys.argv[1] == "watch":
+        watch(*sys.argv[2:])
     elif len(sys.argv) == 5 and sys.argv[1] == "send":
         print(json.dumps(send(*sys.argv[2:])))
     elif len(sys.argv) == 5 and sys.argv[1] == "reload":
         print(request_reload(*sys.argv[2:]))
     else:
-        raise ValueError("usage: rediff-amp-live discover ROOT | send CONNECTION THREAD SUBMISSION.json | reload CONNECTION THREAD ROOT")
+        raise ValueError("usage: rediff-amp-live discover ROOT|--all | watch CONNECTION THREAD | send CONNECTION THREAD SUBMISSION.json | reload CONNECTION THREAD ROOT")
 
 
 if __name__ == "__main__":

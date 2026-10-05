@@ -4,6 +4,10 @@ return function(root, equal, fails, keys)
 	local harness = require("rediff.harness")
 	local feedback = require("rediff.feedback")
 	local review = require("rediff.review")
+	local connections = require("rediff.connections")
+	for _, entry in ipairs(connections.connected()) do
+		connections.disconnect(entry.key)
+	end
 	local s, session = review.state, harness.get(root)
 	local thread = "T-00000000-1111-2222-3333-444444444444"
 	equal(1, vim.fn.executable("rediff-install-amp-plugin"), "Amp installer is packaged")
@@ -100,17 +104,24 @@ return function(root, equal, fails, keys)
 
 	equal(1, vim.fn.executable("rediff-amp-live"), "Live adapter is packaged")
 	local system, discover, picker = vim.system, nil, nil
-	local fzf = require("fzf-lua")
-	local fzf_exec = fzf.fzf_exec
-	fzf.fzf_exec = function(items, opts)
-		picker = { items = items, opts = opts }
+	local panel = require("rediff.harness_panel")
+	local panel_open = panel.open
+	panel.open = function(opts)
+		-- Select from this discovery's Amp rows, not retained CLI bindings from earlier tests.
+		picker = {
+			items = vim.tbl_filter(function(entry)
+				return entry.name == "amp-live" and entry.root == root and entry.online
+			end, connections.items()),
+			opts = opts,
+		}
 	end
 	vim.system = function(argv, opts, callback)
-		equal({ "rediff-amp-live", "discover", root }, argv, "Connection only discovers in the current root")
-		equal(root, opts.cwd, "Discovery cwd is the worktree")
+		equal({ "rediff-amp-live", "discover", "--all" }, argv, "Discovery lists sessions across worktrees")
+		equal(true, opts.text, "Discovery returns JSON text asynchronously")
 		discover = callback
 	end
-	local matches = { { session = thread, connection = "/fake/session-one/connection.json", title = "one" } }
+	local matches =
+		{ { root = root, session = thread, connection = "/fake/session-one/connection.json", title = "one" } }
 	local function respond(value)
 		discover({ code = 0, stderr = "", stdout = vim.json.encode(value) })
 		vim.wait(10)
@@ -130,28 +141,28 @@ return function(root, equal, fails, keys)
 		feedback.command(s.harness),
 		"Live receiver argv"
 	)
-	vim.cmd("Harness connect amp")
+	harness.connect()
 	vim.cmd("Harness disconnect")
 	respond(matches)
 	equal("none", s.harness.name, "Late discovery cannot undo disconnect")
 	vim.cmd("Harness use amp")
-	matches[2] = { session = "T-second", connection = "/fake/session-two/connection.json", title = "two" }
+	matches[2] = { root = root, session = "T-second", connection = "/fake/session-two/connection.json", title = "two" }
 	respond(matches)
 	equal(2, #picker.items, "Multiple sessions require a picker")
 	equal("none", s.harness.name, "Opening picker does not bind or send")
-	picker.opts.actions.enter({ picker.items[2] })
+	picker.opts.on_select(picker.items[2])
 	equal("T-second", s.harness.session, "Session picker selects by ID")
 	vim.cmd("Harness use amp")
 	respond({})
 	equal("T-second", s.harness.session, "No match preserves the existing binding")
 	vim.cmd("Harness use amp")
 	respond(matches)
-	picker.opts.actions.enter({})
+	-- Dismiss without invoking the panel's selection callback.
 	equal("T-second", s.harness.session, "Dismissing selection preserves the existing binding")
 	discover = nil
 	vim.cmd("Harness use claude")
 	equal(nil, discover, "Claude has no live discovery adapter")
-	picker.opts.actions.enter({ picker.items[1] })
+	picker.opts.on_select(picker.items[1])
 	equal("none", s.harness.name, "Old picker cannot rebind after switching providers")
 	vim.cmd("Harness use amp")
 	vim.cmd("Harness use claude")
@@ -176,10 +187,10 @@ return function(root, equal, fails, keys)
 	discover = nil
 	harness.use("amp", root)
 	equal(nil, discover, "Inheriting a launch type does not discover sessions for a new worktree")
-	vim.cmd("Harness connect amp")
+	harness.connect()
 	respond(matches)
-	picker.opts.actions.enter({ picker.items[2] })
-	vim.system, fzf.fzf_exec = system, fzf_exec
+	picker.opts.on_select(picker.items[2])
+	vim.system, panel.open = system, panel_open
 	vim.api.nvim_set_current_tabpage(s.previous_tab)
 	equal(
 		true,
@@ -194,7 +205,9 @@ return function(root, equal, fails, keys)
 	equal("harness: amp-live · T-second · idle", harness.statusline(), "Repeated redraw reuses workspace context")
 	git.root = get_root
 	vim.api.nvim_set_current_tabpage(s.tab)
-	vim.cmd("Harness disconnect")
+	for _, entry in ipairs(connections.connected()) do
+		harness.disconnect(entry)
+	end
 
 	local comment = review.add_comment({
 		file = s.current.path,

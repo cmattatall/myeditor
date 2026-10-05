@@ -410,9 +410,30 @@ Relaunch rediff using the updated package, then connect in the same checkout:
 :Harness disconnect
 ```
 
-`connect amp` and `use amp` discover sessions for the exact checkout. They choose
-the only live match or open a fuzzy session picker for multiple matches.
-Discovery runs only when requested, not in the background. Connecting sends nothing.
+`connect amp` and `list` open the same searchable panel across worktrees. `/`
+filters aliases, titles, providers, IDs, directories, and activity. Enter toggles
+the selected harness's connection without stopping its agent or discarding drafts;
+`r` assigns a local alias, `d` disconnects, `c` shows connected sessions, and `R`
+rediscovers. `use amp` selects the launch type and connects to the only live match
+in this checkout, or opens the panel for multiple matches. Discovery runs only
+when requested. Connecting sends nothing and does not start an agent.
+
+Multiple harnesses can remain connected. `:Harness send` asks which recipient
+when there is more than one, or `:Harness send ALIAS` selects directly. Drafts
+are separate per sender worktree and recipient. Selecting a local harness also
+sets the worktree's annotation target; selecting an external harness never does.
+Annotations cannot be sent across worktrees. General messages include sender
+directory, editor instance/PID, and recipient identity. External recipients get
+an explicit rule not to edit the sender's worktree. This is agent policy, not a
+filesystem sandbox: an existing agent retains its own filesystem permissions.
+
+The panel receives authenticated Amp activity snapshots asynchronously: running,
+idle, awaiting approval, error, and active tool name, without tool inputs/outputs.
+A running agent has a spinner. Multiple editor instances can subscribe to the
+same agent. Lost connections show offline; `R` rediscovers and reconnects their
+streams without resending feedback. Providers without live activity show unknown.
+Aliases persist locally; live subscriptions end when the editor exits.
+
 `:Harness send` opens a general-message `acwrite` buffer with normal Vim editing: `:w` submits and
 stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
 the draft locally without sending. Hidden message drafts do not block quitting;
@@ -437,7 +458,8 @@ live agent health check. `local` means feedback stays in the local outbox.
 
 Message writes never include pending review comments. Repeated writes of the
 same text to the same target reuse the existing submission. `:Harness retry`
-retries the last immutable submission, not newly edited text, and refuses a
+retries the current composer's last immutable submission (or the worktree's last
+annotation submission outside a composer), not newly edited text, and refuses a
 changed target. Live uncertain retries are allowed only on the same connection
 generation; reconnecting does not make an uncertain delivery safe to resend.
 

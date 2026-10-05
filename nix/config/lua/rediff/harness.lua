@@ -1,7 +1,9 @@
 local M = {}
 local api = vim.api
 local feedback = require("rediff.feedback")
+local connections = require("rediff.connections")
 local sessions = {}
+local messages = {}
 local display_cwd, display_root
 local installing = false
 
@@ -10,7 +12,7 @@ local function notify(message, status)
 end
 
 local function save(s)
-	feedback.write(s.directory .. "/harness.json", {
+	feedback.write(s.metadata_path or (s.directory .. "/harness.json"), {
 		target = s.target,
 		provider = s.provider,
 		last = s.last,
@@ -61,11 +63,19 @@ function M.get(root)
 			epoch = 0,
 		}
 		sessions[root].delivery = delivery_status(sessions[root])
+		if target.session then
+			connections.connect(vim.tbl_extend("force", target, { root = root }))
+		end
 	end
 	return sessions[root]
 end
 
 local function current(cached)
+	for _, s in pairs(messages) do
+		if s.buf == api.nvim_get_current_buf() then
+			return s
+		end
+	end
 	for _, s in pairs(sessions) do
 		if s.buf == api.nvim_get_current_buf() then
 			return s
@@ -107,7 +117,16 @@ end
 function M.select(root, target)
 	local s = M.get(root)
 	assert(not feedback.busy(root), "Wait for the current feedback delivery before switching harnesses")
+	assert(not target.root or target.root == root, "Annotations must stay in their own worktree")
 	feedback.command(target)
+	target = {
+		name = target.name,
+		session = target.session,
+		root = target.root,
+		connection = target.connection,
+		title = target.title,
+		capabilities = target.capabilities,
+	}
 	-- Review holds this same target object; there is only one binding per root.
 	for key in pairs(s.target) do
 		s.target[key] = nil
@@ -121,12 +140,15 @@ function M.select(root, target)
 	s.epoch = s.epoch + 1
 	s.delivery = delivery_status(s)
 	save(s)
+	if target.session then
+		connections.connect(vim.tbl_extend("force", target, { root = root }))
+	end
 	notify("Harness: " .. target.name .. (target.session and (" · " .. target.session) or "") .. "; nothing sent")
 end
 
 function M.use(name, root)
 	assert(name == "amp" or name == "claude", "Usage: Harness use amp|claude")
-	local s = root and M.get(root) or current()
+	local s = M.get(root or current().root)
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before switching harnesses")
 	local bound = s.target.name == "amp-live" and "amp" or s.target.name
 	if bound ~= name then
@@ -164,8 +186,8 @@ function M.launch(root)
 	vim.cmd.startinsert()
 end
 
-function M.deliver(root, id, path, argv, retry, callback)
-	local s = M.get(root)
+function M.deliver(root, id, path, argv, retry, callback, owner)
+	local s = owner or M.get(root)
 	assert(not feedback.busy(root), "A feedback delivery is already running for this repository")
 	s.last = { id = id, path = path, argv = vim.deepcopy(argv) }
 	save(s)
@@ -198,7 +220,7 @@ function M.retry()
 		vim.deep_equal(last.argv, feedback.command(s.target)),
 		"Harness changed; reselect the original target before retrying"
 	)
-	M.deliver(s.root, last.id, last.path, last.argv, true)
+	M.deliver(s.root, last.id, last.path, last.argv, true, nil, s)
 end
 
 function M.status()
@@ -216,65 +238,144 @@ function M.status()
 end
 
 function M.connect()
-	local s = current()
+	local s = M.get(current().root)
 	s.epoch = s.epoch + 1
 	local epoch = s.epoch
-	vim.system({ "rediff-amp-live", "discover", s.root }, { cwd = s.root, text = true }, function(result)
-		vim.schedule(function()
-			local ok, err = pcall(function()
-				if s.epoch ~= epoch or current() ~= s then
-					return
-				end
-				assert(result.code == 0, result.stderr)
-				local matches = vim.json.decode(result.stdout)
-				if #matches == 0 then
-					notify(
-						"No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp."
-					)
-					return
-				end
-				local function choose(index)
-					if s.epoch ~= epoch or current() ~= s then
-						return
-					end
-					local target = vim.deepcopy(matches[index])
-					target.name = "amp-live"
-					M.select(s.root, target)
-				end
-				if #matches == 1 then
-					choose(1)
-				else
-					local items = {}
-					for i, match in ipairs(matches) do
-						items[i] = i .. "\t" .. vim.fn.strtrans(match.session .. " " .. (match.title or ""))
-					end
-					require("fzf-lua").fzf_exec(items, {
-						prompt = "Amp sessions> ",
-						previewer = false,
-						fzf_opts = { ["--delimiter"] = "\t", ["--with-nth"] = "2..", ["--no-multi"] = true },
-						actions = {
-							enter = function(selected)
-								if selected[1] then
-									local selected_ok, selected_err =
-										pcall(choose, tonumber(selected[1]:match("^(%d+)")))
-									if not selected_ok then
-										notify(tostring(selected_err), "failed")
-									end
-								end
-							end,
-						},
-					})
-				end
-			end)
+	connections.discover(function(err)
+		local valid, context = pcall(current)
+		if s.epoch ~= epoch or not valid or context.root ~= s.root then
+			return
+		end
+		if err then
+			notify(err, "failed")
+			return
+		end
+		local matches = vim.tbl_filter(function(entry)
+			return entry.name == "amp-live" and entry.root == s.root and entry.online
+		end, connections.items())
+		if #matches == 0 then
+			notify("No live Amp session found for this checkout. Reload Amp's plugins, then run :harness connect amp.")
+		elseif #matches == 1 then
+			local ok, failure = pcall(M.select, s.root, matches[1])
 			if not ok then
-				notify(tostring(err), "failed")
+				notify(tostring(failure), "failed")
 			end
-		end)
+		else
+			M.panel("connect")
+		end
 	end)
 end
 
-function M.compose()
-	local s = current()
+local function find_connection(label)
+	local matches = vim.tbl_filter(function(entry)
+		return entry.key == label or entry.alias == label or entry.session == label
+	end, connections.items())
+	assert(#matches == 1, "Choose a unique harness alias or ID from :harness list")
+	return matches[1]
+end
+
+function M.disconnect(entry)
+	assert(not feedback.busy(current().root), "Wait for the current feedback delivery before disconnecting")
+	assert(not feedback.busy(entry.root), "Wait for this worktree's delivery before disconnecting")
+	for _, message in pairs(messages) do
+		assert(
+			message.connection_key ~= entry.key or not feedback.busy(message.root),
+			"Wait for this harness's delivery before disconnecting"
+		)
+	end
+	connections.disconnect(entry.key)
+	for root, s in pairs(sessions) do
+		if root == entry.root and s.target.name == entry.name and s.target.session == entry.session then
+			M.select(root, { name = "none" })
+		end
+	end
+end
+
+function M.panel(purpose)
+	local root, directory = current().root, vim.fn.getcwd()
+	local source = M.get(root)
+	local epoch = source.epoch
+	return require("rediff.harness_panel").open({
+		root = root,
+		purpose = purpose or "manage",
+		on_select = function(entry)
+			if purpose == "connect" and source.epoch ~= epoch then
+				return
+			end
+			if purpose == "send" then
+				M.compose(entry, root, directory)
+			elseif entry.connected then
+				M.disconnect(entry)
+				epoch = source.epoch
+			elseif entry.root == root then
+				M.select(root, {
+					name = entry.name,
+					session = entry.session,
+					root = entry.root,
+					connection = entry.connection,
+					title = entry.title,
+					capabilities = entry.capabilities,
+				})
+				epoch = source.epoch
+			else
+				connections.connect(entry)
+			end
+		end,
+		on_message = function(entry)
+			M.compose(entry, root, directory)
+		end,
+		on_disconnect = M.disconnect,
+	})
+end
+
+local function message_session(target, root, directory)
+	local key = vim.fn.sha256(root .. "\0" .. target.key)
+	if not messages[key] then
+		local outbox = feedback.directory(root)
+		local path = outbox .. "/message-" .. key .. ".json"
+		local saved = feedback.read(path) or {}
+		messages[key] = {
+			root = root,
+			directory = outbox,
+			metadata_path = path,
+			message = "",
+			epoch = 0,
+			target = vim.deepcopy(target),
+			provider = target.provider,
+			last = saved.last,
+			key = key,
+			connection_key = target.key,
+			origin_directory = directory,
+		}
+		messages[key].delivery = delivery_status(messages[key])
+	end
+	local s = messages[key]
+	-- A descriptor may change after reload, but never retarget an in-flight message.
+	if not feedback.busy(root) then
+		s.target = vim.deepcopy(target)
+	end
+	return s
+end
+
+function M.compose(target, root, directory)
+	root = root or current().root
+	directory = directory or vim.fn.getcwd()
+	if not target then
+		local connected = connections.connected()
+		if #connected > 1 then
+			M.panel("send")
+			return
+		end
+		target = connected[1]
+	end
+	local s
+	if target then
+		local live = assert(connections.get(target.key), "Harness no longer exists")
+		assert(live.connected and live.online, "Harness is offline. Reconnect it from :harness list")
+		s = message_session(live, root, directory)
+	else
+		s = M.get(root)
+	end
 	local loaded = s.buf and api.nvim_buf_is_loaded(s.buf)
 	if loaded then
 		local win = vim.fn.bufwinid(s.buf)
@@ -297,7 +398,7 @@ function M.compose()
 		end
 		local buf = api.nvim_create_buf(false, true)
 		s.buf = buf
-		api.nvim_buf_set_name(buf, "harness://" .. vim.fn.sha256(s.root) .. "/message")
+		api.nvim_buf_set_name(buf, "harness://" .. (s.key or vim.fn.sha256(s.root)) .. "/message")
 		vim.bo[buf].buftype = "acwrite"
 		vim.bo[buf].bufhidden = "hide"
 		vim.bo[buf].swapfile = false
@@ -337,9 +438,23 @@ function M.compose()
 					return
 				end
 				local argv = feedback.command(s.target)
-				local id, path = feedback.enqueue(s.root, nil, nil, argv, s.message)
+				if s.connection_key then
+					local connected = connections.get(s.connection_key)
+					assert(
+						connected and connected.connected and connected.online,
+						"Reconnect this harness before sending"
+					)
+				end
+				local recipient = s.target.session
+						and {
+							provider = s.target.name == "amp-live" and "amp" or s.target.name,
+							id = s.target.session,
+							repository = s.target.root or s.root,
+						}
+					or nil
+				local id, path = feedback.enqueue(s.root, nil, nil, argv, s.message, nil, recipient, s.origin_directory)
 				s.last_message = { id = id, path = path }
-				M.deliver(s.root, id, path, argv)
+				M.deliver(s.root, id, path, argv, false, nil, s)
 				vim.bo[buf].modified = false
 			end,
 		})
@@ -350,7 +465,14 @@ function M.compose()
 	vim.wo.linebreak = true
 	vim.wo.number = false
 	vim.wo.signcolumn = "no"
-	vim.wo.winbar = " Harness message · :w send · :wq send+close · :q retain draft "
+	local label = s.target.alias or (s.target.title ~= "" and s.target.title) or s.target.session or s.target.name
+	vim.wo.winbar = (
+		" To "
+		.. vim.fn.strtrans(label)
+		.. " · "
+		.. vim.fn.strtrans(s.target.root or s.root)
+		.. " · :w send · :wq send+close · :q retain "
+	):gsub("%%", "%%%%")
 end
 
 function M.install()
@@ -388,7 +510,7 @@ function M.install()
 				"reload",
 				target.connection,
 				target.session,
-				session.root,
+				target.root or session.root,
 			}, { text = true }, function(reply)
 				vim.schedule(function()
 					installing = false
@@ -415,7 +537,9 @@ function M.setup()
 		local ok, err = pcall(function()
 			local args = opts.fargs
 			if #args == 2 and args[1] == "connect" and args[2] == "amp" then
-				M.connect()
+				M.panel("connect")
+			elseif #args == 1 and (args[1] == "list" or args[1] == "panel") then
+				M.panel("manage")
 			elseif #args == 2 and args[1] == "use" then
 				M.use(args[2])
 				if args[2] == "amp" then
@@ -425,14 +549,27 @@ function M.setup()
 				M.install()
 			elseif #args == 0 or (#args == 1 and args[1] == "status") then
 				M.status()
-			elseif #args == 1 and args[1] == "send" then
-				M.compose()
+			elseif #args <= 2 and args[1] == "send" then
+				M.compose(args[2] and find_connection(args[2]) or nil)
+			elseif #args >= 3 and args[1] == "rename" then
+				connections.rename(find_connection(args[2]).key, table.concat(args, " ", 3))
 			elseif #args == 1 and args[1] == "retry" then
 				M.retry()
-			elseif #args == 1 and args[1] == "disconnect" then
-				M.select(current().root, { name = "none" })
+			elseif #args <= 2 and args[1] == "disconnect" then
+				local connected = connections.connected()
+				if args[2] then
+					M.disconnect(find_connection(args[2]))
+				elseif #connected > 1 then
+					M.panel("manage")
+				elseif #connected == 1 then
+					M.disconnect(connected[1])
+				else
+					M.select(current().root, { name = "none" })
+				end
 			else
-				error("Usage: Harness use amp|claude | install amp | connect amp | disconnect | send | status | retry")
+				error(
+					"Usage: Harness list | connect amp | use amp|claude | send [alias] | rename ID ALIAS | disconnect [alias] | status | retry | install amp"
+				)
 			end
 		end)
 		if not ok then
@@ -443,11 +580,26 @@ function M.setup()
 		complete = function(_, line, pos)
 			local args = vim.split(line:sub(1, pos), "%s+")
 			if #args == 2 then
-				return { "install", "connect", "use", "disconnect", "send", "status", "retry" }
+				return {
+					"list",
+					"panel",
+					"rename",
+					"install",
+					"connect",
+					"use",
+					"disconnect",
+					"send",
+					"status",
+					"retry",
+				}
 			elseif #args == 3 and args[2] == "use" then
 				return { "amp", "claude" }
 			elseif #args == 3 and (args[2] == "connect" or args[2] == "install") then
 				return { "amp" }
+			elseif #args == 3 and (args[2] == "send" or args[2] == "disconnect" or args[2] == "rename") then
+				return vim.tbl_map(function(entry)
+					return entry.alias or entry.session
+				end, connections.connected())
 			end
 			return {}
 		end,
@@ -466,7 +618,7 @@ function M.setup()
 	end
 	api.nvim_create_autocmd({ "QuitPre", "VimLeavePre" }, {
 		callback = function()
-			for _, s in pairs(sessions) do
+			for _, s in pairs(vim.tbl_extend("force", sessions, messages)) do
 				if s.buf and api.nvim_buf_is_loaded(s.buf) then
 					s.message = table.concat(api.nvim_buf_get_lines(s.buf, 0, -1, false), "\n")
 					save(s) -- Also removes legacy persisted drafts without writing on every edit.

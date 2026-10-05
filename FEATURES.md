@@ -138,15 +138,24 @@ Without a live target, reload manually once and use `:harness connect amp`.
 It preserves Home Manager symlinks, does not install the Amp CLI, and never
 sends annotations or composer text as part of installation.
 
-`:Harness use amp` selects Amp and discovers live sessions for this checkout,
-just like `:Harness connect amp`: one match connects directly, multiple matches
-open a fuzzy picker. No matches or cancelling preserves any compatible binding.
+`:Harness use amp` selects Amp and discovers sessions for this checkout: one
+match connects directly, multiple matches open the harness panel. No matches or
+cancelling preserves any compatible binding. `:Harness connect amp` and
+`:Harness list` open the searchable connection/activity panel across worktrees.
+Use `/` to filter, Enter to connect/disconnect, `r` to give a local alias, `d` to disconnect,
+and `c` to show only connected harnesses. Amp streams state and active tool names;
+running agents show a spinner. Other providers show unknown activity.
+
+Multiple harnesses may stay connected. `:Harness send` asks for a recipient when
+there is more than one; `:Harness send ALIAS` selects directly. Each recipient has
+a separate draft (`:w` submits, `:wq` submits and closes, `:q!` retains the draft).
+Annotations stay bound to a harness in their own worktree. General messages
+include the sender directory/editor instance and recipient; external recipients
+are instructed not to edit the sender's worktree. This is not filesystem isolation.
 Claude has no live discovery adapter; use `:ReviewHarness claude SESSION_ID`.
-Neither command launches an agent or sends feedback. `:Harness send` opens a normal Vim message
-buffer (`:w` submits only, `:wq` submits and closes, `:q!` closes while
-retaining the draft). `:Harness status`, `:Harness retry`, and
-`:Harness disconnect` are supported; disconnect retains drafts and does not
-stop the agent. An accepted ACK means queued steering, not a completed turn.
+Connecting never launches an agent or sends feedback. `:Harness status` and
+`:Harness retry` refer to the current composer or worktree binding. Disconnecting
+retains drafts and does not stop the agent. An ACK is not a completed agent turn.
 
 Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate

@@ -25,7 +25,7 @@ import type { PluginAPI, PluginCommandContext, PluginThread } from '@ampcode/plu
 
 import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
-import { createServer, type Server } from 'node:http'
+import { createServer, type Server, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -34,8 +34,97 @@ export const description = 'Rediff: receive editor review feedback in the curren
 const MAX_BODY = 1024 * 1024
 const MAX_ID = 256
 
-type Connection = { server: Server; directory: string; descriptor: string }
+type ActivityState = 'idle' | 'running' | 'awaiting-approval' | 'error' | 'unknown'
+type ActivitySnapshot = {
+  version: 1; root: string; thread: string; sequence: number
+  state: ActivityState; title: string; tool: string | null
+}
+type StreamClient = {
+  response: ServerResponse; pending: string | null; heartbeat: NodeJS.Timeout
+}
+type Activity = {
+  call(id: string, tool: string): void
+  result(id: string): void
+  subscribe(response: ServerResponse): void
+  dispose(): void
+}
+type Connection = { server: Server; directory: string; descriptor: string; activity: Activity }
 type Outcome = { content: string; result: Promise<void> }
+
+const HEARTBEAT_MS = 15_000
+const MAX_STREAM_BUFFER = 64 * 1024
+
+async function createActivity(thread: PluginThread, root: string): Promise<Activity> {
+  let state: ActivityState = 'unknown'
+  let title = ''
+  let observedState = false
+  let observedTitle = false
+  let sequence = 0
+  const tools = new Map<string, string>()
+  const clients = new Set<StreamClient>()
+
+  const line = (): string => JSON.stringify({
+    version: 1, root, thread: thread.id, sequence,
+    state: state === 'awaiting-approval' || state === 'error' ? state : tools.size ? 'running' : state,
+    title, tool: tools.size ? [...tools.values()].at(-1)! : null,
+  } satisfies ActivitySnapshot) + '\n'
+  const write = (client: StreamClient, value: string): void => {
+    if (client.response.destroyed || client.response.writableEnded) return
+    if (client.pending !== null) {
+      if (value === '\n') return // A heartbeat must not overwrite a pending state change.
+      client.pending = value
+      if (client.response.writableLength > MAX_STREAM_BUFFER) client.response.destroy()
+      return
+    }
+    if (!client.response.write(value)) client.pending = ''
+  }
+  const publish = (): void => {
+    sequence++
+    const value = line()
+    for (const client of clients) write(client, value)
+  }
+  const subscriptions = [
+    thread.state.subscribe((value) => {
+      observedState = true
+      state = value
+      if (value === 'idle' || value === 'error') tools.clear()
+      publish()
+    }),
+    thread.title.subscribe((value) => { observedTitle = true; title = value ?? ''; publish() }),
+  ]
+  // Subscribe before reading so an in-flight get cannot overwrite a newer event.
+  await Promise.all([
+    thread.state.get().then((value) => { if (!observedState) state = value }).catch(() => {}),
+    thread.title.get().then((value) => { if (!observedTitle) title = value ?? '' }).catch(() => {}),
+  ])
+  return {
+    call(id, tool) { tools.set(id, tool); publish() },
+    result(id) { if (tools.delete(id)) publish() },
+    subscribe(response) {
+      const client = { response, pending: null } as StreamClient
+      client.heartbeat = setInterval(() => write(client, '\n'), HEARTBEAT_MS)
+      client.heartbeat.unref()
+      clients.add(client)
+      response.on('drain', () => {
+        if (client.pending === null) return
+        const pending = client.pending
+        client.pending = null
+        if (pending) write(client, pending)
+      })
+      const close = () => { clearInterval(client.heartbeat); clients.delete(client) }
+      response.once('close', close)
+      write(client, line())
+    },
+    dispose() {
+      for (const subscription of subscriptions) subscription.unsubscribe()
+      for (const client of clients) {
+        clearInterval(client.heartbeat)
+        client.response.end()
+      }
+      clients.clear()
+    },
+  }
+}
 
 async function showConnection(thread: PluginThread, descriptor: string): Promise<void> {
   await thread.appendUserMessage({
@@ -67,6 +156,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
     const connection = connections.get(threadID)
     if (!connection) return false
     connections.delete(threadID)
+    connection.activity.dispose()
     await rm(connection.directory, { recursive: true, force: true })
     await closeServer(connection.server)
     return true
@@ -94,10 +184,13 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
     const thread: PluginThread = ctx.thread
     // A title is optional metadata; failure to read it must not prevent review.
     const title = await thread.title.get().catch(() => null)
+    const activity = await createActivity(thread, root)
 
     const server = createServer((request, response) => {
       void (async () => {
-        if (!['GET', 'POST'].includes(request.method ?? '') || request.url !== '/feedback') {
+        const feedback = request.url === '/feedback'
+        const events = request.url === '/events'
+        if ((!feedback && !events) || (events ? request.method !== 'GET' : !['GET', 'POST'].includes(request.method ?? ''))) {
           response.writeHead(404).end('not found')
           return
         }
@@ -107,6 +200,15 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
         }
         if (request.headers.authorization !== `Bearer ${token}`) {
           response.writeHead(401).end('unauthorized')
+          return
+        }
+        if (events) {
+          response.writeHead(200, {
+            'Content-Type': 'application/x-ndjson',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          })
+          activity.subscribe(response)
           return
         }
         if (request.method === 'GET') {
@@ -176,6 +278,9 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
         server.off('error', reject)
         resolve()
       })
+    }).catch((error) => {
+      activity.dispose()
+      throw error
     })
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('rediff server has no TCP address')
@@ -188,6 +293,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
       }
       return mkdtemp(join(registry, 'session-'))
     })().catch(async (error) => {
+      activity.dispose()
       await closeServer(server)
       throw error
     })
@@ -199,10 +305,12 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
         token,
         root,
         thread: thread.id,
+        capabilities: ['activity'],
         ...(title ? { title } : {}),
       }), { mode: 0o600 })
-      connections.set(thread.id, { server, directory, descriptor })
+      connections.set(thread.id, { server, directory, descriptor, activity })
     } catch (error) {
+      activity.dispose()
       await closeServer(server)
       await rm(directory, { recursive: true, force: true })
       throw error
@@ -236,6 +344,13 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
   amp.on('session.start', autoConnect)
   // Also registers after reloading the plugin in an already-open session.
   amp.on('agent.start', autoConnect)
+  amp.on('tool.call', (event) => {
+    connections.get(event.thread.id)?.activity.call(event.toolUseID, event.tool)
+    return { action: 'allow' }
+  })
+  amp.on('tool.result', (event) => {
+    connections.get(event.thread.id)?.activity.result(event.toolUseID)
+  })
   amp.registerCommand('rediff-connect', {
     category: 'rediff', title: 'connect', description: 'Connect editor review feedback to this thread',
   }, async (ctx) => {

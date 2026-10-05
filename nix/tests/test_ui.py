@@ -224,24 +224,23 @@ class EditorUI(unittest.TestCase):
             local system = vim.system
             vim.system = function(argv, opts, callback)
                 if argv[1] ~= 'rediff-amp-live' then return system(argv, opts, callback) end
-                assert(argv[2] == 'discover' and argv[3] == s.root and opts.cwd == s.root)
+                assert(argv[2] == 'discover' and argv[3] == '--all')
                 callback({code=0, stdout=vim.json.encode({
-                    {session='T-first', title='Alpha', connection='/fake/first.json'},
-                    {session='T-second', title='Beta', connection='/fake/second.json'},
+                    {root=s.root, session='T-first', title='Alpha', connection='/fake/first.json'},
+                    {root=s.root, session='T-second', title='Beta', connection='/fake/second.json'},
                 })})
             end
         """,
         )
         for choose in (False, True):
             self.keys(editor, ":harness use amp<CR>")
-            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.wait_for(editor, 'vim.bo.filetype == "rediff-harness-panel"')
             self.assertEqual("none", self.lua(editor, "return s.harness.name"))
             if choose:
-                self.keys(editor, "Beta")
-                self.keys(editor, "<CR>")
+                self.keys(editor, "/Beta<CR><CR>q")
             else:
                 self.keys(editor, "<Esc>")
-            self.wait_for(editor, 'vim.bo.filetype ~= "fzf"')
+            self.wait_for(editor, 'require("rediff.harness_panel").state == nil')
             self.assertEqual(
                 "amp-live" if choose else "none",
                 self.lua(editor, "return s.harness.name"),
@@ -249,6 +248,233 @@ class EditorUI(unittest.TestCase):
         self.assertEqual("T-second", self.lua(editor, "return s.harness.session"))
         self.assertIsNone(
             self.lua(editor, 'return require("rediff.harness").get(s.root).last')
+        )
+
+    def test_multiple_harnesses_panel_routing_and_activity(self):
+        editor = self.launch(self.root)
+        remote = str(Path(self.directory.name, "external-worktree"))
+        Path(remote).mkdir()
+        editor.exec_lua(
+            STATE
+            + """
+            require('rediff.live').stop(s)
+            vim.g.external_root = ...
+            _G.harness_streams, _G.sent_feedback = {}, {}
+            local system = vim.system
+            vim.system = function(argv, opts, callback)
+                if argv[1] ~= 'rediff-amp-live' then return system(argv,opts,callback) end
+                if argv[2] == 'discover' then
+                    callback({code=0,stdout=vim.json.encode({
+                        {root=s.root,session='T-local',title='Local review',connection='/fake/local',capabilities={'activity'}},
+                        {root=vim.g.external_root,session='T-remote',title='Remote worker',connection='/fake/remote',capabilities={'activity'}},
+                    })})
+                elseif argv[2] == 'watch' then
+                    _G.harness_streams[argv[4]] = {stdout=opts.stdout,exit=callback}
+                    return {kill=function() end}
+                else
+                    assert(argv[2] == 'send')
+                    local payload = require('rediff.feedback').read(argv[#argv])
+                    table.insert(_G.sent_feedback,{argv=argv,payload=payload,cwd=opts.cwd})
+                    callback({code=0,stderr='',stdout=vim.json.encode({submission_id=payload.submission_id,status='accepted'})})
+                end
+            end
+            function _G.emit_activity(thread, root, sequence, state, tool)
+                local line = vim.json.encode({version=1,thread=thread,root=root,sequence=sequence,
+                    state=state,tool=tool or vim.NIL,title=thread=='T-local' and 'Local review' or 'Remote worker'}) .. '\\n'
+                local out = _G.harness_streams[thread].stdout
+                out(nil,line:sub(1,9)); out(nil,line:sub(10))
+            end
+            """,
+            remote,
+        )
+        self.keys(editor, ":harness connect amp<CR>")
+        self.wait_for(editor, "#require('rediff.harness_panel').state.entries == 2")
+        self.keys(editor, "<CR>")
+        self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
+        self.assertIn("Enter disconnect", "\n".join(editor.current.buffer[:]))
+        self.keys(editor, "<CR>")
+        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+        self.assertEqual(
+            0, self.lua(editor, "return #require('rediff.connections').connected()")
+        )
+        self.assertIn("Enter connect", "\n".join(editor.current.buffer[:]))
+        self.keys(editor, "<CR>")
+        self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
+        self.keys(editor, "/Remote<CR><CR>")
+        self.assertEqual(
+            2, self.lua(editor, "return #require('rediff.connections').connected()")
+        )
+        self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
+        self.lua(editor, "vim.ui.input=function(_,callback) callback('backend') end")
+        self.keys(editor, "r")
+        self.assertEqual(
+            "backend",
+            self.lua(
+                editor, "return require('rediff.harness_panel').state.entries[1].alias"
+            ),
+        )
+        self.lua(
+            editor,
+            "emit_activity('T-local',s.root,0,'idle'); emit_activity('T-remote',vim.g.external_root,0,'running','shell_command')",
+        )
+        pump(editor)
+        panel_text = "\n".join(editor.current.buffer[:])
+        self.assertIn("external worktree", panel_text)
+        self.assertIn("shell_command", panel_text)
+        frame = self.lua(editor, "return require('rediff.harness_panel').state.frame")
+        self.wait_for(editor, f"require('rediff.harness_panel').state.frame ~= {frame}")
+        editor.ui_try_resize(100, 28)
+        pump(editor)
+        self.assertTrue(
+            self.lua(
+                editor,
+                "local p=require('rediff.harness_panel').state; return vim.api.nvim_win_get_width(p.win) <= 94",
+            )
+        )
+        self.lua(
+            editor,
+            "emit_activity('T-remote',vim.g.external_root,1,'awaiting-approval')",
+        )
+        pump(editor)
+        self.assertIn("awaiting-approval", "\n".join(editor.current.buffer[:]))
+        self.keys(editor, "q")
+        self.lua(
+            editor,
+            "r.add_comment({file=s.current.path,side='new',snapshot_id=s.current.id,selection=require('rediff.selection').line(s.new_buf,5)},'Local annotation')",
+        )
+        self.keys(editor, ":harness send<CR>")
+        self.assertEqual(
+            "send",
+            self.lua(editor, "return require('rediff.harness_panel').state.purpose"),
+        )
+        self.keys(editor, "/backend<CR><CR>")
+        self.assertEqual("acwrite", editor.current.buffer.options["buftype"])
+        self.keys(editor, "iMessage for external worker<Esc>:w<CR>")
+        self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
+        sent = self.lua(editor, "return _G.sent_feedback[1]")
+        self.assertEqual(remote, sent["cwd"])
+        self.assertEqual("T-remote", sent["argv"][3])
+        self.assertEqual(self.root, sent["payload"]["sender"]["repository"])
+        self.assertEqual(self.root, sent["payload"]["sender"]["directory"])
+        self.assertTrue(sent["payload"]["sender"]["instance"])
+        self.assertEqual(
+            {"provider": "amp", "id": "T-remote", "repository": remote},
+            sent["payload"]["recipient"],
+        )
+        self.assertNotIn("comments", sent["payload"])
+        self.assertEqual([""], list(editor.current.buffer[:]))
+        self.assertEqual(1, self.lua(editor, "return #s.comments"))
+        self.keys(editor, "iRetain this remote draft<Esc>:q<CR>")
+        self.keys(editor, ":harness send T-local<CR>")
+        self.assertEqual([""], list(editor.current.buffer[:]))
+        self.keys(editor, "iIndependent local draft<Esc>:q<CR>")
+        self.keys(editor, ":harness send backend<CR>")
+        self.assertEqual(["Retain this remote draft"], list(editor.current.buffer[:]))
+        self.keys(editor, ":q<CR>")
+        self.lua(editor, "vim.api.nvim_set_current_win(s.new_win)")
+        self.keys(editor, ":w<CR>")
+        self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
+        annotation = self.lua(editor, "return _G.sent_feedback[2]")
+        self.assertEqual("T-local", annotation["argv"][3])
+        self.assertEqual(
+            "Local annotation", annotation["payload"]["comments"][0]["text"]
+        )
+        self.assertEqual(0, self.lua(editor, "return #s.comments"))
+        self.assertFalse(
+            self.lua(
+                editor,
+                "return pcall(require('rediff.harness').select,s.root,{name='amp-live',root=vim.g.external_root,session='T-remote',connection='/fake/remote'})",
+            )
+        )
+        self.lua(editor, "_G.harness_streams['T-remote'].exit({code=1})")
+        pump(editor)
+        self.assertTrue(
+            self.lua(
+                editor,
+                "for _,e in ipairs(require('rediff.connections').connected()) do if e.session=='T-remote' then return not e.online and e.activity.state=='unknown' end end",
+            )
+        )
+        self.keys(editor, ":harness list<CR>")
+        self.keys(editor, "/backend<CR><CR>")
+        self.assertEqual(
+            1, self.lua(editor, "return #require('rediff.connections').connected()")
+        )
+        self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
+        self.assertIn("Enter connect", "\n".join(editor.current.buffer[:]))
+        self.keys(editor, "<CR>q:harness send backend<CR>")
+        self.assertEqual(["Retain this remote draft"], list(editor.current.buffer[:]))
+        self.assertEqual(2, self.lua(editor, "return #_G.sent_feedback"))
+
+    def test_harness_stream_lifecycle_and_alias_persistence(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            require('rediff.live').stop(s)
+            _G.streams = {}
+            local system = vim.system
+            vim.system = function(argv, opts, callback)
+                if argv[1] ~= 'rediff-amp-live' then return system(argv,opts,callback) end
+                assert(argv[2] == 'watch')
+                local stream = {out=opts.stdout,exit=callback,killed=false}
+                table.insert(streams,stream)
+                return {kill=function() stream.killed=true end}
+            end
+            _G.registry = require('rediff.connections')
+            _G.target = {name='amp-live',root=s.root,session='T-stream',connection='/fake/stream',capabilities={'activity'}}
+            _G.key = registry.connect(target).key
+            registry.rename(key,'test-worker')
+            registry.disconnect(key)
+            registry.connect(target)
+            streams[1].out(nil,'{}\\n')
+            streams[1].exit({code=1})
+        """,
+        )
+        pump(editor)
+        self.assertTrue(
+            self.lua(editor, "return streams[1].killed and registry.get(key).online")
+        )
+        self.lua(
+            editor,
+            """
+            local line = vim.json.encode({version=1,root=s.root,thread='T-stream',sequence=3,
+                state='running',title='Working',tool=vim.NIL}) .. '\\n'
+            streams[2].out(nil,line)
+        """,
+        )
+        pump(editor)
+        self.assertEqual(
+            {"state": "running"}, self.lua(editor, "return registry.get(key).activity")
+        )
+        self.lua(editor, "streams[2].out(nil,'false\\n')")
+        pump(editor)
+        self.assertTrue(
+            self.lua(
+                editor, "return streams[2].killed and not registry.get(key).online"
+            )
+        )
+        self.lua(
+            editor,
+            """
+            registry.connect(target)
+            local wrong = vim.json.encode({version=1,root=s.root..'/other',thread='T-stream',sequence=4,
+                state='idle',title='Wrong worktree'}) .. '\\n'
+            streams[3].out(nil,wrong)
+        """,
+        )
+        pump(editor)
+        self.assertFalse(self.lua(editor, "return registry.get(key).online"))
+        fresh = self.launch(self.root, headless=True)
+        self.assertEqual(
+            "test-worker",
+            fresh.exec_lua(
+                """
+            local registry = require('rediff.connections')
+            assert(#registry.connected() == 0)
+            return registry.connect({name='amp-live',root=...,session='T-stream',connection='/fake/stream'}).alias
+        """,
+                self.root,
+            ),
         )
 
     def test_command_picker(self):
@@ -799,9 +1025,7 @@ class EditorUI(unittest.TestCase):
             3, self.lua(editor, "return #vim.api.nvim_tabpage_list_wins(0)")
         )
         self.assertTrue(
-            self.lua(
-                editor, 'return require("rediff.harness").get(s.root).last == nil'
-            )
+            self.lua(editor, 'return require("rediff.harness").get(s.root).last == nil')
         )
         locked = self.launch(self.root)
         self.assertTrue(self.lua(locked, "return s == nil"))
@@ -1413,9 +1637,7 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(message.number, editor.current.buffer.number)
         self.assertEqual(draft, message[:])
         self.assertTrue(
-            self.lua(
-                editor, 'return require("rediff.harness").get(s.root).last == nil'
-            )
+            self.lua(editor, 'return require("rediff.harness").get(s.root).last == nil')
         )
         self.keys(editor, "<Tab>")
         self.assertTrue(

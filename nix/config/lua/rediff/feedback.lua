@@ -1,4 +1,5 @@
 local M = {}
+local instance = tostring(vim.uv.os_getpid()) .. "-" .. tostring(vim.uv.hrtime())
 
 function M.directory(root)
 	local path = vim.fn.stdpath("state") .. "/reviews/" .. vim.fn.sha256(root)
@@ -83,10 +84,18 @@ end
 
 -- Feedback is deduplicated by the full batch content. Receivers must also
 -- deduplicate submission_id across uncertain deliveries and process restarts.
-function M.enqueue(root, comments, snapshots, target, message, snapshot_status)
+function M.enqueue(root, comments, snapshots, target, message, snapshot_status, recipient, directory)
 	local payload = {
 		protocol_version = 1,
 		repository = root,
+		sender = {
+			instance = instance,
+			pid = vim.uv.os_getpid(),
+			app = vim.env.NVIM_APPNAME == "rediff" and "rediff" or "nvim",
+			directory = directory or vim.fn.getcwd(),
+			repository = root,
+		},
+		recipient = recipient,
 		comments = vim.deepcopy(comments),
 		snapshots = vim.deepcopy(snapshots),
 		target = target or {},
@@ -154,7 +163,9 @@ function M.deliver(root, id, path, argv, retry, callback)
 			callback(ack)
 		end)
 	end
-	local ok, err = pcall(vim.system, command, { cwd = root, text = true }, done)
+	local payload = M.read(path)
+	local cwd = payload.recipient and payload.recipient.repository or root
+	local ok, err = pcall(vim.system, command, { cwd = cwd, text = true }, done)
 	if not ok then
 		done({ code = 1, stdout = "", stderr = tostring(err) })
 	end

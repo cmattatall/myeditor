@@ -44,6 +44,11 @@ installer in [`plugins/amp/`](plugins/amp/). Enable
 restart/reload Amp and use `:harness connect amp`.
 Other plugin files are left untouched.
 
+`:harness list` opens a searchable connection/activity panel with local aliases.
+Keep multiple harnesses connected; `:harness send` asks which one to message.
+Review annotations remain bound to a harness in the current worktree. Amp streams
+live status and active tool names to the panel.
+
 Built on [Codediff](https://github.com/esmuellert/codediff.nvim)'s diff renderer,
 with compact inline annotations and
 [Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim) for ordinary editing.
