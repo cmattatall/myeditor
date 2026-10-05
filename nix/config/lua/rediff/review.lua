@@ -4,6 +4,7 @@ local git = require("rediff.git")
 local feedback = require("rediff.feedback")
 local harness = require("rediff.harness")
 local selection = require("rediff.selection")
+local awareness = require("rediff.awareness")
 local tree_ns = api.nvim_create_namespace("rediff.tree")
 local active_ns = api.nvim_create_namespace("rediff.active-file")
 local hunk_ns = api.nvim_create_namespace("rediff.hunk")
@@ -388,6 +389,7 @@ function M.show(index, snapshot)
 			break
 		end
 	end
+	awareness.render()
 	save()
 end
 
@@ -531,6 +533,7 @@ function M.refresh(preferred, changes)
 			end
 		end
 	end
+	awareness.scan(s.root)
 	save()
 end
 
@@ -1174,6 +1177,7 @@ end
 function M.leave()
 	local s = state()
 	tree_focus(false)
+	awareness.stop()
 	require("rediff.live").stop(s)
 	if s.composer then
 		release_composer()
@@ -1330,6 +1334,7 @@ function M.open()
 	M.refresh()
 	api.nvim_set_current_win(s.tree_win)
 	require("rediff.live").start(s)
+	awareness.start(s.root)
 	api.nvim_exec_autocmds("User", { pattern = "ReviewEnter" })
 end
 
@@ -1361,6 +1366,9 @@ function M.setup()
 	api.nvim_set_hl(0, "ReviewActiveFile", { bg = palette.highlight_med, bold = true })
 	api.nvim_set_hl(0, "ReviewHunk", { fg = palette.gold, bold = true })
 	local function review_highlights()
+		api.nvim_set_hl(0, "ReviewUnseen", { fg = palette.iris, bold = true })
+		api.nvim_set_hl(0, "ReviewUnseenPulse", { fg = palette.text, bold = true })
+		api.nvim_set_hl(0, "ReviewSeen", { fg = palette.foam })
 		api.nvim_set_hl(0, "ReviewAnnotation", { fg = "#ff9e64" })
 		api.nvim_set_hl(0, "ReviewTreeSelection", { fg = palette.text, bg = palette.highlight_high, bold = true })
 		api.nvim_set_hl(

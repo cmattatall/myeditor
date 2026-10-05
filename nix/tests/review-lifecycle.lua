@@ -21,11 +21,18 @@ return function(root, equal, fails)
 		pending = { callback = callback, payload = feedback.read(argv[#argv]) }
 	end
 	local function acknowledge(status)
+		assert(
+			vim.wait(5000, function()
+				return pending ~= nil
+			end),
+			"Feedback receiver did not start"
+		)
 		pending.callback({
 			code = status == "failed" and 1 or 0,
 			stderr = status == "failed" and "Test failure" or "",
 			stdout = vim.json.encode({ submission_id = pending.payload.submission_id, status = status }),
 		})
+		pending = nil
 		assert(vim.wait(1000, function()
 			return not feedback.busy(root)
 		end))

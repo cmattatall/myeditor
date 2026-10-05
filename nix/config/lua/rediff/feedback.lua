@@ -142,6 +142,7 @@ function M.deliver(root, id, path, argv, retry, callback)
 	table.insert(command, path)
 	M.write(status_path, { status = "running" })
 	running[root] = true
+	local baseline
 	local function done(result)
 		vim.schedule(function()
 			running[root] = nil
@@ -160,15 +161,21 @@ function M.deliver(root, id, path, argv, retry, callback)
 				}
 			end
 			M.write(status_path, ack)
+			if ack.status == "accepted" or ack.status == "completed" then
+				require("rediff.awareness").accept(root, baseline)
+			end
 			callback(ack)
 		end)
 	end
 	local payload = M.read(path)
 	local cwd = payload.recipient and payload.recipient.repository or root
-	local ok, err = pcall(vim.system, command, { cwd = cwd, text = true }, done)
-	if not ok then
-		done({ code = 1, stdout = "", stderr = tostring(err) })
-	end
+	require("rediff.awareness").before_send(root, payload.recipient, function(captured)
+		baseline = captured
+		local ok, err = pcall(vim.system, command, { cwd = cwd, text = true }, done)
+		if not ok then
+			done({ code = 1, stdout = "", stderr = tostring(err) })
+		end
+	end)
 end
 
 return M

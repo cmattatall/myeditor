@@ -311,15 +311,25 @@ return function(root, equal, fails, keys)
 		table.insert(notices, message)
 	end
 	local pending
-	vim.system = function(_, _, callback)
+	vim.system = function(argv, opts, callback)
+		if argv[1] == "git" then
+			return system(argv, opts, callback)
+		end
 		pending = callback
 	end
 	local function finish(status)
+		assert(
+			vim.wait(5000, function()
+				return pending ~= nil
+			end),
+			"Feedback receiver did not start"
+		)
 		pending({
 			code = status == "failed" and 1 or 0,
 			stderr = status == "failed" and "Fixture failure" or "",
 			stdout = vim.json.encode({ submission_id = session.last.id, status = status }),
 		})
+		pending = nil
 		assert(vim.wait(1000, function()
 			return not feedback.busy(root)
 		end))

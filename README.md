@@ -33,6 +33,11 @@ Review automatically. Press **i** to comment and **:w** in a diff pane to send
 saved feedback. **Space q** returns to ordinary editing; **Space r** re-enters
 Review. Git staging is an explicit, separate action.
 
+Press **?** or run `:help rediff-workflow` for a short review walkthrough,
+from navigating diffs and saving annotations to sending feedback and checking
+the agent's next changes. The [editor guide](nix/config/doc/rediff.txt) also
+documents the keys, commands, and changed/unseen color indicators.
+
 Supports **Amp**, **Claude Code**, and custom harness receivers. Select a
 thread/session per repository with `:ReviewHarness amp T-…`; configuration
 and credentials stay separate from your portable editor setup.

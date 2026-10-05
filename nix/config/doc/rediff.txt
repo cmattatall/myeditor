@@ -4,6 +4,20 @@
 ? / Esc / q closes help. Space p finds commands. / searches; n/N repeats.
 Ctrl-] follows a topic link; Ctrl-t returns. Space is the leader key.
 
+HOW TO REVIEW                                                *rediff-workflow*
+
+1. Open rediff in a Git checkout (or Space r). j/k in the tree previews files.
+   Tab enters the diff. ]/[ moves between hunks; :fs/:fm switches Git groups.
+2. Read red deletions and green additions. :view toggles split/merged layout.
+   Press i to add/edit a note, or select lines with V then a for a range note.
+3. Write the note, Esc then :w to save it locally. @ lists/searches saved notes.
+4. :harness use amp connects to your local agent (see |rediff-harness| for setup).
+   :w from the tree/diff sends saved notes. :hs sends a separate general message.
+5. As the agent edits, files refresh. Violet ◆ means changed/unseen; cyan ◇ means
+   changed/seen after 1s in the focused diff. See |rediff-git| for baseline rules.
+6. Stage deliberately with s (hunk) or S (file); sending notes never stages code.
+   Space R refreshes now. Space q leaves Review for ordinary editing.
+
 REVIEW QUICK REFERENCE
 
   Tab                 Switch tree/diff focus
@@ -67,20 +81,34 @@ STAGED compares HEAD/index; UNSTAGED compares index/worktree and includes untrac
 files. Badges: M modified, U untracked, R rename, A added, D deleted. Partially
 staged files appear in both groups. Tree motions stay on file rows.
 
+Change awareness (automatic, for this editor session):
+  Violet ◆       Changed since the last accepted send, not yet seen; pulses for 2s
+  Cyan ◇         Changed since that send, already seen
+  No diamond     Matches the baseline (initial Review contents before first send)
+Hunks use matching labels and line-number colors; red/green still mean delete/add.
+A hunk becomes seen after 1s visible in a focused diff pane, not a tree preview.
+A file stays unseen while any changed hunk is unseen. This records exposure, not
+approval. Accepted local-harness sends reset the baseline to pre-send contents;
+failed/local-only sends and messages to other worktrees do not. Changes are detected
+on refresh regardless of who edited them. Paths no longer in Git's diff leave the
+tree. Context-only line shifts do not count as new hunks. No manual marks to manage.
+
 ] / [ wraps through hunks within the current group; counts work (3]). :fs / :fm
 switch groups without changing pane focus. Space j/k moves files across groups.
 
 s in a source pane toggles its Git hunk; S toggles the selected/displayed file.
 UNSTAGED stages; STAGED unstages. These actions apply immediately, change only
 the index, and reject stale snapshots. Inside ordinary files/notes, s/S still
-edit text. New/deleted files need whole-file staging; renames use delete/add pairs.
+edit text. An all-green new file is one hunk: s stages it and advances to the next
+unstaged hunk (or unstages it from STAGED). Empty/deleted files need S; renames
+use delete/add pairs.
 
 After staging, selection advances within the original group. Whole-file actions
 use the previous file at the end; hunk actions wrap to the next remaining hunk.
 An exhausted group stays empty instead of following the file into the other group.
 Git may combine nearby displayed changes into one staging hunk.
 
-Review checks saved files/index about once a second while tree/diff has Normal-mode
+Review polls saved files/index every three seconds while tree/diff has Normal-mode
 focus. It preserves selection/focus and pauses for composition, Visual selections,
 command input, pickers and delivery. Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
@@ -92,7 +120,9 @@ AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
 Use :harness use amp to select Amp and connect in this worktree. Connecting sends
-nothing. :harness list opens the same searchable panel for all available sessions:
+nothing. :hc opens the connection panel (Amp); :hl / :harness list opens the same
+searchable panel for all available sessions. Each row shows its worktree directory;
+long paths are shortened in the list, with the full path in the selected details.
   /           Filter by alias, provider, title, ID, worktree, or activity
   Enter       Connect/disconnect; connecting locally selects the annotation target
   s / r / d   Message / rename locally / disconnect selected harness
@@ -195,7 +225,8 @@ add arguments and press Enter again to run. Tab accepts inline suggestions or
 completes arguments; Ctrl-d lists matches. :command lists user/plugin commands.
 
 Scripts use uppercase names below. Typed aliases: :harness = :Harness,
-:hs = :Harness send, :ft = :Explorer, :annotations = :Annotations,
+:hs = :Harness send, :hl = :Harness list, :hc = :Harness connect,
+:ft = :Explorer, :annotations = :Annotations,
 :al = :Annotations list, :worktree = :Worktree. In Review, :view = :View,
 :focus = :Focus, :fs = :Focus staged, :fm = :Focus modified.
 
@@ -219,7 +250,7 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :Harness status             Show connection and delivery receipt
   :Harness use amp|claude     Select type; Amp also discovers live sessions
   :Harness install amp        Install bridge and request reload
-  :Harness connect amp        Discover/select live session
+  :Harness connect [amp]      Discover/select live session
   :Harness list               Search and manage harnesses across worktrees
   :Harness panel              Same panel with live activity
   :Harness rename ID ALIAS     Set a local alias, without renaming the agent thread

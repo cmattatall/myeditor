@@ -113,6 +113,91 @@ class EditorUI(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
 
+    def test_change_awareness_tracks_visible_hunks_not_tree_previews(self):
+        editor = self.launch(self.root)
+        editor.ui_try_resize(132, 14)
+        pump(editor)
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.lua(editor, "require('rediff.live').stop(s)")
+        path = Path(self.root, "auth.lua")
+        original = path.read_text()
+        # The second hunk is below this viewport; previewing the first is not enough.
+        path.write_text(
+            original.replace("return true", "return 'first edit'").replace(
+                "  return nil", "  return 'second edit'"
+            )
+        )
+        self.lua(editor, "r.refresh(); vim.api.nvim_set_current_win(s.tree_win)")
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        state = "require('rediff.awareness').file_state(require('rediff.awareness').get(s.root), 'unstaged\\0auth.lua')"
+        self.assertEqual("unseen", self.lua(editor, "return " + state))
+        time.sleep(1.4)
+        pump(editor)
+        self.assertEqual(
+            "unseen", self.lua(editor, "return " + state), "Preview is not exposure"
+        )
+        self.keys(editor, "<Tab>")
+        self.wait_for(
+            editor,
+            "(function() local a=require('rediff.awareness'); local t=a.get(s.root); "
+            "return a.hunk_state(t, 'unstaged\\0auth.lua', t.current['unstaged\\0auth.lua'].hunks[1].id)=='seen' end)()",
+        )
+        self.assertEqual(
+            "unseen",
+            self.lua(editor, "return " + state),
+            "Offscreen hunk keeps file unseen",
+        )
+        self.keys(editor, "]")
+        self.wait_for(editor, state + " == 'seen'")
+        self.lua(editor, "r.view('merged')")
+        self.assertEqual(
+            "seen",
+            self.lua(editor, "return " + state),
+            "Layout changes retain exposure",
+        )
+        self.lua(editor, "vim.cmd('colorscheme rose-pine')")
+        self.assertEqual(
+            int("c4a7e7", 16),
+            editor.api.get_hl(0, {"name": "ReviewUnseen"})["fg"],
+            "Theme reload preserves violet indicators",
+        )
+        # A fresh edit resets only that hunk, and does not steal tree focus.
+        self.lua(editor, "vim.api.nvim_set_current_win(s.tree_win)")
+        path.write_text(path.read_text().replace("second edit", "third edit"))
+        self.lua(editor, "r.refresh(); vim.api.nvim_set_current_win(s.tree_win)")
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.assertEqual("unseen", self.lua(editor, "return " + state))
+        marks = self.lua(
+            editor,
+            "return vim.api.nvim_buf_get_extmarks(s.new_buf, "
+            "vim.api.nvim_create_namespace('rediff.awareness'), 0, -1, {details=true})",
+        )
+        self.assertTrue(
+            any(m[3].get("number_hl_group") == "ReviewUnseen" for m in marks)
+        )
+        self.assertTrue(any(m[3].get("number_hl_group") == "ReviewSeen" for m in marks))
+        # Both pulse phases render without editing text or moving the cursor.
+        self.lua(
+            editor,
+            "local a=require('rediff.awareness'); a.get(s.root).pulses['unstaged\\0auth.lua']=vim.uv.now()-300; a.render()",
+        )
+        tree_marks = self.lua(
+            editor,
+            "return vim.api.nvim_buf_get_extmarks(s.tree_buf, "
+            "vim.api.nvim_create_namespace('rediff.awareness'), 0, -1, {details=true})",
+        )
+        self.assertEqual("ReviewUnseenPulse", tree_marks[0][3]["virt_text"][0][1])
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win()==s.tree_win")
+        )
+        self.lua(editor, "r.leave(); r.open()")
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.assertEqual(
+            "unseen",
+            self.lua(editor, "return " + state),
+            "Reopening preserves this session's baseline",
+        )
+
     def test_saved_amp_connection_is_rediscovered_before_sending(self):
         for outcome in ("renewed", "replacement", "gone", "superseded"):
             with self.subTest(outcome=outcome):
@@ -423,8 +508,17 @@ class EditorUI(unittest.TestCase):
             """,
             remote,
         )
-        self.keys(editor, ":harness connect amp<CR>")
+        self.keys(editor, ":hc<CR>")
         self.wait_for(editor, "#require('rediff.harness_panel').state.entries == 2")
+        rows = editor.current.buffer[:]
+        self.assertIn(Path(self.root).name, rows[3])
+        self.assertIn("external-worktree", rows[5])
+        self.keys(editor, "q:hl<CR>")
+        self.wait_for(editor, "require('rediff.harness_panel').state ~= nil")
+        self.assertEqual(
+            "manage",
+            self.lua(editor, "return require('rediff.harness_panel').state.purpose"),
+        )
         self.keys(editor, "<CR>")
         self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
         self.assertIn("Enter disconnect", "\n".join(editor.current.buffer[:]))
@@ -1520,6 +1614,81 @@ class EditorUI(unittest.TestCase):
         self.wait_for(editor, 's.current ~= nil and s.current.group == "unstaged"')
         self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
 
+    def test_lowercase_s_stages_new_file_and_advances(self):
+        path = Path(self.root, "fresh file.txt")
+        path.write_text("First line\nLast line without newline")
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+
+        def show(group):
+            self.lua(
+                editor,
+                "r.refresh(); for i, entry in ipairs(s.entries) do "
+                f"if entry.path == 'fresh file.txt' and entry.group == '{group}' then "
+                "r.show(i); vim.api.nvim_set_current_win(s.new_win); return end end; error('Missing file')",
+            )
+
+        show("untracked")
+        # Reject stale new-file snapshots before adding any content to the index.
+        before = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        path.write_text(path.read_text() + " — edited")
+        self.keys(editor, "s")
+        self.assertEqual(
+            before, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+        self.assertIn("Reviewed content changed", editor.vars["startup_notice"])
+        show("untracked")
+        self.keys(editor, "s")
+        self.assertEqual(
+            path.read_bytes(),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":fresh file.txt"]
+            ),
+        )
+        self.assertEqual(
+            b"fresh file.txt\n",
+            subprocess.check_output(
+                ["git", "-C", self.root, "diff", "--cached", "--name-only"]
+            ),
+        )
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return s.current.group ~= 'staged' and s.current.path ~= 'fresh file.txt'",
+            )
+        )
+        self.assertTrue(
+            self.lua(editor, "return vim.api.nvim_get_current_win() == s.new_win")
+        )
+
+        show("staged")
+        self.keys(editor, "s")
+        self.assertEqual(
+            before,
+            subprocess.check_output(["git", "-C", self.root, "write-tree"]),
+            "s also unstages the entire added-file hunk",
+        )
+        self.assertTrue(path.exists())
+
+        # Intent-to-add files arrive as UNSTAGED new-file patches, not untracked.
+        subprocess.run(
+            ["git", "-C", self.root, "add", "-N", "--", path.name], check=True
+        )
+        show("unstaged")
+        self.keys(editor, ":view merged<CR>s")
+        self.assertEqual(
+            path.read_bytes(),
+            subprocess.check_output(
+                ["git", "-C", self.root, "show", ":fresh file.txt"]
+            ),
+        )
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return s.current.group ~= 'staged' and s.current.path ~= 'fresh file.txt'",
+            )
+        )
+
     def test_staging_uses_git_hunk_boundary_in_merged_view(self):
         baseline = [f"-- original line {i}\n" for i in range(1, 61)]
         path = Path(self.root, "auth.lua")
@@ -1845,6 +2014,22 @@ class EditorUI(unittest.TestCase):
 
     def test_live_refresh_preserves_focus_and_annotations(self):
         editor = self.launch(self.root)
+        self.assertEqual(
+            3000,
+            self.lua(
+                editor,
+                """
+                local live = require('rediff.live')
+                live.stop(s)
+                local create, timer = vim.uv.new_timer, nil
+                vim.uv.new_timer = function() timer = create(); return timer end
+                live.start(s)
+                vim.uv.new_timer = create
+                return timer:get_repeat()
+            """,
+            ),
+            "Review polls every three seconds without filesystem events",
+        )
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
         path = Path(self.root, "auth.lua")
         self.keys(editor, "]")
@@ -1863,7 +2048,7 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, " diKeep the earlier snapshot<Esc>")
         snapshot = self.lua(editor, "return s.current.id")
         path.write_text(path.read_text().replace("return 123", "return 456"))
-        time.sleep(1.2)
+        time.sleep(3.2)  # Cross a poll interval while the annotation editor is open.
         pump(editor)
         self.assertEqual(snapshot, self.lua(editor, "return s.current.id"))
         self.keys(editor, ":w<CR>")

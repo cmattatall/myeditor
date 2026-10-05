@@ -180,8 +180,9 @@ so changing your system's packages does not silently change this editor.
    archives any remaining notes.
 
 While a Review source pane or sidebar is focused in Normal mode, saved file and
-index changes are checked about once a second. Refresh preserves the displayed
-file and pane focus, retaining cursor/scroll positions where possible. It pauses
+index changes are polled every three seconds, without relying on filesystem events.
+Refresh preserves the displayed file and pane focus, retaining cursor/scroll
+positions where possible. It pauses
 while composing annotations/messages, selecting text, using commands/pickers,
 or delivering feedback. Original annotation snapshots are retained, never
 silently re-anchored. Refresh does not save buffers, stage files, or send feedback.
@@ -271,7 +272,8 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space q / `:ReviewLeave` (also q in sidebar) | Return to editing, retaining drafts |
 
 Git hunks include Git's context lines and can group nearby edits differently
-from Codediff's highlighted ranges. New/deleted files require **S**. Renames
+from Codediff's highlighted ranges. An all-green new file is one hunk, so **s**
+stages it and advances to the next unstaged hunk. Empty/deleted files require **S**. Renames
 are shown as deletion/addition pairs. Stage before commenting if possible:
 staging changes the index comparison and can make existing anchors stale.
 

@@ -622,7 +622,7 @@ function M.setup()
 	api.nvim_create_user_command("Harness", function(opts)
 		local ok, err = pcall(function()
 			local args = opts.fargs
-			if #args == 2 and args[1] == "connect" and args[2] == "amp" then
+			if args[1] == "connect" and (#args == 1 or (#args == 2 and args[2] == "amp")) then
 				M.panel("connect")
 			elseif #args == 1 and (args[1] == "list" or args[1] == "panel") then
 				M.panel("manage")
@@ -690,7 +690,7 @@ function M.setup()
 			return {}
 		end,
 	})
-	for from, to in pairs({ harness = "Harness", hs = "Harness send" }) do
+	for from, to in pairs({ harness = "Harness", hs = "Harness send", hl = "Harness list", hc = "Harness connect" }) do
 		vim.cmd(
 			string.format(
 				"cnoreabbrev <expr> %s getcmdtype() == ':' && getcmdline() == '%s' && getcmdpos() == %d ? '%s' : '%s'",

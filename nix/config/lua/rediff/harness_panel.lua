@@ -1,5 +1,6 @@
 local M = { state = nil }
 local api = vim.api
+local directory_ns = api.nvim_create_namespace("rediff.harness-directories")
 
 local spinner = { "|", "/", "-", "\\" }
 
@@ -143,7 +144,7 @@ local function render()
 		return
 	end
 	refresh_items(s)
-	local slots = math.max(1, s.height - 8)
+	local slots = math.max(1, math.floor((s.height - 8) / 2))
 	if s.selected < s.offset then
 		s.offset = s.selected
 	elseif s.selected >= s.offset + slots then
@@ -152,6 +153,7 @@ local function render()
 	s.offset = math.max(1, math.min(s.offset, math.max(1, #s.entries - slots + 1)))
 	local mode = s.connected_only and "connected only" or "all sessions"
 	local lines = { string.format(" Live harnesses · %s · %d ", mode, #s.entries), "" }
+	local directory_rows = {}
 	s.rows = {}
 	for index = s.offset, math.min(#s.entries, s.offset + slots - 1) do
 		local entry = s.entries[index]
@@ -167,8 +169,15 @@ local function render()
 		)
 		table.insert(lines, line)
 		s.rows[#lines] = entry
+		local directory = vim.fn.fnamemodify(entry.root or "(root unknown)", ":~")
+		if vim.fn.strdisplaywidth(text(directory)) > s.width - 4 then
+			directory = vim.fn.pathshorten(directory)
+		end
+		table.insert(lines, "    " .. text(directory))
+		directory_rows[#lines] = true
+		s.rows[#lines] = entry
 	end
-	while #lines < slots + 2 do
+	while #lines < slots * 2 + 2 do
 		table.insert(lines, "")
 	end
 	table.insert(lines, string.rep("─", math.max(1, s.width - 2)))
@@ -207,8 +216,12 @@ local function render()
 	vim.bo[s.buf].modifiable = true
 	api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
 	vim.bo[s.buf].modifiable = false
+	api.nvim_buf_clear_namespace(s.buf, directory_ns, 0, -1)
+	for row in pairs(directory_rows) do
+		api.nvim_buf_set_extmark(s.buf, directory_ns, row - 1, 0, { line_hl_group = "Comment" })
+	end
 	if entry then
-		local row = 3 + (s.selected - s.offset)
+		local row = 3 + 2 * (s.selected - s.offset)
 		pcall(api.nvim_win_set_cursor, s.win, { row, 0 })
 	end
 end

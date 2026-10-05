@@ -149,17 +149,15 @@ end
 function M.stage(root, snapshot, side, line, whole_file)
 	M.validate(root, snapshot)
 	if snapshot.group == "untracked" then
-		assert(whole_file, "New files must be staged with S (whole file)")
+		local _, hunks = M.hunks(snapshot.patch)
+		assert(whole_file or hunks[1], "Empty new files must be staged with S")
 		M.run(root, { "add", "--", snapshot.path })
-		return
+		return not whole_file and hunks[1] or nil
 	end
 	local patch = snapshot.patch
 	local chosen
 	if not whole_file then
-		assert(
-			not patch:find("\nnew file mode ", 1, true) and not patch:find("\ndeleted file mode ", 1, true),
-			"Added/deleted files must be staged or unstaged with S"
-		)
+		assert(not patch:find("\ndeleted file mode ", 1, true), "Deleted files must be staged or unstaged with S")
 		local header, hunks = M.hunks(patch)
 		for _, hunk in ipairs(hunks) do
 			local start = hunk[side .. "_start"]

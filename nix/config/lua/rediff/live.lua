@@ -54,7 +54,7 @@ function M.start(s)
 	local running, previous, last_error = false, nil, nil
 	timer:start(
 		0,
-		1000,
+		3000,
 		vim.schedule_wrap(function()
 			if running or timers[s] ~= timer or not M.ready(s) then
 				return

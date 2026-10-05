@@ -56,9 +56,15 @@ revdiff parity.
 - **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
-- Review checks saved files and the index about once a second, preserving file
+- Review polls saved files and the index every three seconds, preserving file
   selection and pane focus. Refresh pauses during composition, selections,
   command input, pickers, and delivery. **Space R** also refreshes immediately.
+- Changes since the last accepted local-harness send get violet **◆** file/hunk
+  indicators, with a brief tree pulse. After a changed hunk is visible for one
+  second in a focused diff pane, its indicator becomes cyan **◇** (seen, not
+  approved). Tree previews do not mark hunks seen. The initial Review contents
+  are the baseline before the first send; awareness is session-local and automatic.
+  `:help rediff-git` explains the colors and baseline rules.
 - The bottom Review bar shows the current branch, or `@short-SHA` for detached
   HEAD. It updates with manual/live refresh and worktree switching.
 - **:worktree list** / **:worktree switch** opens a worktree chooser;
