@@ -72,26 +72,12 @@ require("codediff").setup({
 	-- Blank filler rows preserve alignment without rendering wide patterns per line.
 	diff = { compute_moves = false, highlight_priority = 150, filler_text = "" },
 	highlights = {
-		line_insert = "#28683e",
-		line_delete = "#c62828",
-		char_insert = "#58a46b",
-		char_delete = "#ff5252",
+		line_insert = "#24352f",
+		line_delete = "#3b2833",
+		char_insert = "#354e40",
+		char_delete = "#593743",
 	},
 })
-local function diff_contrast()
-	-- Syntax colors cannot stay readable against both vivid red and green fills.
-	for _, kind in ipairs({ "Line", "Char" }) do
-		for _, side in ipairs({ "Insert", "Delete" }) do
-			local name = "CodeDiff" .. kind .. side
-			local highlight = vim.api.nvim_get_hl(0, { name = name })
-			highlight.fg = kind == "Line" and "#ffffff" or "#101010"
-			highlight.nocombine = true
-			vim.api.nvim_set_hl(0, name, highlight)
-		end
-	end
-end
--- CodeDiff's plugin entry point resets these groups after init.lua and on theme changes.
-vim.api.nvim_create_autocmd({ "VimEnter", "ColorScheme" }, { callback = vim.schedule_wrap(diff_contrast) })
 require("review.config").setup({ export = { clipboard = false, clear_on_close = false } })
 require("review.highlights").setup()
 require("neo-tree").setup({
@@ -153,7 +139,13 @@ for _, binding in ipairs({
 	vim.api.nvim_create_user_command(binding[2], binding[3], {})
 end
 vim.cmd("cnoreabbrev <expr> ft getcmdtype() == ':' && getcmdline() == 'ft' && getcmdpos() == 3 ? 'Explorer' : 'ft'")
-vim.keymap.set("n", "<leader>r", review.open, { desc = "Enter Review workspace" })
+vim.keymap.set("n", "<leader>r", function()
+	if review.active() then
+		review.leave()
+	else
+		review.open()
+	end
+end, { desc = "Toggle Review workspace" })
 vim.keymap.set("n", "<leader>E", function()
 	if review.active() then
 		navigation.explorer()

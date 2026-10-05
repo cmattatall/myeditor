@@ -98,7 +98,7 @@ function M.highlight(s, snapshot)
 					end
 				end
 				require("codediff.ui.inline").render_inline_diff(s.new_buf, adapted, old_lines, new_lines, {
-					filetype = "", -- Keep the high-contrast diff foreground on deleted virtual lines.
+					filetype = vim.bo[s.new_buf].filetype,
 				})
 			end
 			local text_ns = api.nvim_get_namespaces()["codediff-highlight"]

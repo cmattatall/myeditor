@@ -30,7 +30,7 @@ nix run path:/path/to/rediff -- src/main.lua
 Interactive launches with no file arguments inside a Git worktree open Review,
 focused on the tree with the first diff previewed. File arguments open directly
 for editing. Outside Git, startup stays in ordinary editing without a sidebar.
-**Space q** leaves Review; **Space r** enters it. **Space R** refreshes snapshots.
+**Space r** toggles Review; **Space q** also leaves it. **Space R** refreshes snapshots.
 **Space e** or **:ft** opens/focuses the tree, **Space d** returns to the editor, and
 **Space E** toggles it. Headless runs open neither Review nor the tree.
 If Review is locked by another editor or cannot open, startup reports the
@@ -259,7 +259,8 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space e / `:ft` / `:Explorer` | Focus Git sidebar in Review; focus Neo-tree while editing |
 | Space d / `:FocusDiff` | Focus diff in Review; focus editor while editing |
 | Space E | Toggle ordinary Neo-tree while editing; focus-only in Review |
-| Space r / `:Review` | Enter/focus Review |
+| Space r | Toggle Review |
+| `:Review` | Enter/focus Review |
 | `:view [split\|merged]` / `:View` | Select a diff layout; no argument toggles |
 | Tab | Toggle tree/diff focus in Review |
 | Space j / Space k | Next/previous changed file |

@@ -402,8 +402,7 @@ function M.show(index, snapshot, keep_fold)
 		vim.wo[s.new_win].scrollbind = false
 		vim.wo[s.new_win].wrap = false
 		s.diff = assert(require("codediff.core.diff").compute_diff(old_lines, new_lines, renderer.diff_options()))
-		-- Deleted virtual lines use the diff's readable foreground, not syntax colors.
-		require("codediff.ui.inline").render_inline_diff(s.new_buf, s.diff, old_lines, new_lines, { filetype = "" })
+		require("codediff.ui.inline").render_inline_diff(s.new_buf, s.diff, old_lines, new_lines, { filetype = ft })
 	else
 		vim.wo[s.old_win].winbar = " OLD · " .. (snapshot.group == "staged" and "HEAD" or "INDEX")
 		vim.wo[s.new_win].winbar = " NEW · " .. (snapshot.group == "staged" and "INDEX" or "WORKTREE")

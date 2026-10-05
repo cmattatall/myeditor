@@ -1391,6 +1391,37 @@ class EditorUI(unittest.TestCase):
             self.lua(outside, "return s == nil and #vim.api.nvim_list_wins() == 1")
         )
 
+    def test_space_r_toggles_review(self):
+        editor = self.launch(self.root, file="auth.lua")
+        buffer = editor.current.buffer
+        saved = Path(buffer.name).read_text()
+        buffer[0] = "-- unsaved edit"
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        for focus in ("", "<Tab>", ":hs<CR>"):
+            self.keys(editor, " r")
+            self.assertTrue(self.lua(editor, "return r.active() ~= nil"))
+            # From the editing tab, focus the existing Review rather than closing it.
+            self.lua(
+                editor,
+                "_G.review_tab=s.tab; vim.api.nvim_set_current_tabpage(s.previous_tab)",
+            )
+            self.keys(editor, " r")
+            self.assertTrue(
+                self.lua(editor, "return r.active() ~= nil and s.tab == review_tab")
+            )
+            if focus:
+                self.keys(editor, focus)
+            self.keys(editor, " r")
+            self.assertTrue(self.lua(editor, "return s == nil"))
+            self.assertEqual(1, len(editor.tabpages))
+            self.assertEqual(buffer.number, editor.current.buffer.number)
+            self.assertEqual("-- unsaved edit", buffer[0])
+            self.assertTrue(buffer.options["modified"])
+        self.assertEqual(saved, Path(buffer.name).read_text())
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_file_arguments_open_for_editing(self):
         outside_file = Path(self.directory.name, "plain file.txt")
         outside_file.write_text("Ordinary file outside Git\n")
@@ -3066,22 +3097,23 @@ class EditorUI(unittest.TestCase):
             )
         )
 
-    def test_bright_diff_foregrounds_survive_theme_reload(self):
+    def test_muted_diff_backgrounds_preserve_syntax_after_theme_reload(self):
         editor = self.launch(self.root)
         for reload_theme in (False, True):
             if reload_theme:
                 editor.command("colorscheme rose-pine")
-            for name, background, foreground in (
-                ("CodeDiffLineInsert", 0x28683E, 0xFFFFFF),
-                ("CodeDiffLineDelete", 0xC62828, 0xFFFFFF),
-                ("CodeDiffCharInsert", 0x58A46B, 0x101010),
-                ("CodeDiffCharDelete", 0xFF5252, 0x101010),
+            for name, background in (
+                ("CodeDiffLineInsert", 0x24352F),
+                ("CodeDiffLineDelete", 0x3B2833),
+                ("CodeDiffCharInsert", 0x354E40),
+                ("CodeDiffCharDelete", 0x593743),
             ):
                 highlight = editor.api.get_hl(0, {"name": name})
-                self.assertEqual(
-                    (background, foreground), (highlight["bg"], highlight["fg"])
+                self.assertEqual(background, highlight["bg"])
+                self.assertNotIn(
+                    "fg", highlight, "Diff backgrounds must retain syntax colors"
                 )
-                self.assertTrue(highlight["nocombine"])
+                self.assertFalse(highlight.get("nocombine", False))
         self.keys(editor, ":view merged<CR>")
         self.assertTrue(
             self.lua(
@@ -3102,8 +3134,11 @@ class EditorUI(unittest.TestCase):
             return vim.tbl_keys(groups)
         """,
         )
-        self.assertEqual(
-            {"CodeDiffLineDelete", "CodeDiffCharDelete"}, set(deleted_groups)
+        highlights = [editor.api.get_hl(0, {"name": group}) for group in deleted_groups]
+        self.assertEqual({0x3B2833, 0x593743}, {hl["bg"] for hl in highlights})
+        self.assertTrue(
+            any("fg" in hl for hl in highlights),
+            "Deleted virtual lines need syntax colors too",
         )
 
     def test_git_detected_renames_keep_both_snapshot_paths(self):
