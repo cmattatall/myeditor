@@ -16,16 +16,15 @@ in
   inherit pkgs;
   modules = [
     flake.homeManagerModules.default
+    flake.homeManagerModules.harnesses
     {
       home = {
         inherit username homeDirectory;
         stateVersion = "26.05";
-        packages = [
-          pkgs.amp-cli
-          pkgs.pi-coding-agent
-        ];
         file.".config/rediff/standalone-owner".text = "rediff-standalone-v1\n";
       };
+      programs.harnesses.amp.enable = true;
+      programs.harnesses.pi.enable = true;
       programs.rediff = {
         enable = true;
         nvimAlias = true;

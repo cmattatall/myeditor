@@ -123,13 +123,18 @@ Add its module and enable it in your Home Manager configuration:
 }
 ```
 
-The module does not force CLI installation. To include the same harnesses:
+The editor module does not install harness CLIs. Import the independent
+`inputs.rediff.homeManagerModules.harnesses` module to install either or both:
 
 ```nix
-home.packages = with pkgs; [ amp-cli pi-coding-agent ];
+programs.harnesses.amp.enable = true;
+programs.harnesses.pi.enable = true;
 nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
 ```
 
+The harness module lives in `programs/harnesses.nix` and works without the editor
+module. Both options default to false; `.amp.package` and `.pi.package` can
+override the nixpkgs packages. It does not install plugins or manage credentials.
 If Home Manager uses an externally configured `pkgs` (such as nix-darwin's
 global packages), set the unfree predicate on that nixpkgs instance instead.
 
@@ -149,7 +154,7 @@ Then run your usual `home-manager switch --flake ...` (or your existing
 NixOS/nix-darwin rebuild command if Home Manager is integrated there).
 
 To vendor this instead, copy the root `flake.nix`, `flake.lock`, `install.sh`, and
-`LICENSE` alongside the complete `nix/`, `plugins/`, and `examples/` directories
+`LICENSE` alongside the complete `nix/`, `plugins/`, `programs/`, and `examples/` directories
 into your dotfiles as `rediff/`, preserving their layout, and use:
 
 ```nix

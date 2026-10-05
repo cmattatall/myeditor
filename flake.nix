@@ -59,6 +59,10 @@
           };
         in
         {
+          harnesses = import ./nix/tests/harnesses.nix {
+            inherit pkgs;
+            module = self.homeManagerModules.harnesses;
+          };
           home-manager =
             (inputs.home-manager.lib.homeManagerConfiguration {
               inherit pkgs;
@@ -150,5 +154,6 @@
       );
       formatter = eachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt);
       homeManagerModules.default = import ./nix/home-manager.nix { inherit self; };
+      homeManagerModules.harnesses = import ./programs/harnesses.nix;
     };
 }

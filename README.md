@@ -86,15 +86,21 @@ programs.rediff = {
 
 Apply with your usual `home-manager switch --flake ~/.config/home-manager`,
 or your NixOS/nix-darwin rebuild if Home Manager is integrated there. The module
-does not install agent CLIs by default. To install Amp and pi too, add:
+does not install agent CLIs. Import `inputs.rediff.homeManagerModules.harnesses`
+in your module list to opt into the independent harness installer, then add:
 
 ```nix
-home.packages = with pkgs; [ amp-cli pi-coding-agent ];
+programs.harnesses.amp.enable = true;
+programs.harnesses.pi.enable = true;
 nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
 ```
 
-`pkgs` and `lib` are Home Manager module arguments. If you supply an already
-configured/global `pkgs`, allow Amp in that nixpkgs instance instead. Authenticate
+Both harnesses default to disabled and each accepts a `.package` override.
+You can import only the harness module without installing rediff, Neovim, or the
+Amp bridge plugin. Conversely, installing the editor does not require harnesses.
+
+`lib` is a Home Manager module argument. If you supply an already configured/global
+`pkgs`, allow Amp in that nixpkgs instance instead. Authenticate
 the CLIs separately; credentials do not belong in the Nix configuration. Pi's CLI
 can be installed, but rediff does not yet have a native pi feedback adapter.
 
@@ -172,6 +178,7 @@ Press **?** in the editor for help.
 - [`nix/package.nix`](nix/package.nix): reusable editor derivation.
 - [`nix/config/`](nix/config/): Neovim configuration and Review implementation.
 - [`nix/home-manager.nix`](nix/home-manager.nix): optional module, not a home profile.
+- [`programs/harnesses.nix`](programs/harnesses.nix): independent opt-in Amp/pi CLI module.
 - [`examples/home-manager.nix`](examples/home-manager.nix): opinionated bootstrap
   profile used only by the install script and its tests.
 - [`plugins/`](plugins/): harness plugins, including the Amp bridge.
