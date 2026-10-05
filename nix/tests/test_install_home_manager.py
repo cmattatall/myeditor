@@ -44,7 +44,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.home / "activated").exists())
         self.assertEqual(self.rc.read_text(), self.original)
         self.assertEqual((self.home / "build-args").read_text().splitlines(), [
-            "build", "--impure", "--file", str(INSTALLER.parent / "standalone-home.nix"),
+            "build", "--impure", "--file", str(INSTALLER.parent.parent / "examples/home-manager.nix"),
             "--no-link", "--print-out-paths"])
         self.assertEqual((self.home / "flake-path").read_text().strip(),
                          "path:" + str(INSTALLER.parent.parent))

@@ -1,70 +1,182 @@
 # rediff
 
-Testing
+**Read the diff.** rediff is a Neovim-based editor for reviewing an AI coding
+agent's changes. Read side-by-side or merged diffs, annotate lines and selections,
+send feedback to an agent, and review what changed afterward. You control staging
+and commits; sending feedback never stages files.
 
-Read diff: a human reading the agent's changes. A Nix-packaged Neovim setup
-for modal editing and agent-assisted code review.
+It also works as an ordinary editor. Opening a file starts in editing mode.
+Launching without file arguments inside a Git worktree opens Review. **Space r**
+toggles between Review and editing.
 
-The root flake packages the Home Manager module, editor configuration, and tests
-under [`nix/`](nix/), plus harness plugins under [`plugins/`](plugins/).
-Consume this repository as a flake input or vendor both directories with the flake
-and [`LICENSE`](LICENSE).
+rediff is distributed as a **Nix package**, not a home configuration. Home Manager
+is optional. The package bundles Neovim, its plugins, and the Rosé Pine theme under
+`NVIM_APPNAME=rediff`; it does not replace `~/.config/nvim`, alias `nvim`, install
+agent CLIs, or manage your shell. Supported targets are Apple Silicon macOS and
+ARM64/x86-64 Linux.
 
-```sh
-nix run path:.
+## Run or install the package
+
+Install [Nix](https://nixos.org/download/) first. Enable flakes in your Nix
+configuration (`~/.config/nix/nix.conf` on a standalone installation):
+
+```conf
+experimental-features = nix-command flakes
 ```
 
-To install the Nix-built editor as `nvim` through Home Manager:
+From a checkout:
 
 ```sh
-./install.sh           # Build only; no activation or shell changes
-./install.sh --switch  # Install, then open a new terminal and type nvim
+git clone https://github.com/cmattatall/myeditor.git rediff
+cd rediff
+nix run path:.                 # Review this worktree
+nix run path:. -- src/file.lua # Edit a file directly
+nix build path:.               # Build only: ./result/bin/rediff
+nix profile add path:.         # Optional: install the rediff command
 ```
 
-The installer bootstraps Home Manager using this repository's pinned inputs.
-It refuses to replace an existing Home Manager setup; use the module in the
-[installation guide](nix/README.md#home-manager) for that case. It preserves
-your existing Neovim configuration. The theme is **Rosé Pine (main)**, packaged
-by Nix along with the editor and plugins.
+Or run the published version from the worktree you want to review:
 
-The `rediff` command uses its own `NVIM_APPNAME=rediff` profile. Your normal
-Neovim configuration is untouched. Interactive launches inside a Git worktree open
-Review automatically. Press **i** to comment and **:w** in a diff pane to send
-saved feedback. **Space q** returns to ordinary editing; **Space r** re-enters
-Review. Git staging is an explicit, separate action.
+```sh
+nix run github:cmattatall/myeditor
+```
 
-Press **?** or run `:help rediff-workflow` for a short review walkthrough,
-from navigating diffs and saving annotations to sending feedback and checking
-the agent's next changes. The [editor guide](nix/config/doc/rediff.txt) also
-documents the keys, commands, and changed/unseen color indicators.
+The repository is still named `myeditor`; the application and command are `rediff`.
+The package is defined in [`nix/package.nix`](nix/package.nix) and exported as
+`packages.<system>.rediff` and `packages.<system>.default`. Building/running it
+does not activate Home Manager.
 
-Supports **Amp**, **Claude Code**, and custom harness receivers. Select a
-thread/session per repository with `:ReviewHarness amp T-…`; configuration
-and credentials stay separate from your portable editor setup.
+## Use your own Home Manager configuration
 
-For live Amp steering, this repository owns the **rediff** plugin and
-installer in [`plugins/amp/`](plugins/amp/). Enable
-`programs.rediff.ampPlugin.enable = true` in Home Manager, or run
-`:harness install amp` in the editor (shell: `bash plugins/amp/install.sh`), then
-restart/reload Amp and use `:harness connect amp`.
-Other plugin files are left untouched.
+If you already use Home Manager, add rediff to your existing configuration rather
+than running the bootstrap installer below.
 
-`:harness list` opens a searchable connection/activity panel with local aliases.
-Keep multiple harnesses connected; `:harness send` asks which one to message.
-Review annotations remain bound to a harness in the current worktree. Amp streams
-live status and active tool names to the panel.
+Add this input to your `flake.nix`:
 
-Built on [Codediff](https://github.com/esmuellert/codediff.nvim)'s diff renderer,
-with compact inline annotations and
-[Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim) for ordinary editing.
+```nix
+inputs.rediff.url = "github:cmattatall/myeditor";
+```
 
-See the [installation, workflow, and agent integration guide](nix/README.md).
-Review refreshes automatically; **Space R** refreshes immediately. The bottom
-Review bar shows the branch or detached commit. Use `:harness use amp`, then
-`:worktree new` to create a checkout with its own harness process.
-`:worktree list` / `:worktree switch` navigates existing checkouts. See the
-[feature list](FEATURES.md) for implemented behavior and remaining gaps.
+Include the module in your **Home Manager** module list. For a standalone flake,
+the relevant output looks like this; retain your existing username, system,
+inputs, and other modules:
 
-Licensed under the [MIT License](LICENSE).
+```nix
+outputs = inputs@{ nixpkgs, home-manager, ... }: {
+  homeConfigurations."you" = home-manager.lib.homeManagerConfiguration {
+    pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+    modules = [
+      inputs.rediff.homeManagerModules.default
+      ./home.nix
+    ];
+  };
+};
+```
 
-Third-party code retains its existing copyright notices and licenses.
+Add these settings to `home.nix`:
+
+```nix
+programs.rediff = {
+  enable = true;
+  nvimAlias = false;          # Set true to use rediff as nvim
+  ampPlugin.enable = false;  # Opt in to managing the rediff Amp plugin
+  reviewRefreshInterval = 3; # Seconds; 0 disables fallback polling, not events
+};
+```
+
+Apply with your usual `home-manager switch --flake ~/.config/home-manager`,
+or your NixOS/nix-darwin rebuild if Home Manager is integrated there. The module
+does not install agent CLIs by default. To install Amp and pi too, add:
+
+```nix
+home.packages = with pkgs; [ amp-cli pi-coding-agent ];
+nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
+```
+
+`pkgs` and `lib` are Home Manager module arguments. If you supply an already
+configured/global `pkgs`, allow Amp in that nixpkgs instance instead. Authenticate
+the CLIs separately; credentials do not belong in the Nix configuration. Pi's CLI
+can be installed, but rediff does not yet have a native pi feedback adapter.
+
+## Install Home Manager for the first time
+
+Choose **one** of these paths after installing Nix and enabling flakes.
+
+**Manage your own home configuration:** follow the
+[Home Manager manual](https://nix-community.github.io/home-manager/). For an
+unstable nixpkgs-based configuration, initialize it with:
+
+```sh
+nix run github:nix-community/home-manager/master -- init --switch
+```
+
+This creates `~/.config/home-manager/flake.nix` and `home.nix`. Then add rediff as
+shown above. Use the matching Home Manager release branch if your nixpkgs is
+pinned to a stable release. Do not initialize over an existing configuration.
+
+**Use rediff's optional bootstrap profile:** if you do not have a Home Manager
+configuration and want the editor plus harness CLIs, run from this checkout:
+
+```sh
+./install.sh          # Build the optional profile; change nothing in your home
+./install.sh --switch # Activate it and add Home Manager session setup to your shell
+```
+
+This explicitly opts into [`examples/home-manager.nix`](examples/home-manager.nix).
+It installs rediff as `nvim`, plus `amp` and `pi`, allowing only Amp's unfree
+package. It leaves your Neovim configuration, agent credentials, and Amp plugins
+alone. No separate Home Manager CLI installation is required.
+
+The script refuses to replace an unrelated Home Manager/NixOS/nix-darwin profile.
+It backs up a regular shell rc before adding the session setup line. On first
+installation, refresh your shell once:
+
+```sh
+unset __HM_SESS_VARS_SOURCED
+. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
+hash -r
+command -v nvim
+```
+
+Repeat `./install.sh --switch` to rebuild and activate later changes. Quit and
+reopen Neovim afterward; an already-running editor retains its previous build.
+See the [installation details](nix/README.md#home-manager) for profile safety,
+PATH precedence, and integration with an existing home configuration.
+
+## Review and send feedback
+
+1. Launch `rediff` in a Git worktree, or press **Space r** while editing there.
+2. Use **j/k** in the tree to preview files and **Tab** to enter the diff.
+   **[ / ]** moves between hunks; `:view` toggles split/merged layout.
+3. Press **i** to add/edit an annotation, or select text and press **a** to
+   annotate a range. Save the note with `:w`. **@** lists/searches annotations.
+4. Connect a harness, then `:w` in the tree/diff sends saved annotations.
+   `:harness send` composes a general message.
+5. Review the next edits: violet **◆** means changed/unseen, cyan **◇** means
+   changed/seen. **s** stages a hunk; **S** stages a file. **Space R** refreshes.
+
+For a live Amp session, install the rediff plugin with `:harness install amp`,
+or opt into `programs.rediff.ampPlugin.enable` in Home Manager. Reload Amp's
+plugins, then run `:harness connect amp`. `:harness list` shows available and
+connected sessions, their worktrees, and activity. Multiple connections are
+supported; annotations stay associated with their originating worktree.
+
+Amp, Claude Code, and custom feedback receivers are supported. Agent selection,
+authentication, and sending feedback are explicit actions, not installation steps.
+Read the [agent integration guide](nix/README.md#connect-an-agent-amp-claude-code-or-a-custom-harness),
+[editor help](nix/config/doc/rediff.txt), or [feature list](FEATURES.md) for details.
+Press **?** in the editor for help.
+
+## Repository layout
+
+- [`nix/package.nix`](nix/package.nix): reusable editor derivation.
+- [`nix/config/`](nix/config/): Neovim configuration and Review implementation.
+- [`nix/home-manager.nix`](nix/home-manager.nix): optional module, not a home profile.
+- [`examples/home-manager.nix`](examples/home-manager.nix): opinionated bootstrap
+  profile used only by the install script and its tests.
+- [`plugins/`](plugins/): harness plugins, including the Amp bridge.
+
+Built on [Codediff](https://github.com/esmuellert/codediff.nvim),
+[review.nvim](https://github.com/georgeguimaraes/review.nvim), and
+[Neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim).
+Licensed under the [MIT License](LICENSE); dependencies retain their own licenses.

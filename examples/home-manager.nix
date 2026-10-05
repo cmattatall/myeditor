@@ -1,18 +1,29 @@
-# Bootstrap for users without an existing Home Manager configuration.
+# Optional installer profile, not the rediff package or reusable Home Manager module.
+# For users without an existing home configuration; ./install.sh opts into this example.
 {
   flake ? builtins.getFlake (builtins.getEnv "REDIFF_FLAKE"),
   system ? builtins.currentSystem,
   username ? builtins.getEnv "USER",
   homeDirectory ? builtins.getEnv "HOME",
 }:
+let
+  pkgs = import flake.inputs.nixpkgs {
+    inherit system;
+    config.allowUnfreePredicate = pkg: flake.inputs.nixpkgs.lib.getName pkg == "amp-cli";
+  };
+in
 (flake.inputs.home-manager.lib.homeManagerConfiguration {
-  pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
+  inherit pkgs;
   modules = [
     flake.homeManagerModules.default
     {
       home = {
         inherit username homeDirectory;
         stateVersion = "26.05";
+        packages = [
+          pkgs.amp-cli
+          pkgs.pi-coding-agent
+        ];
         file.".config/rediff/standalone-owner".text = "rediff-standalone-v1\n";
       };
       programs.rediff = {

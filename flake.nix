@@ -51,7 +51,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           testHome = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/review-test" else "/home/review-test";
-          standalone = import ./nix/standalone-home.nix {
+          standalone = import ./examples/home-manager.nix {
             flake = self;
             inherit system;
             username = "review-test";
@@ -95,6 +95,10 @@
                 . "$TMPDIR/session-vars.sh"
                 test "$(command -v nvim)" = "$HOME/.nix-profile/bin/nvim"
                 test "$(realpath "$(command -v nvim)")" = "${self.packages.${system}.default}/bin/rediff"
+                test "$(command -v amp)" = "$HOME/.nix-profile/bin/amp"
+                test "$(command -v pi)" = "$HOME/.nix-profile/bin/pi"
+                amp --version
+                pi --version
                 test ! -e "$HOME/.nix-profile/bin/myeditor"
                 nvim --headless -i NONE -c 'lua if vim.env.NVIM_APPNAME ~= "rediff" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' -c 'qa!'
                 # A profile switch must update nvim in this same shell, without

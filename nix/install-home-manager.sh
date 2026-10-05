@@ -6,8 +6,8 @@ case "${1:---build}" in
     --help|-h)
         echo "Usage: ./install.sh [--build | --switch]"
         echo "Or: bash nix/install-home-manager.sh [--build | --switch]"
-        echo "Default: build only. --switch activates Home Manager and adds its session setup to your shell rc."
-        echo "For an existing Home Manager setup, import home-manager.nix instead; see nix/README.md."
+        echo "Builds the optional examples/home-manager.nix profile. --switch activates it and updates your shell rc."
+        echo "For an existing Home Manager setup, use homeManagerModules.default instead; see README.md."
         exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
 esac
@@ -58,7 +58,7 @@ if [ "$mode" = --switch ]; then
     fi
 fi
 
-generation=$(nix build --impure --file "$source_dir/standalone-home.nix" --no-link --print-out-paths)
+generation=$(nix build --impure --file "$root/examples/home-manager.nix" --no-link --print-out-paths)
 printf 'Built Home Manager generation: %s\n' "$generation"
 if [ "$mode" != --switch ]; then
     echo "Nothing activated. Run this script with --switch to install nvim."

@@ -7,6 +7,11 @@ runtime plugin manager and no first-launch plugin/library download.
 Nix modules and editor configuration live here; harness plugins live under
 `plugins/<harness>/` at the repository root.
 
+`package.nix` is the reusable editor derivation. `home-manager.nix` is an optional
+module for your own home configuration. The install script's opinionated profile
+lives separately in [`examples/home-manager.nix`](../examples/home-manager.nix);
+it is not required to build or run the editor.
+
 ## Try it without changing your configuration
 
 Requires Nix with `nix-command` and `flakes` enabled. From the repository:
@@ -66,11 +71,15 @@ command -v nvim       # Should resolve to a Nix store path, not Homebrew
 The root installer delegates to `nix/install-home-manager.sh`, which uses the
 flake and lockfile at the repository root. Both scripts accept the same flags.
 Nix and flakes must already be available. No separate Home Manager CLI is needed.
-`standalone-home.nix` uses this flake's locked Home Manager/nixpkgs and reads
+`examples/home-manager.nix` uses this flake's locked Home Manager/nixpkgs and reads
 only the host system, username, and home directory through impure evaluation.
 Repeat `--switch` after changing the checkout to rebuild and install updates.
 
-Activation installs the package and its `nvim` wrapper through Home Manager.
+Activation installs rediff, its `nvim` wrapper, Amp (`amp`), and pi (`pi`) through
+Home Manager. CLI versions come from the pinned `amp-cli` and `pi-coding-agent`
+nixpkgs packages; no curl/npm installer runs. Only `amp-cli` is allowed as an
+unfree package. Log in to each CLI separately. Installing pi does not add a
+native rediff feedback adapter for it; use a custom receiver for integration.
 The installer backs up an existing regular shell rc and appends the standard
 `hm-session-vars.sh` source line once: `.zshrc` (respecting `ZDOTDIR`), `.bashrc`
 on Linux, or `.bash_profile` for macOS Bash login shells. Home Manager puts
@@ -114,6 +123,16 @@ Add its module and enable it in your Home Manager configuration:
 }
 ```
 
+The module does not force CLI installation. To include the same harnesses:
+
+```nix
+home.packages = with pkgs; [ amp-cli pi-coding-agent ];
+nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "amp-cli";
+```
+
+If Home Manager uses an externally configured `pkgs` (such as nix-darwin's
+global packages), set the unfree predicate on that nixpkgs instance instead.
+
 Use `programs.rediff` and `inputs.rediff` when upgrading an existing configuration.
 The GitHub URLs above retain the repository's current name until it is renamed.
 Remove `?dir=nix` from older flake inputs; the flake now lives at the root.
@@ -130,15 +149,15 @@ Then run your usual `home-manager switch --flake ...` (or your existing
 NixOS/nix-darwin rebuild command if Home Manager is integrated there).
 
 To vendor this instead, copy the root `flake.nix`, `flake.lock`, `install.sh`, and
-`LICENSE` alongside the complete `nix/` and `plugins/` directories into your dotfiles as
-`rediff/`, preserving their layout, and use:
+`LICENSE` alongside the complete `nix/`, `plugins/`, and `examples/` directories
+into your dotfiles as `rediff/`, preserving their layout, and use:
 
 ```nix
 inputs.rediff.url = "path:./rediff";
 ```
 
 Keep copied files tracked if the enclosing flake is a Git repository.
-The module needs both directories, not just `nix/`. By default
+Copy the full layout, not just `nix/`. By default
 the editor uses its own locked nixpkgs rather than following your system's,
 so changing your system's packages does not silently change this editor.
 
