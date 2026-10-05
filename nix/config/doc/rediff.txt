@@ -7,7 +7,7 @@ Ctrl-] follows a topic link; Ctrl-t returns. Space is the leader key.
 HOW TO REVIEW                                                *rediff-workflow*
 
 1. Open rediff in a Git checkout (or Space r). j/k in the tree previews files.
-   Tab enters the diff. ]/[ moves between hunks; :fs/:fm switches Git groups.
+   Tab enters the diff. ]/[ moves between hunks; :fs/:fu switches Git groups.
 2. Read red deletions and green additions. :view toggles split/merged layout.
    Press i to add/edit a note, or select lines with V then a for a range note.
 3. Write the note, Esc then :w to save it locally. @ lists/searches saved notes.
@@ -24,7 +24,7 @@ REVIEW QUICK REFERENCE
   Space e / Space d   Focus tree / diff or editor
   Space j / Space k   Next/previous changed file
   ] / [               Next/previous hunk within the current Git group
-  :fs / :fm           Focus STAGED / UNSTAGED
+  :fs / :fu           Focus STAGED / UNSTAGED
   s / S               Stage/unstage hunk / whole file
   i                   Edit annotation here, or create one
   v / V / Ctrl-v, a   Annotate a character / line / block selection
@@ -84,16 +84,19 @@ staged files appear in both groups. Tree motions stay on file rows.
 Change awareness (automatic, for this editor session):
   Violet ◆       Changed since the last accepted send, not yet seen; pulses for 2s
   Cyan ◇         Changed since that send, already seen
-  No diamond     Matches the baseline (initial Review contents before first send)
+  No diamond     Matches the baseline or was acknowledged by staging/unstaging
 Hunks use matching labels and line-number colors; red/green still mean delete/add.
 A hunk becomes seen after 1s visible in a focused diff pane, not a tree preview.
+A successful s/S clears the affected hunk indicators in either group. Moving them
+back does not restore purple; new edits do. Other unread hunks stay unread.
 A file stays unseen while any changed hunk is unseen. This records exposure, not
-approval. Accepted local-harness sends reset the baseline to pre-send contents;
+approval. The baseline starts with Review's initial contents.
+Accepted local-harness sends reset the baseline to pre-send contents;
 failed/local-only sends and messages to other worktrees do not. Changes are detected
 on refresh regardless of who edited them. Paths no longer in Git's diff leave the
 tree. Context-only line shifts do not count as new hunks. No manual marks to manage.
 
-] / [ wraps through hunks within the current group; counts work (3]). :fs / :fm
+] / [ wraps through hunks within the current group; counts work (3]). :fs / :fu
 switch groups without changing pane focus. Space j/k moves files across groups.
 
 s in a source pane toggles its Git hunk; S toggles the selected/displayed file.
@@ -108,12 +111,18 @@ use the previous file at the end; hunk actions wrap to the next remaining hunk.
 An exhausted group stays empty instead of following the file into the other group.
 Git may combine nearby displayed changes into one staging hunk.
 
-Review polls saved files/index every three seconds while tree/diff has Normal-mode
-focus. It preserves selection/focus and pauses for composition, Visual selections,
+Review polls saved files/index every three seconds by default with Normal-mode
+tree/diff focus. It preserves selection/focus and pauses for composition, selections,
 command input, pickers and delivery. Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
 Use it instead of :bufdo e: Review panes are snapshots, not ordinary file buffers.
 Outside Review, :checktime checks loaded files for external changes.
+
+Set programs.rediff.reviewRefreshInterval in Home Manager, or add
+"review_refresh_interval": 10 to settings.json in stdpath('config') (normally
+~/.config/rediff). Use a whole number of seconds; 0 disables automatic refresh.
+Apply your Home Manager configuration, or save settings.json if not managed by
+Home Manager, then leave/re-enter Review (Space q, Space r). Space R still works.
 
 ==============================================================================
 AGENT HARNESSES                                               *rediff-harness*
@@ -228,14 +237,14 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
 :hs = :Harness send, :hl = :Harness list, :hc = :Harness connect,
 :ft = :Explorer, :annotations = :Annotations,
 :al = :Annotations list, :worktree = :Worktree. In Review, :view = :View,
-:focus = :Focus, :fs = :Focus staged, :fm = :Focus modified.
+:focus = :Focus, :fs = :Focus staged, :fu = :Focus unstaged.
 
   :Review / :ReviewLeave       Enter/leave Review
   :Explorer / :FocusDiff       Focus tree / diff or editor
   :Files / :Search             Fuzzy file / text search
   :Commands                   Find available commands
   :View [split|merged]         Choose layout; no argument toggles
-  :Focus staged|modified      Select first file/hunk in that group
+  :Focus staged|unstaged      Select first file/hunk in that group
   :ReviewRefresh              Refresh snapshots and file list
   :ReviewStage hunk|file       Stage selected hunk/file
   :ReviewUnstage hunk|file     Unstage selected hunk/file

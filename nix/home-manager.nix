@@ -21,6 +21,16 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       description = "The rediff package to install.";
     };
+    reviewRefreshInterval = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 3;
+      example = 10;
+      description = ''
+        Seconds between background Review refresh checks. Set to 0 to disable
+        automatic refresh; Space R and :ReviewRefresh still work. Changes take
+        effect when Review is next opened.
+      '';
+    };
     ampPlugin.enable = lib.mkOption {
       type = lib.types.bool;
       default = cfg.harness == "amp";
@@ -62,6 +72,7 @@ in
     xdg.configFile."rediff/settings.json".text = builtins.toJSON {
       harness = cfg.harness;
       feedback_command = cfg.feedbackCommand;
+      review_refresh_interval = cfg.reviewRefreshInterval;
     };
   };
 }

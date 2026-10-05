@@ -390,7 +390,6 @@ function M.show(index, snapshot)
 		end
 	end
 	awareness.render()
-	save()
 end
 
 function M.view(layout)
@@ -526,7 +525,7 @@ function M.refresh(preferred, changes)
 		if s.exhausted_group then
 			api.nvim_win_set_cursor(s.tree_win, { s.group_rows[s.exhausted_group], 0 })
 			vim.wo[s.new_win].winbar = s.exhausted_group == "staged"
-					and " No staged changes · :fm to review unstaged changes"
+					and " No staged changes · :fu to review unstaged changes"
 				or " No unstaged changes · :fs to review staged changes"
 			if s.old_win then
 				vim.wo[s.old_win].winbar = ""
@@ -599,7 +598,7 @@ end
 
 function M.focus(group)
 	local s = assert(M.active(), "Enter Review first")
-	assert(group == "staged" or group == "modified", "Usage: focus staged|modified")
+	assert(group == "staged" or group == "unstaged", "Usage: focus staged|unstaged")
 	local win = api.nvim_get_current_win()
 	for i, entry in ipairs(s.entries) do
 		if (entry.group == "staged") == (group == "staged") then
@@ -639,7 +638,12 @@ function M.jump_hunk(direction)
 	for offset = 1, #s.entries do
 		local i = ((previous or 1) - 1 + direction * offset) % #s.entries + 1
 		if (s.entries[i].group == "staged") == staged then
-			local ok, err = pcall(M.show, i, i == previous and snapshot or nil)
+			local ok, err = true, nil
+			-- Wrapping in the displayed file only needs a cursor move. Rebuild it
+			-- only if we visited another file while looking for a nonempty diff.
+			if i ~= s.index then
+				ok, err = pcall(M.show, i, i == previous and snapshot or nil)
+			end
 			if not ok then
 				notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
 			elseif #s.diff.changes > 0 then
@@ -750,6 +754,10 @@ function M.stage(whole_file, unstage)
 	end
 	local entries, index = s.entries, s.index
 	local hunk = git.stage(s.root, snapshot, side, line, whole_file)
+	local ok, err = pcall(awareness.acknowledge, s.root, snapshot)
+	if not ok then
+		notify("Index updated, but change indicators could not be cleared: " .. tostring(err), vim.log.levels.WARN)
+	end
 	if tree_group then
 		s.exhausted_group = tree_group
 		M.refresh(next_entry)
@@ -1491,7 +1499,7 @@ function M.setup()
 		{
 			nargs = 1,
 			complete = function()
-				return { "staged", "modified" }
+				return { "staged", "unstaged" }
 			end,
 		}
 	)
@@ -1521,7 +1529,7 @@ function M.setup()
 	for alias, command in pairs({
 		focus = "Focus",
 		fs = "Focus staged",
-		fm = "Focus modified",
+		fu = "Focus unstaged",
 		annotations = "Annotations",
 		al = "Annotations list",
 	}) do

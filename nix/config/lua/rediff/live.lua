@@ -45,7 +45,23 @@ function M.stop(s)
 end
 
 function M.start(s)
+	-- Replace the old timer so restarting cannot duplicate polling or leave it running when disabled.
+	M.stop(s)
 	if #api.nvim_list_uis() == 0 then
+		return
+	end
+	local interval = require("rediff.feedback").settings().review_refresh_interval
+	if interval == nil then
+		interval = 3
+	end
+	if type(interval) ~= "number" or interval < 0 or interval % 1 ~= 0 then
+		vim.notify(
+			"review_refresh_interval must be a non-negative whole number of seconds (0 disables automatic refresh).",
+			vim.log.levels.WARN
+		)
+		return
+	end
+	if interval == 0 then
 		return
 	end
 	local timer = assert(vim.uv.new_timer())
@@ -54,7 +70,7 @@ function M.start(s)
 	local running, previous, last_error = false, nil, nil
 	timer:start(
 		0,
-		3000,
+		interval * 1000,
 		vim.schedule_wrap(function()
 			if running or timers[s] ~= timer or not M.ready(s) then
 				return

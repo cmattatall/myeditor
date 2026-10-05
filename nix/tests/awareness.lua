@@ -63,6 +63,57 @@ return function(equal)
 	local partial = capture()
 	equal(true, partial[file] ~= nil and partial["staged\0auth.lua"] ~= nil, "Partial staging captures both groups")
 
+	-- Identical hunks must not share acknowledgement when split between groups.
+	local model = a.get(root .. "-duplicates")
+	a.update(model, {})
+	local padding = "\n"
+	for i = 1, 12 do
+		padding = padding .. "context " .. i .. "\n"
+	end
+	local original, working = "old" .. padding .. "old\n", "new" .. padding .. "new\n"
+	local indexed = "new" .. padding .. "old\n"
+	local function description(old, new)
+		return a.describe(vim.diff(old, new, { ctxlen = 0 }))
+	end
+	local before = description(original, working)
+	a.update(model, { [file] = before })
+	local backend = require("rediff.git")
+	local snapshot = backend.snapshot
+	local ok_duplicates, err_duplicates = xpcall(function()
+		backend.snapshot = function()
+			return { old = original, new = indexed, patch = vim.diff(original, indexed) }
+		end
+		a.acknowledge(root .. "-duplicates", { path = "auth.lua", group = "unstaged", old = original, new = working })
+		local remaining, staged_part = description(indexed, working), description(original, indexed)
+		a.update(model, { [file] = remaining, ["staged\0auth.lua"] = staged_part })
+		equal("unseen", a.file_state(model, file), "Identical remaining hunk is still unseen")
+		equal(nil, a.file_state(model, "staged\0auth.lua"), "Only the staged occurrence is acknowledged")
+		backend.snapshot = function()
+			return { old = original, new = working, patch = vim.diff(original, working) }
+		end
+		a.acknowledge(root .. "-duplicates", { path = "auth.lua", group = "staged", old = original, new = indexed })
+		a.update(model, { [file] = before })
+		equal(nil, a.hunk_state(model, file, before.hunks[1].id), "Unstaged first occurrence stays acknowledged")
+		equal("unseen", a.hunk_state(model, file, before.hunks[2].id), "Untouched second occurrence stays unseen")
+		local edited = description(original, "newer" .. padding .. "new\n")
+		a.update(model, { [file] = edited })
+		equal("unseen", a.hunk_state(model, file, edited.hunks[1].id), "New edits to an acknowledged hunk are unseen")
+		a.update(model, { [file] = before })
+		equal("unseen", a.hunk_state(model, file, before.hunks[1].id), "Returning old content after an edit is unseen")
+		local newer_worktree = "newer" .. padding .. "old\n"
+		local seen_edit = description(indexed, newer_worktree)
+		a.update(model, { [file] = seen_edit, ["staged\0auth.lua"] = staged_part })
+		model.seen[file .. "\0" .. seen_edit.hunks[1].id] = true
+		backend.snapshot = function()
+			return { old = original, new = newer_worktree, patch = vim.diff(original, newer_worktree) }
+		end
+		a.acknowledge(root .. "-duplicates", { path = "auth.lua", group = "staged", old = original, new = indexed })
+		a.update(model, { [file] = description(original, newer_worktree) })
+		equal(nil, a.file_state(model, file), "Unstaging does not turn already-seen worktree edits purple")
+	end, debug.traceback)
+	backend.snapshot = snapshot
+	assert(ok_duplicates, err_duplicates)
+
 	-- Actual feedback pipeline: capture before launching, never at the late ACK.
 	local system, pending = vim.system, nil
 	vim.system = function(argv, opts, callback)

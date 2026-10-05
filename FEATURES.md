@@ -44,7 +44,7 @@ revdiff parity.
 - **]** / **[** cycle through hunks across visible files within the current
   STAGED or UNSTAGED group, including untracked files, and accept counts.
   **:fs** / **:focus staged** selects the first visible staged file;
-  **:fm** / **:focus modified** selects the first visible unstaged file.
+  **:fu** / **:focus unstaged** selects the first visible unstaged file.
   Both preserve pane focus; an empty group leaves the selection unchanged.
   **Space j/k** select the next/previous changed file across groups.
 - **Space f** / `:Files` fuzzy-finds nonignored project files while editing;
@@ -56,9 +56,12 @@ revdiff parity.
 - **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
-- Review polls saved files and the index every three seconds, preserving file
-  selection and pane focus. Refresh pauses during composition, selections,
+- Review polls saved files and the index every three seconds by default,
+  preserving file selection and pane focus. Refresh pauses during composition, selections,
   command input, pickers, and delivery. **Space R** also refreshes immediately.
+  Home Manager's `programs.rediff.reviewRefreshInterval` (JSON:
+  `review_refresh_interval`) sets whole seconds; `0` disables automatic refresh.
+  Leave and re-enter Review after changing settings.
 - Changes since the last accepted local-harness send get violet **◆** file/hunk
   indicators, with a brief tree pulse. After a changed hunk is visible for one
   second in a focused diff pane, its indicator becomes cyan **◇** (seen, not

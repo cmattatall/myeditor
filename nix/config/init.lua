@@ -69,7 +69,8 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 vim.keymap.set("n", "?", "<Cmd>help rediff<CR>", { desc = "Editor help overlay" })
 
 require("codediff").setup({
-	diff = { compute_moves = false, highlight_priority = 150 },
+	-- Blank filler rows preserve alignment without rendering wide patterns per line.
+	diff = { compute_moves = false, highlight_priority = 150, filler_text = "" },
 	highlights = {
 		line_insert = "#28683e",
 		line_delete = "#c62828",

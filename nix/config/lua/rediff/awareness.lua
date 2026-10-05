@@ -27,7 +27,12 @@ function M.describe(patch)
 	end
 	local ordered = vim.tbl_keys(ids)
 	table.sort(ordered)
-	return { hunks = hunks, ids = ids, fingerprint = vim.fn.sha256(#hunks > 0 and table.concat(ordered, "\0") or patch) }
+	return {
+		hunks = hunks,
+		ids = ids,
+		counts = counts,
+		fingerprint = vim.fn.sha256(#hunks > 0 and table.concat(ordered, "\0") or patch),
+	}
 end
 
 -- All subprocesses are asynchronous and bounded. Paths come from NUL-delimited
@@ -112,13 +117,17 @@ function M.capture(root, callback)
 end
 
 function M.get(root)
-	roots[root] = roots[root] or { seen = {}, pulses = {}, dwell = {} }
+	roots[root] = roots[root] or { seen = {}, pulses = {}, dwell = {}, acknowledged = {} }
 	return roots[root]
+end
+
+local function acknowledged(s, file, id)
+	return s.acknowledged[file] and s.acknowledged[file][id]
 end
 
 function M.hunk_state(s, file, id)
 	local baseline = s.baseline and s.baseline[file]
-	if not s.baseline or (baseline and baseline.ids[id]) then
+	if not s.baseline or (baseline and baseline.ids[id]) or acknowledged(s, file, id) then
 		return nil
 	end
 	return s.seen[file .. "\0" .. id] and "seen" or "unseen"
@@ -130,22 +139,116 @@ function M.file_state(s, file)
 	if not current or not s.baseline or (baseline and baseline.fingerprint == current.fingerprint) then
 		return nil
 	end
-	local changed = false
+	local changed, handled = false, acknowledged(s, file, current.fingerprint)
 	for id in pairs(current.ids) do
 		local status = M.hunk_state(s, file, id)
 		if status == "unseen" then
 			return "unseen"
 		end
 		changed = changed or status == "seen"
+		handled = handled or acknowledged(s, file, id)
+	end
+	if not changed and handled then
+		return nil
 	end
 	-- A removed hunk or a mode-only change has no new changed lines to visit.
 	return (changed or s.seen[file .. "\0" .. current.fingerprint]) and "seen" or "unseen"
 end
 
+-- Called only after a successful index operation. Compare both sides of that
+-- operation so partial staging, combined hunks and new files retain their identity.
+function M.acknowledge(root, snapshot)
+	local s = M.get(root)
+	s.generation = (s.generation or 0) + 1
+	local staging = snapshot.group ~= "staged"
+	local destination = { path = snapshot.path, group = staging and "staged" or "unstaged" }
+	local after = git.snapshot(root, destination)
+	local function describe(old, new)
+		return M.describe(vim.diff(old, new, { ctxlen = 0 }))
+	end
+	local source_before = describe(snapshot.old, snapshot.new)
+	local source_after = staging and describe(after.new, snapshot.new) or describe(snapshot.old, after.old)
+	local destination_before = staging and describe(after.old, snapshot.old) or describe(snapshot.new, after.new)
+	local destination_after = describe(after.old, after.new)
+	-- HEAD and worktree coordinates do not move when only the index changes.
+	-- Use those anchors rather than occurrence numbers, which change when one
+	-- of two identical hunks moves to the other group.
+	local function matching(before, hunk, side)
+		for _, prior in ipairs(before.hunks) do
+			if
+				prior[side .. "_start"] == hunk[side .. "_start"]
+				and prior[side .. "_count"] == hunk[side .. "_count"]
+				and prior.id:match("^[^:]+") == hunk.id:match("^[^:]+")
+			then
+				return prior
+			end
+		end
+	end
+	local source_handled = { hunks = source_after.hunks, counts = source_after.counts }
+	local destination_handled = { hunks = destination_after.hunks, counts = destination_after.counts }
+	for _, hunk in ipairs(source_after.hunks) do
+		local prior = matching(source_before, hunk, staging and "new" or "old")
+		source_handled[hunk.id] = prior and acknowledged(s, key(snapshot), prior.id)
+	end
+	for _, hunk in ipairs(destination_after.hunks) do
+		local prior = matching(destination_before, hunk, staging and "old" or "new")
+		if prior then
+			destination_handled[hunk.id] = acknowledged(s, key(destination), prior.id)
+		else
+			local unread = false
+			if not staging then
+				-- Unstaging must not acknowledge independent worktree edits that
+				-- Git merges into the same destination hunk.
+				for _, prior in ipairs(destination_before.hunks) do
+					if
+						prior.new_start <= hunk.new_start + math.max(1, hunk.new_count) - 1
+						and hunk.new_start <= prior.new_start + math.max(1, prior.new_count) - 1
+						and M.hunk_state(s, key(destination), prior.id) == "unseen"
+					then
+						unread = true
+					end
+				end
+			end
+			if not unread then
+				destination_handled[hunk.id] = true
+			end
+		end
+	end
+	source_handled[source_after.fingerprint] = true
+	destination_handled[destination_after.fingerprint] = true
+	s.acknowledged[key(snapshot)] = source_handled
+	if not staging and after.patch == "" and after.new ~= "" then
+		destination.group = "untracked" -- Removing a new file from the index.
+	end
+	s.acknowledged[key(destination)] = destination_handled
+	s.painting = nil
+end
+
 function M.update(s, current)
 	s.baseline = s.baseline or current
-	local retained = {}
+	local retained, handled = {}, {}
 	for file, value in pairs(current) do
+		handled[file] = { hunks = value.hunks, counts = value.counts }
+		handled[file][value.fingerprint] = acknowledged(s, file, value.fingerprint)
+		local before = s.acknowledged[file]
+		for _, hunk in ipairs(value.hunks) do
+			local hash = hunk.id:match("^[^:]+")
+			if before and before.counts[hash] ~= value.counts[hash] then
+				-- Removing/editing one duplicate renumbers the others. Do not let
+				-- its acknowledgement migrate to a different occurrence.
+				for _, prior in ipairs(before.hunks) do
+					if
+						prior.id:match("^[^:]+") == hash
+						and prior.new_start == hunk.new_start
+						and prior.old_start == hunk.old_start
+					then
+						handled[file][hunk.id] = before[prior.id]
+					end
+				end
+			else
+				handled[file][hunk.id] = acknowledged(s, file, hunk.id)
+			end
+		end
 		if not s.current or not s.current[file] or s.current[file].fingerprint ~= value.fingerprint then
 			s.pulses[file] = vim.uv.now()
 			-- Revisiting earlier content after another edit is unseen again.
@@ -162,6 +265,7 @@ function M.update(s, current)
 		end
 	end
 	s.seen = retained
+	s.acknowledged = handled
 	s.current = current
 end
 
@@ -172,9 +276,12 @@ function M.scan(root)
 		return
 	end
 	s.scanning = true
+	local generation = s.generation
 	M.capture(root, function(current)
 		s.scanning = nil
-		if current then
+		if generation ~= s.generation then
+			s.again = true -- Discard a capture that straddled an index operation.
+		elseif current then
 			M.update(s, current)
 			M.render()
 		end
@@ -198,6 +305,7 @@ function M.accept(root, baseline)
 	if baseline then
 		local s = M.get(root)
 		s.baseline, s.seen, s.dwell = baseline, {}, {}
+		s.acknowledged = {}
 		M.scan(root)
 	end
 end

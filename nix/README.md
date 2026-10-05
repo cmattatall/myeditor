@@ -179,16 +179,26 @@ so changing your system's packages does not silently change this editor.
    agent edits files; **Space R** refreshes immediately. **:ReviewArchive**
    archives any remaining notes.
 
-While a Review source pane or sidebar is focused in Normal mode, saved file and
-index changes are polled every three seconds, without relying on filesystem events.
-Refresh preserves the displayed file and pane focus, retaining cursor/scroll
-positions where possible. It pauses
-while composing annotations/messages, selecting text, using commands/pickers,
-or delivering feedback. Original annotation snapshots are retained, never
-silently re-anchored. Refresh does not save buffers, stage files, or send feedback.
+Review polls saved files and the index every three seconds by default while the
+tree or diff has Normal-mode focus. Refresh keeps the selected file, pane focus,
+and cursor/scroll positions where possible. It pauses for annotations/messages,
+selections, commands/pickers, and feedback delivery. Annotation snapshots stay
+unchanged. Refresh never saves buffers, stages files, or sends feedback.
 The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.
 Use **Space R** / **:ReviewRefresh** for these snapshot buffers, not `:bufdo e`.
 Outside Review, native `:checktime` checks ordinary buffers for external changes.
+
+Configure the interval in Home Manager (seconds, `0` disables automatic refresh):
+
+```nix
+programs.rediff.reviewRefreshInterval = 10;
+```
+
+Without Home Manager, merge `"review_refresh_interval": 10` into
+`~/.config/rediff/settings.json` (respecting `XDG_CONFIG_HOME`). The value must be
+a non-negative whole number; the default is `3`. Apply Home Manager changes or
+save the unmanaged JSON file, then leave and re-enter Review to use the new value.
+**Space R** / **:ReviewRefresh** remains available when polling is disabled.
 
 The sidebar separates **STAGED** and **UNSTAGED** with colored header rows and
 counts; empty sections remain visible. Untracked files are included in UNSTAGED.
@@ -206,10 +216,10 @@ Untracked files belong to the UNSTAGED cycle. They work from
 either source pane or the sidebar, retain focus, and accept counts (e.g.
 **3]**). A gutter arrow/bar marks the selected hunk in both source panes.
 
-Use **:fs** / **:focus staged** or **:fm** / **:focus modified** to select the
+Use **:fs** / **:focus staged** or **:fu** / **:focus unstaged** to select the
 first visible file/hunk in that group without changing pane focus. If the group
 is empty, selection stays unchanged. Scripts use `:Focus staged` or
-`:Focus modified`; lowercase aliases expand only while in Review.
+`:Focus unstaged`; lowercase aliases expand only while in Review.
 
 Use **:view split** for side-by-side panes, **:view merged** for a unified view,
 or **:view** to toggle. The selected file/hunk and saved notes survive switching.
@@ -246,7 +256,7 @@ subcommands also have hints; other arguments keep native Tab completion.
 | Space j / Space k | Next/previous changed file |
 | `]` / `[` | Cycle hunks across files within the current Git group; retain pane focus |
 | `:fs` / `:focus staged` | Select first visible STAGED file/hunk |
-| `:fm` / `:focus modified` | Select first visible UNSTAGED file/hunk, including untracked |
+| `:fu` / `:focus unstaged` | Select first visible UNSTAGED file/hunk, including untracked |
 | Space f / `:Files` | Fuzzy project files, or visible Review entries |
 | Space / / `:Search` | Fuzzy saved contents, or old/new Review lines |
 | Space p / `:Commands` | Search native and plugin commands |
