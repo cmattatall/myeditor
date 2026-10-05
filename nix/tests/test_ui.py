@@ -245,11 +245,13 @@ class EditorUI(unittest.TestCase):
             "a.capture=function(_,callback) a.capture=capture; _G.late_capture=callback end; "
             "a.scan(s.root)",
         )
-        self.keys(editor, "<Tab>s")
+        # Await the operation, not a fixed key-input delay: slow Git must finish
+        # before the next file edit or assertion. Key mappings are tested separately.
+        self.lua(editor, "vim.api.nvim_set_current_win(s.new_win); r.stage(false)")
         self.lua(editor, "late_capture({}); _G.late_capture=nil")
         self.assertEqual(["quiet", "quiet"], states("staged"))
         self.assertEqual(["unseen", "unseen"], states("unstaged"))
-        self.keys(editor, ":fs<CR>")
+        self.lua(editor, "r.focus('staged')")
         self.assertEqual(
             [],
             self.lua(
@@ -259,33 +261,33 @@ class EditorUI(unittest.TestCase):
             ),
             "Staged hunk has no purple or cyan awareness marks",
         )
-        self.keys(editor, "s")
+        self.lua(editor, "r.stage(false)")
         self.assertEqual(["unseen", "quiet", "unseen"], states("unstaged"))
-        self.keys(editor, ":fu<CR>S")
+        self.lua(editor, "r.focus('unstaged'); r.stage(true)")
         self.assertEqual(["quiet", "quiet", "quiet"], states("staged"))
-        self.keys(editor, ":fs<CR>S")
+        self.lua(editor, "r.focus('staged'); r.stage(true)")
         self.assertEqual(["quiet", "quiet", "quiet"], states("unstaged"))
 
         # Stage a second revision of a line already changed in the index. Its
         # HEAD-to-index hunk differs from the index-to-worktree hunk just acted on.
-        self.keys(editor, ":fu<CR>s")
+        self.lua(editor, "r.focus('unstaged'); r.stage(false)")
         path.write_text(path.read_text().replace("first edit", "third edit"))
         self.lua(editor, "r.refresh(); r.focus('unstaged')")
         self.assertEqual(["unseen", "unseen", "quiet"], states("unstaged"))
-        self.keys(editor, "s")
+        self.lua(editor, "r.stage(false)")
         self.assertEqual(["quiet", "quiet"], states("staged"))
-        self.keys(editor, ":fs<CR>s")
+        self.lua(editor, "r.focus('staged'); r.stage(false)")
         self.assertEqual(["quiet", "quiet", "quiet"], states("unstaged"))
 
         # A later edit is unread, even when unstage folds it into the same hunk.
-        self.keys(editor, ":fu<CR>s")
+        self.lua(editor, "r.focus('unstaged'); r.stage(false)")
         path.write_text(path.read_text().replace("third edit", "fourth edit"))
         self.lua(editor, "r.refresh(); r.focus('staged')")
-        self.keys(editor, "s")
+        self.lua(editor, "r.stage(false)")
         self.assertEqual(["unseen", "unseen", "quiet"], states("unstaged"))
 
         # Rejected stale staging must not acknowledge the displayed hunk.
-        self.keys(editor, ":fu<CR>")
+        self.lua(editor, "r.focus('unstaged')")
         path.write_text(path.read_text().replace("fourth edit", "fifth edit"))
         self.assertFalse(self.lua(editor, "return pcall(r.stage, false)"))
         self.assertEqual(["unseen", "unseen", "quiet"], states("unstaged"))
@@ -298,7 +300,7 @@ class EditorUI(unittest.TestCase):
             "if e.path=='fresh.lua' then r.show(i); break end end",
         )
         self.assertEqual(["unseen", "unseen"], states("untracked", "fresh.lua"))
-        self.keys(editor, "s:fs<CR>s")
+        self.lua(editor, "r.stage(false); r.focus('staged'); r.stage(false)")
         self.assertEqual(["quiet", "quiet"], states("untracked", "fresh.lua"))
 
     def test_saved_amp_connection_is_rediscovered_before_sending(self):
@@ -1488,7 +1490,7 @@ class EditorUI(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            [row + 1],
+            [],
             self.lua(
                 editor,
                 'local rows = {}; for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(s.tree_buf, vim.api.nvim_get_namespaces()["rediff.active-file"], 0, -1, {})) do table.insert(rows, mark[2]) end; return rows',
@@ -1497,9 +1499,14 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(
             self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
         )
-        # Absolute motions skip headings and select a file too.
+        # Absolute motions reach empty headers without changing the preview.
         self.keys(editor, "gg")
-        self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
+        self.assertEqual(
+            self.lua(editor, "return s.group_rows.staged"),
+            editor.current.window.cursor[0],
+        )
+        self.assertEqual("plan.md", self.lua(editor, "return s.current.path"))
+        # Jumping directly to a file still selects and displays it.
         self.keys(editor, f"{row}G")
         self.assertEqual("auth.lua", self.lua(editor, "return s.current.path"))
         self.keys(editor, ":view split<CR>")
@@ -1602,11 +1609,11 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "j")
         selected("staged", "removed.lua")
         tick = self.lua(editor, "return vim.api.nvim_buf_get_changedtick(s.new_buf)")
-        for left, right in (("h", "l"), ("<Left>", "<Right>")):
+        for left, right in (("h", "l"), ("<Left>", "<Right>"), ("h", "<CR>")):
             for _ in range(2):
                 self.keys(editor, left + left)
                 heading("staged")
-                self.keys(editor, right)
+                self.keys(editor, right + right)
                 selected("staged", "removed.lua")
                 self.assertEqual(
                     tick,
@@ -1625,6 +1632,10 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "<Up>")
         heading("staged")
         self.keys(editor, "<Down>")
+        heading("unstaged")
+        self.keys(editor, "<CR><CR>")
+        selected("untracked", "plan.md")
+        self.keys(editor, "h")
         heading("unstaged")
 
         # Refresh can shift row numbers, but must preserve both folds and focus.
@@ -1660,6 +1671,50 @@ class EditorUI(unittest.TestCase):
         self.assertNotEqual("plan.md", self.lua(editor, "return s.current.path"))
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
+    def test_tree_header_selection_has_no_second_file_highlight(self):
+        subprocess.run(["git", "-C", self.root, "add", "auth.lua"], check=True)
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        self.keys(editor, "hj")
+        self.assertEqual("removed.lua", self.lua(editor, "return s.current.path"))
+        self.keys(editor, "k")
+
+        def selection():
+            return self.lua(
+                editor,
+                """
+                local ns = vim.api.nvim_get_namespaces()
+                local marks = vim.api.nvim_buf_get_extmarks(s.tree_buf, ns['rediff.active-file'], 0, -1, {})
+                local header = vim.api.nvim_buf_get_extmark_by_id(s.tree_buf, ns['rediff.tree'],
+                    s.group_rows.staged, {details=true})[3].line_hl_group
+                return {vim.api.nvim_win_get_cursor(s.tree_win)[1] == s.group_rows.staged,
+                    header, #marks, s.current.path, s.collapsed.unstaged == true}
+                """,
+            )
+
+        expected = [True, "ReviewTreeSelection", 0, "removed.lua", False]
+        self.assertEqual(expected, selection())
+        self.lua(editor, "r.refresh_live()")
+        self.assertEqual(
+            expected, selection(), "Refresh must not restore a second highlight"
+        )
+        self.keys(editor, "<Tab>")
+        self.assertEqual([True, "ReviewStaged", 1, "removed.lua", False], selection())
+        self.assertTrue(
+            self.lua(
+                editor,
+                "local mark=vim.api.nvim_buf_get_extmarks(s.tree_buf, "
+                "vim.api.nvim_get_namespaces()['rediff.active-file'],0,-1,{})[1]; "
+                "return s.rows[mark[2]+1] == s.index",
+            )
+        )
+        self.keys(editor, "<Tab>")
+        self.assertEqual(
+            expected,
+            selection(),
+            "Returning to the tree restores only its cursor highlight",
         )
 
     def test_collapsed_tree_navigation_reaches_empty_groups(self):
@@ -1699,6 +1754,9 @@ class EditorUI(unittest.TestCase):
                 self.assertNotEqual("ReviewTreeSelection", highlight(editor, empty))
                 self.keys(editor, "<Tab>")
                 heading(editor, empty)
+                self.keys(editor, "h<CR><CR>")
+                heading(editor, empty)
+                self.assertEqual(-1, editor.eval("foldclosed(line('.'))"))
                 self.keys(editor, back)
                 heading(editor, populated)
                 self.keys(editor, "l")
@@ -1754,7 +1812,13 @@ class EditorUI(unittest.TestCase):
             )
             self.assertEqual(changed, Path(self.root, "auth.lua").read_bytes())
         self.keys(editor, "<Tab>")
-        self.assertEqual("", self.lua(editor, 'return vim.fn.maparg("<CR>", "n")'))
+        self.keys(editor, "<CR>")
+        self.assertTrue(
+            self.lua(
+                editor,
+                "return vim.api.nvim_get_current_win() == s.tree_win and s.composer == nil",
+            )
+        )
         self.keys(editor, "j")
         self.keys(editor, "<Tab>")
         self.assertEqual(
@@ -2681,7 +2745,11 @@ class EditorUI(unittest.TestCase):
                     local row = vim.api.nvim_win_get_cursor(s.tree_win)[1]
                     local marks = vim.api.nvim_buf_get_extmarks(s.tree_buf,
                         vim.api.nvim_get_namespaces()['rediff.active-file'], 0, -1, {})
-                    return s.rows[row] == s.index and #marks == 1 and marks[1][2] == row - 1
+                    if vim.api.nvim_get_current_win() == s.tree_win then
+                        return s.rows[row] == s.index and vim.wo[s.tree_win].cursorline and #marks == 0
+                    end
+                    return s.rows[row] == s.index and not vim.wo[s.tree_win].cursorline
+                        and #marks == 1 and marks[1][2] == row - 1
                     """,
                 ),
                 "Sidebar cursor and sole file highlight must follow the selected hunk",

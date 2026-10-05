@@ -12,15 +12,26 @@ local annotation_ns = api.nvim_create_namespace("rediff.annotations")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 local saved_guicursor
 
-local function highlight_tree_headers(s)
+local function highlight_tree_selection(s)
 	local cursor = api.nvim_win_get_cursor(s.tree_win)[1]
+	local focused = vim.wo[s.tree_win].cursorline
 	for group, row in pairs(s.group_rows or {}) do
 		local highlight = group == "staged" and "ReviewStaged" or "ReviewUnstaged"
-		if vim.wo[s.tree_win].cursorline and cursor == row then
+		if focused and cursor == row then
 			highlight = "ReviewTreeSelection"
 		end
 		-- Header backgrounds override CursorLine, including on closed folds.
 		api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 0, { id = row, line_hl_group = highlight })
+	end
+	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
+	-- The preview marker is context for diff focus, not a second tree selection.
+	if not focused and s.current then
+		for row, index in pairs(s.rows) do
+			if index == s.index then
+				api.nvim_buf_set_extmark(s.tree_buf, active_ns, row - 1, 0, { line_hl_group = "ReviewActiveFile" })
+				break
+			end
+		end
 	end
 end
 
@@ -28,7 +39,7 @@ local function tree_focus(focused)
 	local s = M.state
 	if s and s.tree_win and api.nvim_win_is_valid(s.tree_win) then
 		vim.wo[s.tree_win].cursorline = focused
-		highlight_tree_headers(s)
+		highlight_tree_selection(s)
 	end
 	if focused then
 		saved_guicursor = saved_guicursor or vim.o.guicursor
@@ -313,7 +324,6 @@ end
 
 local function select_tree_file(keep_fold)
 	local s = state()
-	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
 	for row, item in pairs(s.rows) do
 		if item == s.index then
 			local entry = s.entries[item]
@@ -327,13 +337,11 @@ local function select_tree_file(keep_fold)
 					vim.cmd(row .. "foldopen!")
 				end)
 			end
-			api.nvim_buf_set_extmark(s.tree_buf, active_ns, row - 1, 0, {
-				line_hl_group = "ReviewActiveFile",
-			})
 			api.nvim_win_set_cursor(s.tree_win, { s.collapsed[group] and s.group_rows[group] or row, 0 })
 			break
 		end
 	end
+	highlight_tree_selection(s)
 end
 
 local function focus_hunk(index, keep_fold)
@@ -579,7 +587,7 @@ function M.refresh(preferred, changes)
 	if heading then
 		api.nvim_win_set_cursor(s.tree_win, { s.group_rows[heading], 0 })
 	end
-	highlight_tree_headers(s)
+	highlight_tree_selection(s)
 	awareness.scan(s.root)
 	save()
 end
@@ -1370,7 +1378,7 @@ function M.open()
 			M.tree_fold(true)
 		end, "Collapse Git group")
 	end
-	for _, key in ipairs({ "l", "<Right>" }) do
+	for _, key in ipairs({ "l", "<Right>", "<CR>" }) do
 		map(s.tree_buf, "n", key, function()
 			M.tree_fold(false)
 		end, "Expand Git group and restore selection")
@@ -1551,7 +1559,7 @@ function M.setup()
 				end
 				api.nvim_win_set_cursor(0, { cursor[1], 0 })
 				s.tree_cursor = cursor[1]
-				highlight_tree_headers(s)
+				highlight_tree_selection(s)
 				if index and (index ~= s.index or not s.current) then
 					local entry = s.entries[index]
 					local ok, snapshot = pcall(git.snapshot, s.root, entry)

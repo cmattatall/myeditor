@@ -24,6 +24,7 @@ REVIEW QUICK REFERENCE
   Space e / Space d   Focus tree / diff or editor
   Space j / Space k   Next/previous changed file
   h / l in tree       Collapse/expand group (also Left/Right); restore selection
+  Enter in tree       Expand group only; keep tree focus
   ] / [               Next/previous hunk within the current Git group
   :fs / :fu           Focus STAGED / UNSTAGED
   s / S               Stage/unstage hunk / whole file
@@ -80,8 +81,9 @@ GIT AND REFRESH                                                    *rediff-git*
 
 STAGED compares HEAD/index; UNSTAGED compares index/worktree and includes untracked
 files. Badges: M modified, U untracked, R rename, A added, D deleted. Partially
-staged files appear in both groups. h/Left collapses a group (▸); l/Right expands
-it (▾) and restores its selected file. j/k or Up/Down moves between visible files
+staged files appear in both groups. h/Left collapses a group (▸); l/Right or Enter
+expands it (▾) and restores its selected file. Enter never collapses a group.
+j/k or Up/Down moves between visible files
 and collapsed or empty group headers, skipping blank rows. The selected header
 is highlighted. Refresh preserves collapsed groups;
 :fs/:fu and hunk navigation reveal their target file.

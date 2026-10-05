@@ -20,8 +20,9 @@ revdiff parity.
   or oversized files retain ordinary text highlights.
 - The sidebar has **STAGED** and **UNSTAGED** sections. Untracked files appear in
   UNSTAGED with `U`; `M`, `R`, `A`, and `D` identify modified, Git-detected renamed,
-  added, and deleted paths. **h/Left** collapses a section (**▸**); **l/Right**
-  expands it (**▾**) and restores its selected file. **j/k** and **Up/Down** skip
+  added, and deleted paths. **h/Left** collapses a section (**▸**); **l/Right** or
+  **Enter** expands it (**▾**) and restores its selected file. Enter never collapses.
+  **j/k** and **Up/Down** skip
   hidden files and stop on collapsed or empty headers, highlighting the selection.
   Staging/unstaging advances to the next
   entry in the same group, or the previous one at the end. An exhausted group

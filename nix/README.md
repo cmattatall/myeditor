@@ -208,8 +208,9 @@ Badges show `M` modified, `U` untracked, `R` Git-detected rename, `A` added, and
 same group, or the previous one at the end. With none left, focus stays on that
 group's header, including after refresh; further **S** presses change nothing.
 Focused tree navigation highlights a full row instead of a character cursor;
-**h/Left** collapses a group (**▸**); **l/Right** expands it (**▾**) and restores
-its selected file. **j/k** or **Up/Down** visits visible files and collapsed
+**h/Left** collapses a group (**▸**); **l/Right** or **Enter** expands it (**▾**)
+and restores its selected file. **Enter** never collapses or leaves the tree.
+**j/k** or **Up/Down** visits visible files and collapsed
 or empty group headers, skipping blank rows. The selected header is highlighted.
 Refresh preserves collapsed groups; **:fs/:fu**
 and hunk navigation reveal their target file. Moving onto a file immediately
