@@ -27,7 +27,7 @@ experimental-features = nix-command flakes
 From a checkout:
 
 ```sh
-git clone https://github.com/cmattatall/myeditor.git rediff
+git clone https://github.com/cmattatall/readiff.git rediff
 cd rediff
 nix run path:.                 # Review this worktree
 nix run path:. -- src/file.lua # Edit a file directly
@@ -38,10 +38,10 @@ nix profile add path:.         # Optional: install the rediff command
 Or run the published version from the worktree you want to review:
 
 ```sh
-nix run github:cmattatall/myeditor
+nix run github:cmattatall/readiff
 ```
 
-The repository is still named `myeditor`; the application and command are `rediff`.
+The repository is named `readiff`; the application and command are `rediff`.
 The package is defined in [`nix/package.nix`](nix/package.nix) and exported as
 `packages.<system>.rediff` and `packages.<system>.default`. Building/running it
 does not activate Home Manager.
@@ -49,12 +49,15 @@ does not activate Home Manager.
 ## Use your own Home Manager configuration
 
 If you already use Home Manager, add rediff to your existing configuration rather
-than running the bootstrap installer below.
+than running the bootstrap installer below. This repository supplies the Neovim
+editing configuration, plugins, and editor package. Your home configuration owns
+the username, home directory, state version, shell, other packages, and activation.
+Importing the module alone enables nothing.
 
 Add this input to your `flake.nix`:
 
 ```nix
-inputs.rediff.url = "github:cmattatall/myeditor";
+inputs.rediff.url = "github:cmattatall/readiff";
 ```
 
 Include the module in your **Home Manager** module list. For a standalone flake,
@@ -78,11 +81,28 @@ Add these settings to `home.nix`:
 ```nix
 programs.rediff = {
   enable = true;
-  nvimAlias = false;          # Set true to use rediff as nvim
+  nvimAlias = true;           # Use this editing configuration when running nvim
   ampPlugin.enable = false;  # Opt in to managing the rediff Amp plugin
   reviewRefreshInterval = 3; # Seconds; 0 disables fallback polling, not events
 };
+
+# Optional: make it the editor used by other commands.
+home.sessionVariables.EDITOR = "nvim";
+home.sessionVariables.VISUAL = "nvim";
 ```
+
+With `nvimAlias = true`, disable `programs.neovim.enable` and remove any separate
+`pkgs.neovim` from `home.packages` to avoid two packages providing `bin/nvim`.
+The bundled configuration stays isolated under `NVIM_APPNAME=rediff`; existing
+`~/.config/nvim` files are neither overwritten nor loaded. Omit `nvimAlias` (it
+defaults to false) to keep another `nvim` and launch this editor as `rediff` only.
+
+The editor uses this repository's pinned dependencies by default. You may set
+`inputs.rediff.inputs.nixpkgs.follows = "nixpkgs"` to share your nixpkgs instead,
+but that also changes the editor's Neovim and plugin versions. The module uses
+your Home Manager instance; this flake's Home Manager input is only for its own
+checks and optional bootstrap profile. Update the editor with
+`nix flake update rediff` from your home configuration, then rebuild as usual.
 
 Apply with your usual `home-manager switch --flake ~/.config/home-manager`,
 or your NixOS/nix-darwin rebuild if Home Manager is integrated there. The module

@@ -23,7 +23,7 @@ nix run path:.
 Or, after these changes have been published:
 
 ```sh
-nix run github:cmattatall/myeditor
+nix run github:cmattatall/readiff
 ```
 
 Run from a Git worktree to review its changes. Arguments are passed to Neovim:
@@ -110,7 +110,7 @@ configuration over a larger home configuration: Home Manager manages one profile
 Add the flake to your existing flake's inputs:
 
 ```nix
-inputs.rediff.url = "github:cmattatall/myeditor";
+inputs.rediff.url = "github:cmattatall/readiff";
 ```
 
 Add its module and enable it in your Home Manager configuration:
@@ -122,6 +122,14 @@ Add its module and enable it in your Home Manager configuration:
   programs.rediff.nvimAlias = true;
 }
 ```
+
+The consuming configuration owns the Home Manager instance, username, home
+directory, state version, shell, and activation. This module supplies only the
+editor and its settings, plus explicitly enabled agent plugins. Do not import
+`examples/home-manager.nix` or run `install.sh --switch` for this setup.
+To select this editor for other commands, optionally set
+`home.sessionVariables.EDITOR = "nvim"` and
+`home.sessionVariables.VISUAL = "nvim"` in your own configuration.
 
 The editor module does not install harness CLIs. Import the independent
 `inputs.rediff.homeManagerModules.harnesses` module to install either or both:
@@ -139,11 +147,12 @@ If Home Manager uses an externally configured `pkgs` (such as nix-darwin's
 global packages), set the unfree predicate on that nixpkgs instance instead.
 
 Use `programs.rediff` and `inputs.rediff` when upgrading an existing configuration.
-The GitHub URLs above retain the repository's current name until it is renamed.
 Remove `?dir=nix` from older flake inputs; the flake now lives at the root.
 `nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
-they opt in. Disable any other Home Manager `nvim` package to avoid a profile
-collision. If Home Manager does not manage your shell, source
+they opt in. With the alias enabled, disable `programs.neovim.enable` and remove
+any separate `pkgs.neovim` from `home.packages` to avoid a profile collision.
+Existing `~/.config/nvim` files are not overwritten or loaded by rediff.
+If Home Manager does not manage your shell, source
 `~/.nix-profile/etc/profile.d/hm-session-vars.sh` after other PATH setup so the
 Nix-built wrapper takes precedence. Its stable profile path follows updates;
 subsequent switches require reopening Neovim, not restarting your shell.
@@ -165,6 +174,9 @@ Keep copied files tracked if the enclosing flake is a Git repository.
 Copy the full layout, not just `nix/`. By default
 the editor uses its own locked nixpkgs rather than following your system's,
 so changing your system's packages does not silently change this editor.
+Set `inputs.rediff.inputs.nixpkgs.follows = "nixpkgs"` only if you want to share
+your nixpkgs, including its Neovim and plugin versions. Update the editor with
+`nix flake update rediff` in the consuming configuration and rebuild there.
 
 ## Review workflow
 

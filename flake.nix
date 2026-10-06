@@ -63,6 +63,10 @@
             inherit pkgs;
             module = self.homeManagerModules.harnesses;
           };
+          home-manager-composition = import ./nix/tests/home-manager.nix {
+            inherit pkgs;
+            flake = self;
+          };
           home-manager =
             (inputs.home-manager.lib.homeManagerConfiguration {
               inherit pkgs;
