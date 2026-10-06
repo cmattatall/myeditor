@@ -97,6 +97,12 @@ vim.api.nvim_create_autocmd("VimEnter", {
 		if #vim.api.nvim_list_uis() == 0 or vim.fn.argc() > 0 or not pcall(require("rediff.git").root) then
 			return
 		end
+		require("neo-tree.command").execute({
+			action = "focus",
+			source = "filesystem",
+			position = "left",
+			dir = vim.fn.getcwd(),
+		})
 		local ok, err = pcall(require("rediff.review").open)
 		if ok then
 			return

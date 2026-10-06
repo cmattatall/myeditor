@@ -411,20 +411,28 @@ local function test()
 	)
 	local before_close = s.last_submission
 	keys(":q<CR>")
-	equal(nil, s.composer, "Native q discards and closes the annotation")
+	equal(nil, s.composer, "Native q closes the annotation")
 	equal(before_close, s.last_submission, "Closing an annotation does not send feedback")
 	equal(0, #s.comments, "Unwritten annotation never enters the batch")
-	equal(nil, feedback.read(s.directory .. "/draft.json").draft, "Discarded text is removed from persistence")
+	equal(nil, feedback.read(s.directory .. "/draft.json").draft, "Unwritten text stays session-local")
+	vim.api.nvim_win_set_cursor(s.new_win, { 16, 0 })
+	keys("Vji<Esc>")
+	equal(
+		{ "Preserve the refresh contract." },
+		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
+		"Reopening the same selected range restores its draft"
+	)
+	keys(":q<CR>")
 	keys("i<Esc>")
 	equal(
 		{ "" },
 		vim.api.nvim_buf_get_lines(s.composer, 0, -1, false),
-		"Reentering starts a fresh panel even on the same hunk"
+		"A different selection in the same hunk has an independent draft"
 	)
 	keys("iDiscard this too<Esc>:q!<CR>")
-	equal(0, #s.comments, "Forced close also discards unsaved text")
+	equal(0, #s.comments, "Forced close does not save a draft into the batch")
 	vim.api.nvim_win_set_cursor(s.new_win, { 16, 0 })
-	keys("VjiSaved range note<Esc>:w<CR>")
+	keys("Vji<Esc>gg0cGSaved range note<Esc>:w<CR>")
 	equal(17, s.comments[1].line_end, "Annotation write preserves exact visual range")
 	equal(before_close, s.last_submission, "Annotation write is local, not a submission")
 	equal(nil, s.composer, "Visual annotation write also closes its editor")
@@ -439,7 +447,7 @@ local function test()
 	)
 	vim.api.nvim_set_current_win(s.composer_win)
 	keys(":q<CR>")
-	equal("Saved range note", s.comments[1].text, "q discards the edit, not the saved note")
+	equal("Saved range note", s.comments[1].text, "q retains the edit separately from the saved note")
 	vim.api.nvim_win_set_cursor(s.new_win, { 17, 0 })
 	keys(":Annotations new<CR>Second saved annotation<Esc>:wq<CR>")
 	equal(2, #s.comments, "wq saves a separate annotation without sending")

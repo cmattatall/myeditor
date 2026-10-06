@@ -1276,7 +1276,7 @@ class EditorUI(unittest.TestCase):
                         editor, f"return vim.api.nvim_get_current_win() == s.{side}_win"
                     )
                 )
-        self.keys(editor, "iSaved note<Esc>:w<CR>")
+        self.keys(editor, "i<Esc>gg0cGSaved note<Esc>:w<CR>")
         self.wait_for(editor, "s.composer == nil")
         self.keys(editor, "iUnsaved edit<Esc>")
         self.assertIsNotNone(self.lua(editor, "return s.composer"))
@@ -1288,6 +1288,81 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
+
+    def test_empty_review_write_is_a_notice_without_delivery(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            require('rediff.live').stop(s)
+            require('rediff.feedback').enqueue = function() error('Unexpected enqueue') end
+            vim.notify = function(message, level)
+                vim.g.empty_notice = message
+                vim.g.empty_level = level
+                original_notify(message, level)
+            end
+        """,
+        )
+        for pane in ("tree_win", "old_win", "new_win"):
+            self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane})")
+            self.keys(editor, ":w<CR>")
+            self.assertEqual(
+                "No agent notes to send to the harness", editor.vars["empty_notice"]
+            )
+            self.assertEqual(2, editor.vars["empty_level"])
+            self.assertIsNone(self.lua(editor, "return s.last_submission"))
+            self.assertEqual("n", editor.api.get_mode()["mode"])
+        self.assertEqual("draft", self.lua(editor, "return s.delivery"))
+
+    def test_closed_note_drafts_are_independent_and_not_sent(self):
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        cases = (
+            ("new", 5, "First draft", ":q<CR>"),
+            ("new", 17, "Second draft", ":q!<CR>"),
+            ("old", 5, "Old-side draft", "<Esc>"),
+        )
+        for side, line, text, closing in cases:
+            self.lua(editor, f"vim.api.nvim_set_current_win(s.{side}_win)")
+            editor.current.window.cursor = [line, 0]
+            self.keys(editor, "i" + text + "<Esc>" + closing)
+            self.wait_for(editor, "s.composer == nil")
+        self.assertEqual(0, self.lua(editor, "return #s.comments"))
+        self.keys(editor, ":w<CR>")
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        self.lua(editor, "r.leave(); r.open(); require('rediff.live').stop(r.state)")
+        for side, line, text, _ in cases:
+            self.lua(editor, f"vim.api.nvim_set_current_win(s.{side}_win)")
+            editor.current.window.cursor = [line, 0]
+            self.keys(editor, "i<Esc>")
+            self.assertEqual([text], list(editor.current.buffer[:]))
+            self.keys(editor, ":q<CR>")
+            self.wait_for(editor, "s.composer == nil")
+        self.lua(editor, "vim.api.nvim_set_current_win(s.new_win)")
+        editor.current.window.cursor = [5, 0]
+        self.keys(editor, "i<Esc>:w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.keys(editor, "i<Esc>A with edits<Esc>:q<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.keys(editor, ":w<CR>")
+        self.assertEqual(
+            ["First draft"],
+            self.lua(
+                editor,
+                "return vim.tbl_map(function(c) return c.text end, require('rediff.feedback').read(s.last_submission).comments)",
+            ),
+        )
+        self.lua(editor, "r.clear_sent(s.root, s.last_submission)")
+        self.keys(editor, "i<Esc>")
+        self.assertEqual(["First draft with edits"], list(editor.current.buffer[:]))
+        self.keys(editor, ":w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.assertEqual(
+            "First draft with edits", self.lua(editor, "return s.comments[1].text")
+        )
+        self.lua(editor, "r.archive()")
+        self.keys(editor, "i<Esc>")
+        self.assertEqual([""], list(editor.current.buffer[:]))
 
     def test_visual_a_preserves_annotation_ranges_through_submission(self):
         editor = self.launch(self.root)
@@ -1442,7 +1517,7 @@ class EditorUI(unittest.TestCase):
         expected = [dict(note) for note in notes]
         expected[0]["text"] = "Updated boundary\nCheck lease timeout"
         self.assertEqual(expected, edited)
-        self.keys(editor, "iDiscard this edit<Esc>:q!<CR>")
+        self.keys(editor, "iDraft: <Esc>:q!<CR>")
         self.assertEqual(expected, self.lua(editor, "return s.comments"))
 
         # Direct i on overlapping anchors asks which note, rather than overwriting one.
@@ -1489,7 +1564,8 @@ class EditorUI(unittest.TestCase):
         self.assertIn("Space R", self.lua(editor, "return vim.g.startup_notice"))
         self.keys(editor, "i<Esc>")
         self.assertEqual(
-            ["Updated boundary", "Check lease timeout"], list(editor.current.buffer[:])
+            ["Draft: Updated boundary", "Check lease timeout"],
+            list(editor.current.buffer[:]),
         )
         self.keys(editor, ":q<CR> R")
         self.assertTrue(self.lua(editor, "return s.annotation_id == nil"))
@@ -1731,10 +1807,12 @@ class EditorUI(unittest.TestCase):
             "Another editor owns", self.lua(locked, "return vim.g.startup_notice")
         )
         self.keys(editor, " q")
+        self.wait_for(editor, 'vim.bo.filetype == "neo-tree"')
         self.assertEqual(
-            "",
+            self.root,
             self.lua(
-                editor, 'return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t")'
+                editor,
+                "return require('neo-tree.sources.manager').get_state('filesystem').path",
             ),
         )
         self.assertEqual(
@@ -1753,6 +1831,48 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(
             self.lua(outside, "return s == nil and #vim.api.nvim_list_wins() == 1")
         )
+
+    def test_leaving_startup_review_can_explore_worktree_subdirectories(self):
+        worktree = Path(self.directory.name, "linked-worktree")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                self.root,
+                "worktree",
+                "add",
+                "--detach",
+                str(worktree),
+                "HEAD",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        folder = worktree / "nested"
+        folder.mkdir()
+        child = folder / "child.txt"
+        child.write_text("Explore this file\n")
+        editor = self.launch(str(worktree))
+        self.assertTrue(self.lua(editor, "return r.active() ~= nil"))
+        self.keys(editor, " r")
+        self.wait_for(editor, 'vim.bo.filetype == "neo-tree"')
+        self.assertEqual(
+            str(worktree.resolve()),
+            self.lua(
+                editor,
+                "return vim.uv.fs_realpath(require('neo-tree.sources.manager').get_state('filesystem').path)",
+            ),
+        )
+        self.assertGreater(editor.funcs.search("nested", "w"), 0)
+        self.keys(editor, "<CR>")
+        self.wait_for(
+            editor,
+            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):find('child.txt',1,true) ~= nil",
+        )
+        self.keys(editor, "j<CR>")
+        self.wait_for(editor, "vim.bo.filetype ~= 'neo-tree'")
+        self.assertEqual(child.resolve(), Path(editor.current.buffer.name).resolve())
+        self.assertEqual(["Explore this file"], list(editor.current.buffer[:]))
 
     def test_space_r_toggles_review(self):
         editor = self.launch(self.root, file="auth.lua")

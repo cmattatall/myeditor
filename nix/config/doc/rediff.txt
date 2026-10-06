@@ -51,7 +51,8 @@ REVIEW AND ANNOTATIONS                                          *rediff-review*
 
 Interactive startup without file arguments opens Review inside Git, with tree
 focus and a diff preview. File arguments open directly for editing.
-Moving onto a file previews it; Tab enters the diff. Space q returns to editing.
+Moving onto a file previews it. Tab enters the diff. Space q returns to editing,
+with the launch directory's explorer ready after automatic Review startup.
 Outside Git, startup stays in ordinary editing without a sidebar.
 Headless runs open neither Review nor the tree. Space r toggles Review.
 The bottom bar shows the branch (or detached @short-SHA), harness and delivery.
@@ -63,10 +64,11 @@ v/V/Ctrl-v, then a (also i or Space c). The harness receives the selection's ran
 and character/block columns, not just the cursor line.
 
 The note editor floats below the selected range without resizing the diff panes.
-Notes use normal Neovim editing. Esc while typing returns to Normal mode;
-press Esc again to close the panel and discard unsaved edits.
-  :w / :wq    Save locally and close; never send
-  Esc / :q / :q!  Discard unsaved edits and close; keep any previously saved note
+Notes use normal Neovim editing. Esc while typing returns to Normal mode.
+Press Esc again to close the panel and retain its draft in this editor session.
+  :w / :wq        Save locally and close
+  Esc / :q / :q!  Close and keep the draft
+Reopen the same line/range to resume its draft.
 
 Saved notes appear as orange text under their source range. Orange >> in the gutter
 marks notes at the cursor. @ searches filenames and note text; Enter jumps, Esc
@@ -76,8 +78,9 @@ bindings leave ordinary files/note text unchanged.
 
 Jumping to an older note shows its original snapshot and pauses refresh/staging.
 Space R returns to current files. Old-side notes switch merged view to split.
-Editing a note preserves its anchor. :w in diff/tree sends only saved notes;
-it never writes or stages source. See |rediff-drafts| for retention and retry.
+Editing a note preserves its anchor. :w in diff/tree sends the saved notes.
+An empty batch shows "No agent notes to send to the harness".
+See |rediff-drafts| for retention and retry.
 
 ==============================================================================
 GIT AND REFRESH                                                    *rediff-git*

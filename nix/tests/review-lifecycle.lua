@@ -64,7 +64,10 @@ return function(root, equal, fails)
 		acknowledge("completed")
 		equal({}, review.state.comments, "Completed batch is deleted")
 		equal(true, review.statusline():find("0 comments", 1, true) ~= nil, "Comment count reflects the cleared batch")
-		fails(review.submit, "No feedback to submit")
+		local last_submission = review.state.last_submission
+		equal(nil, review.submit(), "Empty follow-up is a no-op")
+		equal("No agent notes to send to the harness", notice, "Empty follow-up explains why nothing was sent")
+		equal(last_submission, review.state.last_submission, "Empty follow-up leaves the previous submission intact")
 		equal(2, calls, "Empty follow-up cannot resend the old batch")
 
 		local failed = add("Retry this note")

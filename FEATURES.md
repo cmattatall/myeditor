@@ -129,16 +129,19 @@ receipt-path notification or Enter prompt. Failed/pending/local-only messages
 and newer edits remain intact within this editor process only. A fresh editor opens an
 empty composer, including when an older version saved draft text to disk.
 Review annotations are separate: annotation `:w` saves the note
-locally and closes the panel without sending. `:w` from a diff pane or Git
-sidebar sends only the saved batch. Accepted/completed delivery deletes the
-sent notes, preserving newer notes and edits. Pending, failed, and local-only
-batches remain in the current editor session. Annotations survive leaving and
+locally and closes the panel. `:w` from a diff pane or Git
+sidebar sends the saved batch. An empty batch shows a notice.
+Accepted/completed delivery deletes sent notes, preserving newer notes and edits.
+Pending, failed, and local-only batches remain in the current editor session.
+Annotations survive leaving and
 re-entering Review, but a fresh editor process always starts without notes.
 Submitted payloads and receipts remain in the outbox for inspection/retry.
 
-Closing an annotation with `:q` discards edits since its last write; `:wq`
-saves locally and closes. Notes appear below their source range as a small
-orange icon and orange text, without a label or border.
+Closing an annotation with `Esc`, `:q`, or `:q!` keeps its draft for the same
+line/range in this editor session. `:wq` saves locally and closes.
+Unwritten edits remain separate from the saved feedback batch.
+Notes appear below their source range as a small orange icon and orange text,
+without a label or border.
 **@** / `:annotations list` / `:al` opens a fuzzy
 picker over filenames and note text; Enter jumps to the note. **i** on an
 annotated source line edits that note (choose if several overlap), preserving

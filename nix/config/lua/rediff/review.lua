@@ -915,6 +915,9 @@ function M.save_composer()
 		comment = M.add_comment(s.draft.anchor, text, s.draft.comment_id)
 		s.draft.comment_id = comment.id
 	end
+	s.drafts = vim.tbl_filter(function(draft)
+		return draft ~= s.draft
+	end, s.drafts)
 	s.draft.text, s.draft.saved = text, true
 	save()
 	if loaded then
@@ -926,6 +929,17 @@ end
 local function release_composer()
 	local s = state()
 	local buf = s.composer
+	if api.nvim_buf_is_loaded(buf) then
+		s.draft.text = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+	end
+	for _, comment in ipairs(s.comments) do
+		if s.draft.comment_id == comment.id and s.draft.text == comment.text then
+			s.drafts = vim.tbl_filter(function(draft)
+				return draft ~= s.draft
+			end, s.drafts)
+			break
+		end
+	end
 	s.draft = nil
 	s.composer, s.composer_win = nil, nil
 	save()
@@ -965,7 +979,7 @@ local function composer_config(s)
 			.. " · "
 			.. anchor.side
 			.. " ",
-		footer = " :w save · :q discard ",
+		footer = " :w save · :q keep draft ",
 	}
 end
 
@@ -1001,12 +1015,22 @@ function M.compose(visual, keys, comment)
 			selection = vim.deepcopy(comment.selection),
 		}
 	end
-	local draft = { anchor = anchor, text = comment and comment.text or "", comment_id = comment and comment.id }
+	local draft
+	for _, pending in ipairs(s.drafts) do
+		if pending.comment_id == (comment and comment.id) and vim.deep_equal(pending.anchor, anchor) then
+			draft = pending
+			break
+		end
+	end
+	if not draft then
+		draft = { anchor = anchor, text = comment and comment.text or "", comment_id = comment and comment.id }
+		table.insert(s.drafts, draft)
+	end
 	s.draft = draft
 	local composer = owned_buffer("review://" .. s.id .. "/comment", vim.split(draft.text, "\n"), true)
 	s.composer = composer
 	vim.bo[composer].filetype = "markdown"
-	vim.keymap.set("n", "<Esc>", "<Cmd>quit<CR>", { buffer = composer, desc = "Discard note edits and close" })
+	vim.keymap.set("n", "<Esc>", "<Cmd>quit<CR>", { buffer = composer, desc = "Keep note draft and close" })
 	s.composer_win = api.nvim_open_win(composer, true, composer_config(s))
 	vim.wo[s.composer_win].wrap = true
 	vim.wo[s.composer_win].linebreak = true
@@ -1050,6 +1074,11 @@ function M.clear_sent(root, path)
 		if s.draft and s.draft.comment_id == comment.id then
 			s.draft.comment_id = nil
 		end
+		for _, draft in ipairs(s.drafts) do
+			if draft.comment_id == comment.id then
+				draft.comment_id = nil
+			end
+		end
 		if s.annotation_id == comment.id then
 			s.annotation_id = nil
 		end
@@ -1062,8 +1091,11 @@ end
 
 function M.submit(retry)
 	local s = state()
+	if #s.comments == 0 then
+		notify("No agent notes to send to the harness")
+		return
+	end
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before submitting again")
-	assert(#s.comments > 0, "No feedback to submit")
 	local snapshots, snapshot_status, warnings = {}, {}, {}
 	for _, comment in ipairs(s.comments) do
 		local snapshot = assert(s.snapshots[comment.snapshot_id], "Missing comment snapshot")
@@ -1117,9 +1149,9 @@ function M.archive()
 	feedback.write(s.directory .. "/archive-" .. tostring(vim.uv.hrtime()) .. ".json", {
 		comments = s.comments,
 		snapshots = s.snapshots,
-		draft = s.draft,
+		drafts = s.drafts,
 	})
-	s.comments, s.snapshots, s.draft = {}, {}, nil
+	s.comments, s.snapshots, s.drafts, s.draft = {}, {}, {}, nil
 	s.annotation_id = nil
 	if s.current then
 		s.snapshots[s.current.id] = s.current
@@ -1139,6 +1171,11 @@ local function remove_comment(comment)
 			end
 			if s.draft and s.draft.comment_id == comment.id then
 				s.draft.comment_id = nil
+			end
+			for _, draft in ipairs(s.drafts) do
+				if draft.comment_id == comment.id then
+					draft.comment_id = nil
+				end
 			end
 			save()
 			render_comments()
@@ -1332,6 +1369,7 @@ function M.open()
 		root = root,
 		directory = directory,
 		comments = pending.comments or {},
+		drafts = pending.drafts or {},
 		snapshots = pending.snapshots or {},
 		harness = target,
 		previous_tab = api.nvim_get_current_tabpage(),
@@ -1727,7 +1765,7 @@ function M.setup()
 	api.nvim_create_autocmd("QuitPre", {
 		callback = function()
 			if M.state and M.state.composer and api.nvim_buf_is_loaded(M.state.composer) then
-				-- Closing discards edits; only explicit writes add/update comments.
+				-- Keep edits in the session draft. Only explicit writes add or update comments.
 				vim.bo[M.state.composer].modified = false
 			end
 		end,
