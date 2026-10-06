@@ -58,6 +58,12 @@ revdiff parity.
   while editing and old plus new lines (including deletions) in Review.
   **Enter** chooses and **Esc** cancels. Native `/`, `n`, and `N` remain
   current-buffer search.
+- **Option+Enter** / **gd** in Review finds symbol definitions asynchronously
+  with Neovim's LSP client and `nvim-lspconfig`. Definitions open in a separate
+  editing tab; **gT** returns to Review with notes intact. Multiple matches use
+  the quickfix list. Nix bundles servers for Lua, Nix, Python, JS/TypeScript,
+  Go (`gopls`), and Rust (`rust-analyzer`). Go/Rust use your project's toolchains.
+  The terminal must forward Alt/Meta+Enter.
 - **Space p** / `:Commands` fuzzy-searches native and plugin commands in Editing
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
@@ -97,7 +103,7 @@ Partial: annotations support native editing, exact ranges, fuzzy discovery and
 next/previous navigation, but not revdiff's file/hunk scopes. Display and
 command-palette parity is selective.
 
-Pending: LSP symbol inspection/definition/references; blame views; collapsed
+Pending: Review hover/reference navigation; blame views; collapsed
 and compact diff presentation; file/hunk-level annotations; and
 the remaining view toggles, filters, and general commands in the revdiff fork.
 

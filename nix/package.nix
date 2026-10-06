@@ -9,6 +9,12 @@
   ripgrep,
   fzf,
   difftastic,
+  lua-language-server,
+  nil,
+  pyright,
+  typescript-language-server,
+  gopls,
+  rust-analyzer,
   python3,
   bash,
   coreutils,
@@ -40,6 +46,7 @@ let
     vimPlugins.nui-nvim
     vimPlugins.neo-tree-nvim
     vimPlugins.fzf-lua
+    vimPlugins.nvim-lspconfig
     vimPlugins.plenary-nvim
     vimPlugins.nvim-web-devicons
     vimPlugins.rose-pine
@@ -69,6 +76,12 @@ stdenv.mkDerivation {
           ripgrep
           fzf
           difftastic
+          lua-language-server
+          nil
+          pyright
+          typescript-language-server
+          gopls
+          rust-analyzer
         ]
       } \
       --prefix PATH : "$out/bin" \

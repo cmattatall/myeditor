@@ -107,8 +107,8 @@ class EditorUI(unittest.TestCase):
         editor.input(keys)
         pump(editor)
 
-    def wait_for(self, editor, condition):
-        deadline = time.monotonic() + 8
+    def wait_for(self, editor, condition, timeout=8):
+        deadline = time.monotonic() + timeout
         while not self.lua(editor, "return " + condition):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
@@ -987,6 +987,221 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
+
+    def test_review_symbol_definitions_use_current_worktree_without_leaving_review(
+        self,
+    ):
+        source = Path(self.root, "auth.lua")
+        source.write_text(
+            "-- Lines moved in the worktree\n\n"
+            + source.read_text().replace(
+                "return token.expires_at > os.time()",
+                'local label = "é😀"; return require("helper with spaces").lookup_target(token)',
+            )
+        )
+        helper = Path(self.root, "helper with spaces.lua")
+        helper.write_text(
+            "local M = {}\n\nfunction M.lookup_target(token)\n  return true\nend\nreturn M\n"
+        )
+        # Same symbol name in a different module: semantic lookup must follow the import.
+        Path(self.root, "other.lua").write_text(
+            "local M = {}\nfunction M.lookup_target() end\nreturn M\n"
+        )
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        original = source.read_bytes()
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            "require('rediff.live').stop(s); for i,e in ipairs(s.entries) do if e.path=='auth.lua' then r.show(i); break end end",
+        )
+        self.lua(
+            editor,
+            "r.add_comment({file=s.current.path,side='new',snapshot_id=s.current.id,selection=require('rediff.selection').line(s.new_buf,5)},'Keep this note')",
+        )
+        review_tab = editor.current.tabpage.handle
+        for layout, side, line, key, destination, destination_line in (
+            ("split", "old", 3, "<M-CR>", source, 5),
+            ("split", "new", 9, "<M-CR>", helper, 3),
+            ("merged", "new", 9, "gd", helper, 3),
+        ):
+            with self.subTest(layout=layout, side=side):
+                editor.command("View " + layout)
+                self.lua(editor, f"vim.api.nvim_set_current_win(s.{side}_win)")
+                column = (
+                    12
+                    if side == "old"
+                    else len(
+                        editor.current.buffer[line - 1]
+                        .split("lookup_target")[0]
+                        .encode()
+                    )
+                )
+                editor.current.window.cursor = [line, column]
+                panes = editor.eval("winlayout()")
+                self.keys(editor, key)
+                self.wait_for(
+                    editor, f"vim.api.nvim_get_current_tabpage() ~= {review_tab}"
+                )
+                self.assertEqual(str(destination), editor.current.buffer.name)
+                self.assertEqual(destination_line, editor.current.window.cursor[0])
+                self.keys(editor, "gT")
+                self.assertEqual(review_tab, editor.current.tabpage.handle)
+                self.assertEqual(panes, editor.eval("winlayout()"))
+                self.assertEqual(
+                    "Keep this note", self.lua(editor, "return s.comments[1].text")
+                )
+                self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        editor.command("View split")
+        self.lua(editor, "vim.api.nvim_set_current_win(s.old_win)")
+        editor.current.window.cursor = [7, 12]
+        self.keys(editor, "gd")
+        self.assertEqual(review_tab, editor.current.tabpage.handle)
+        self.assertIn("This line changed", editor.vars["startup_notice"])
+        self.assertEqual(
+            0, self.lua(editor, "return #vim.lsp.get_clients({bufnr=s.new_buf})")
+        )
+        self.assertEqual(
+            0, self.lua(editor, "return #vim.lsp.get_clients({bufnr=s.old_buf})")
+        )
+        self.assertEqual(original, source.read_bytes())
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
+    def test_bundled_language_servers_resolve_review_definitions(self):
+        cases = (
+            (
+                "example.py",
+                "def greeting():\n    return 'hi'\n\ngreeting()\n",
+                4,
+                0,
+                1,
+                "pyright",
+            ),
+            (
+                "example.ts",
+                "export function greeting() {}\ngreeting();\n",
+                2,
+                0,
+                1,
+                "ts_ls",
+            ),
+            (
+                "example.nix",
+                'let\n  greeting = name: name;\nin greeting "hi"\n',
+                3,
+                3,
+                2,
+                "nil_ls",
+            ),
+            (
+                "example.go",
+                'package fixture\n\nfunc greeting() string { return "hi" }\nfunc caller() string { return greeting() }\n',
+                4,
+                30,
+                3,
+                "gopls",
+            ),
+            (
+                "example.rs",
+                "pub fn greeting() -> u32 { 1 }\npub fn caller() -> u32 { greeting() }\n",
+                2,
+                25,
+                1,
+                "rust_analyzer",
+            ),
+        )
+        Path(self.root, "go.mod").write_text("module example.com/fixture\n\ngo 1.20\n")
+        Path(self.root, "Cargo.toml").write_text(
+            '[package]\nname = "rediff_fixture"\nversion = "0.1.0"\nedition = "2021"\n[lib]\npath = "example.rs"\n'
+        )
+        for name, contents, *_ in cases:
+            Path(self.root, name).write_text(contents)
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        review_tab = editor.current.tabpage.handle
+        for name, _, row, col, target, server in cases:
+            with self.subTest(language_server=server):
+                self.lua(
+                    editor,
+                    f"for i,e in ipairs(s.entries) do if e.path=='{name}' then r.show(i); break end end; vim.api.nvim_set_current_win(s.new_win)",
+                )
+                editor.current.window.cursor = [row, col]
+                if server == "rust_analyzer":
+                    # Rust answers with no locations until its initial workspace indexing finishes.
+                    self.lua(
+                        editor,
+                        """
+                        vim.lsp.config('rust_analyzer', {handlers={
+                            ['experimental/serverStatus']=function(_, result)
+                                vim.g.rust_ready=result.quiescent
+                            end,
+                        }})
+                        vim.fn.bufload(vim.fn.bufadd(s.root..'/example.rs'))
+                    """,
+                    )
+                    self.wait_for(editor, "vim.g.rust_ready == true", timeout=60)
+                self.keys(editor, "gd")
+                self.wait_for(
+                    editor,
+                    f"vim.api.nvim_get_current_tabpage() ~= {review_tab}",
+                    timeout=30,
+                )
+                self.assertEqual(str(Path(self.root, name)), editor.current.buffer.name)
+                self.assertEqual(target, editor.current.window.cursor[0])
+                self.assertEqual(
+                    server,
+                    self.lua(editor, "return vim.lsp.get_clients({bufnr=0})[1].name"),
+                )
+                self.keys(editor, "gT")
+
+    def test_definition_lookup_is_async_and_does_not_jump_after_cursor_moves(self):
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            """
+            require('rediff.live').stop(s)
+            vim.api.nvim_set_current_win(s.new_win)
+            vim.api.nvim_win_set_cursor(0,{3,12})
+            vim.lsp.enable({'lua_ls', 'nil_ls', 'pyright', 'ts_ls'}, false)
+            local get_clients = vim.lsp.get_clients
+            vim.lsp.get_clients = function(opts)
+                if opts and opts.method == 'textDocument/definition' then return {{}} end
+                return get_clients(opts)
+            end
+            vim.lsp.buf.definition = function(opts) _G.definition_result = opts.on_list end
+        """,
+        )
+        tab = editor.current.tabpage.handle
+        self.keys(editor, "<M-CR>")
+        self.wait_for(editor, "definition_result ~= nil")
+        self.keys(editor, "j")
+        self.assertEqual(
+            4, editor.current.window.cursor[0], "Lookup must not block navigation"
+        )
+        self.lua(
+            editor,
+            "definition_result({items={{filename=s.root..'/auth.lua',lnum=3,col=1}}})",
+        )
+        pump(editor)
+        self.assertEqual(tab, editor.current.tabpage.handle)
+        self.assertEqual(
+            4, editor.current.window.cursor[0], "Stale lookup must not steal focus"
+        )
+        self.lua(
+            editor,
+            "vim.api.nvim_win_set_cursor(s.new_win,{3,12}); _G.definition_result=nil",
+        )
+        self.keys(editor, "gd")
+        self.wait_for(editor, "definition_result ~= nil")
+        self.lua(
+            editor,
+            "definition_result({items={{filename=s.root..'/auth.lua',lnum=3,col=1},{filename=s.root..'/auth.lua',lnum=16,col=1}}})",
+        )
+        pump(editor)
+        self.assertNotEqual(tab, editor.current.tabpage.handle)
+        self.assertEqual("quickfix", editor.current.buffer.options["buftype"])
+        self.assertEqual([3, 16], [item["lnum"] for item in editor.funcs.getqflist()])
 
     def test_annotation_editor_is_anchored_below_source(self):
         editor = self.launch(self.root)

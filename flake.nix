@@ -161,8 +161,12 @@
                 nativeBuildInputs = [
                   self.packages.${system}.default
                   pkgs.git
+                  pkgs.go
+                  pkgs.cargo
+                  pkgs.rustc
                   (pkgs.python3.withPackages (ps: [ ps.pynvim ]))
                 ];
+                RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
               }
               ''
                 export HOME="$TMPDIR/home"

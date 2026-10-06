@@ -107,6 +107,8 @@ vim.api.nvim_create_autocmd("VimEnter", {
 })
 
 local review = require("rediff.review")
+vim.lsp.config("lua_ls", { settings = { Lua = { workspace = { checkThirdParty = false } } } })
+vim.lsp.enable({ "lua_ls", "nil_ls", "pyright", "ts_ls", "gopls", "rust_analyzer" })
 review.setup()
 require("rediff.harness").setup()
 require("rediff.worktree").setup()

@@ -1384,6 +1384,11 @@ function M.open()
 		end, "Expand Git group and restore selection")
 	end
 	for _, buf in ipairs({ s.old_buf, s.new_buf }) do
+		for _, key in ipairs({ "<M-CR>", "gd" }) do
+			map(buf, "n", key, function()
+				require("rediff.navigation").definition()
+			end, "Find symbol definitions in current worktree")
+		end
 		for _, key in ipairs({
 			"i",
 			"a",

@@ -244,6 +244,19 @@ project files; Space / searches saved contents. In Review these search changed
 entries and both snapshot sides, including deletions. Enter chooses; Esc cancels.
 / and n/N search the current buffer. ? opens this guide; use :? for backward search.
 
+In a Review source pane, Option+Enter (Alt+Enter / gd) finds definitions of the
+symbol under the cursor using Neovim's LSP client. Results open in a separate
+editing tab; multiple matches also open the quickfix list. gT returns to Review
+without losing notes. Lookup is asynchronous and never edits source, stages,
+or sends feedback.
+
+Nix bundles nvim-lspconfig and servers for Lua, Nix, Python, JS/TypeScript,
+Go (gopls), and Rust (rust-analyzer). Go and Rust use your project's toolchain;
+provide go or cargo/rustc on PATH. Nix supplies Rust standard-library sources;
+set RUST_SRC_PATH to use sources matching a different project toolchain.
+Configure your terminal to send Option+Enter as Alt/Meta+Enter; use gd if it
+sends plain Enter instead. Insert-mode editing is unchanged.
+
 Ctrl-a / Ctrl-e moves to line start/end in Insert and command/search input.
 Option+Left/Up/h/k moves a word backward; Option+Right/Down/l/j moves forward.
 Set your terminal's Option key to Alt/Meta; Esc-b/Esc-f sequences also work.
