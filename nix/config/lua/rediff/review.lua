@@ -11,6 +11,13 @@ local hunk_ns = api.nvim_create_namespace("rediff.hunk")
 local annotation_ns = api.nvim_create_namespace("rediff.annotations")
 local reviews = {} -- Pending annotations belong to this editor process, not the next launch.
 local saved_guicursor
+local status_highlights = {
+	A = "ReviewAdded",
+	M = "ReviewModified",
+	U = "ReviewUntracked",
+	D = "ReviewDeleted",
+	R = "ReviewRenamed",
+}
 
 local function highlight_tree_selection(s)
 	local cursor = api.nvim_win_get_cursor(s.tree_win)[1]
@@ -115,6 +122,13 @@ local function map_hunks(buf)
 				desc = direction > 0 and "Next hunk in Git group" or "Previous hunk in Git group",
 			}
 		)
+	end
+	for key, direction in pairs({ ["<C-S-]>"] = 1, ["<C-S-[>"] = -1 }) do
+		map(buf, "n", key, function()
+			for _ = 1, vim.v.count1 do
+				M.jump_hunk(direction, true)
+			end
+		end, direction > 0 and "Next unseen hunk in Git group" or "Previous unseen hunk in Git group")
 	end
 end
 
@@ -231,8 +245,28 @@ local function comments_at_cursor()
 	return matches
 end
 
+local function render_tree_annotations(s)
+	api.nvim_buf_clear_namespace(s.tree_buf, annotation_ns, 0, -1)
+	local annotated = {}
+	for _, comment in ipairs(s.comments) do
+		annotated[comment.file] = true
+	end
+	for row, index in pairs(s.rows) do
+		if annotated[s.entries[index].path] then
+			api.nvim_buf_set_extmark(s.tree_buf, annotation_ns, row - 1, 0, {
+				virt_text = { { "●", "ReviewAnnotation" } },
+				virt_text_pos = "right_align",
+				hl_mode = "combine",
+			})
+		end
+	end
+end
+
 local function render_comments(selection_only)
 	local s = state()
+	if not selection_only then
+		render_tree_annotations(s)
+	end
 	local selected = {}
 	local buf = api.nvim_get_current_buf()
 	if M.active() == s and (buf == s.old_buf or buf == s.new_buf) then
@@ -375,6 +409,7 @@ end
 
 function M.show(index, snapshot, keep_fold)
 	local s = state()
+	local wrap = s.wrap or false
 	snapshot = snapshot or git.snapshot(s.root, assert(s.entries[index], "No changed file selected"))
 	s.index, s.current = index, snapshot
 	s.annotation_id = nil
@@ -418,6 +453,12 @@ function M.show(index, snapshot, keep_fold)
 			true
 		)
 	end
+	-- The renderer sets nowrap; restore the user's choice after every refresh.
+	s.wrap = wrap
+	if s.old_win then
+		vim.wo[s.old_win].wrap = wrap
+	end
+	vim.wo[s.new_win].wrap = wrap
 	require("rediff.difftastic").highlight(s, snapshot)
 	render_comments()
 	api.nvim_set_current_win(s.new_win)
@@ -540,6 +581,17 @@ function M.refresh(preferred, changes)
 	set_lines(s.tree_buf, lines)
 	api.nvim_buf_clear_namespace(s.tree_buf, tree_ns, 0, -1)
 	api.nvim_buf_clear_namespace(s.tree_buf, active_ns, 0, -1)
+	for row, index in pairs(rows) do
+		local highlight = status_highlights[s.entries[index].status]
+		if highlight then
+			api.nvim_buf_set_extmark(s.tree_buf, tree_ns, row - 1, 1, {
+				id = row,
+				end_col = 2,
+				hl_group = highlight,
+				priority = 200,
+			})
+		end
+	end
 	api.nvim_win_call(s.tree_win, function()
 		vim.cmd("normal! zE")
 		for _, group in ipairs({ "staged", "unstaged" }) do
@@ -587,6 +639,7 @@ function M.refresh(preferred, changes)
 		api.nvim_win_set_cursor(s.tree_win, { s.group_rows[heading], 0 })
 	end
 	highlight_tree_selection(s)
+	render_tree_annotations(s)
 	awareness.scan(s.root)
 	save()
 end
@@ -712,20 +765,55 @@ function M.focus(group)
 	notify(group == "staged" and "No visible STAGED files" or "No visible UNSTAGED files")
 end
 
-function M.jump_hunk(direction)
+local function unseen_changes(s)
+	local result, tracker = {}, awareness.get(s.root)
+	local file = s.current and entry_key(s.current)
+	local current = file and tracker.current and tracker.current[file]
+	if not current then
+		return result
+	end
+	local displayed = awareness.describe(vim.diff(s.current.old, s.current.new, { ctxlen = 0 }))
+	if not vim.deep_equal(displayed.ids, current.ids) then
+		return result -- Never navigate using awareness from a different snapshot.
+	end
+	for _, hunk in ipairs(displayed.hunks) do
+		if awareness.hunk_state(tracker, file, hunk.id) == "unseen" then
+			for i, change in ipairs(s.diff.changes) do
+				for _, side in ipairs({ { "old", "original" }, { "new", "modified" } }) do
+					local first, count = hunk[side[1] .. "_start"], hunk[side[1] .. "_count"]
+					local range = change[side[2]]
+					if count > 0 and range.start_line < first + count and first < range.end_line then
+						result[i] = true
+					end
+				end
+			end
+		end
+	end
+	return result
+end
+
+function M.jump_hunk(direction, unseen_only)
 	local s = state()
+	if unseen_only and s.annotation_id then
+		notify("Use Space R to return to current files before navigating unseen hunks")
+		return
+	end
 	local win = api.nvim_get_current_win()
 	local side = win == s.old_win and "old" or "new"
 	local buf = side == "old" and s.old_buf or s.new_buf
 	local line = api.nvim_win_get_cursor(side == "old" and s.old_win or s.new_win)[1]
 	local changes = s.diff and s.diff.changes or {}
+	local unseen = unseen_only and unseen_changes(s)
 	local first, last, step = 1, #changes, 1
 	if direction < 0 then
 		first, last, step = #changes, 1, -1
 	end
 	for i = first, last, step do
 		local start_line, end_line = hunk_range(changes[i], side, buf)
-		if (direction > 0 and start_line > line) or (direction < 0 and end_line < line) then
+		if
+			(not unseen or unseen[i])
+			and ((direction > 0 and start_line > line) or (direction < 0 and end_line < line))
+		then
 			focus_hunk(i)
 			return
 		end
@@ -737,7 +825,10 @@ function M.jump_hunk(direction)
 	local new_view = api.nvim_win_call(s.new_win, vim.fn.winsaveview)
 	for offset = 1, #s.entries do
 		local i = ((previous or 1) - 1 + direction * offset) % #s.entries + 1
-		if (s.entries[i].group == "staged") == staged then
+		if
+			(s.entries[i].group == "staged") == staged
+			and (not unseen_only or awareness.file_state(awareness.get(s.root), entry_key(s.entries[i])) == "unseen")
+		then
 			local ok, err = true, nil
 			-- Wrapping in the displayed file only needs a cursor move. Rebuild it
 			-- only if we visited another file while looking for a nonempty diff.
@@ -746,10 +837,17 @@ function M.jump_hunk(direction)
 			end
 			if not ok then
 				notify("Skipping " .. s.entries[i].path .. ": " .. tostring(err), vim.log.levels.WARN)
-			elseif #s.diff.changes > 0 then
-				focus_hunk(direction > 0 and 1 or #s.diff.changes)
-				api.nvim_set_current_win(win)
-				return
+			else
+				local eligible = unseen_only and unseen_changes(s)
+				local start = direction > 0 and 1 or #s.diff.changes
+				local finish = direction > 0 and #s.diff.changes or 1
+				for hunk = start, finish, direction do
+					if not eligible or eligible[hunk] then
+						focus_hunk(hunk)
+						api.nvim_set_current_win(win)
+						return
+					end
+				end
 			end
 		end
 	end
@@ -768,7 +866,7 @@ function M.jump_hunk(direction)
 		mark_hunk(selected)
 	end
 	api.nvim_set_current_win(win)
-	notify("No hunks in this Git group")
+	notify(unseen_only and "No unseen hunks in this Git group" or "No hunks in this Git group")
 end
 
 local function advance_staged_hunk(snapshot, hunk, entries, index)
@@ -1538,11 +1636,17 @@ function M.setup()
 	api.nvim_set_hl(0, "ReviewActiveFile", { bg = palette.highlight_med, bold = true })
 	api.nvim_set_hl(0, "ReviewHunk", { fg = palette.gold, bold = true })
 	local function review_highlights()
+		api.nvim_set_hl(0, "ReviewAdded", { fg = "#4ade80", bold = true })
+		api.nvim_set_hl(0, "ReviewModified", { fg = "#facc15", bold = true })
+		api.nvim_set_hl(0, "ReviewUntracked", { fg = "#4ade80", bold = true })
+		api.nvim_set_hl(0, "ReviewDeleted", { fg = "#f87171", bold = true })
+		api.nvim_set_hl(0, "ReviewRenamed", { fg = "#a3a3a3", bold = true })
 		api.nvim_set_hl(0, "ReviewUnseen", { fg = palette.iris, bold = true })
 		api.nvim_set_hl(0, "ReviewUnseenPulse", { fg = palette.text, bold = true })
 		api.nvim_set_hl(0, "ReviewSeen", { fg = palette.foam })
 		api.nvim_set_hl(0, "ReviewAnnotation", { fg = "#ff9e64" })
-		api.nvim_set_hl(0, "ReviewTreeSelection", { fg = palette.text, bg = palette.highlight_high, bold = true })
+		-- CursorLine must preserve the status marker's foreground color.
+		api.nvim_set_hl(0, "ReviewTreeSelection", { bg = palette.highlight_high, bold = true })
 		api.nvim_set_hl(
 			0,
 			"ReviewTreeCursor",
@@ -1551,6 +1655,20 @@ function M.setup()
 	end
 	review_highlights()
 	api.nvim_create_autocmd("ColorScheme", { callback = review_highlights })
+	api.nvim_create_autocmd("OptionSet", {
+		pattern = "wrap",
+		callback = function()
+			local s, win = M.state, api.nvim_get_current_win()
+			if not s or (win ~= s.old_win and win ~= s.new_win) or vim.v.option_command == "setglobal" then
+				return
+			end
+			s.wrap = vim.wo[win].wrap
+			local other = win == s.old_win and s.new_win or s.old_win
+			if other then
+				vim.wo[other].wrap = s.wrap
+			end
+		end,
+	})
 	api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
 		callback = function()
 			local s = M.state

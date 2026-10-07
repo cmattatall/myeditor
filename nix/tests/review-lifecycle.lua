@@ -46,6 +46,15 @@ return function(root, equal, fails)
 			selection = selection.line(s.new_buf, 5),
 		}, text, id)
 	end
+	local function markers()
+		return #vim.api.nvim_buf_get_extmarks(
+			review.state.tree_buf,
+			vim.api.nvim_get_namespaces()["rediff.annotations"],
+			0,
+			-1,
+			{}
+		)
+	end
 	local ok, err = xpcall(function()
 		review.select_harness("custom")
 		local edited = add("Original text")
@@ -56,6 +65,7 @@ return function(root, equal, fails)
 		local newer = add("Added during delivery")
 		acknowledge("accepted")
 		equal({ edited, newer }, review.state.comments, "Late ACK clears sent notes, preserving edits and additions")
+		equal(1, markers(), "Late ACK keeps the tree marker for remaining notes")
 		equal("Original text", feedback.read(path).comments[1].text, "Outbox preserves the actual sent text")
 		vim.cmd("ReviewRetry")
 		equal(1, calls, "Cached acknowledgment does not invoke the receiver again")
@@ -63,6 +73,7 @@ return function(root, equal, fails)
 		review.submit()
 		acknowledge("completed")
 		equal({}, review.state.comments, "Completed batch is deleted")
+		equal(0, markers(), "Completed batch clears the tree marker")
 		equal(true, review.statusline():find("0 comments", 1, true) ~= nil, "Comment count reflects the cleared batch")
 		local last_submission = review.state.last_submission
 		equal(nil, review.submit(), "Empty follow-up is a no-op")
@@ -75,9 +86,11 @@ return function(root, equal, fails)
 		acknowledge("failed")
 		equal(true, notice:find("Test failure", 1, true) ~= nil, "Failed delivery is reported")
 		equal({ failed }, review.state.comments, "Failed delivery retains notes")
+		equal(1, markers(), "Failed delivery retains the tree marker")
 		vim.cmd("ReviewRetry")
 		acknowledge("accepted")
 		equal({}, review.state.comments, "Successful explicit retry clears notes")
+		equal(0, markers(), "Successful retry clears the tree marker")
 
 		-- Both orders matter: acknowledgment while closed and after reopening.
 		for _, reopen_first in ipairs({ false, true }) do
@@ -93,7 +106,9 @@ return function(root, equal, fails)
 				review.open()
 			end
 			equal({ retained }, review.state.comments, "ACK clears the cached batch across Review leave/reopen")
+			equal(1, markers(), "Reopened tree marks the retained note after ACK")
 			review.archive()
+			equal(0, markers(), "Archiving clears the tree marker")
 		end
 		review.select_harness("none")
 		local local_note = add("Local queue only")

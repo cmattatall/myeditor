@@ -1,5 +1,10 @@
 # rediff
 
+The public distribution lives at [cmattatall/readiff](https://github.com/cmattatall/readiff).
+This is a one-way snapshot mirror maintained from the author's development checkout.
+Issues and pull requests are welcome; contributions are integrated upstream before
+the next snapshot is published. You do not need access to the development checkout.
+
 **Read the diff.** rediff is a Neovim-based editor for reviewing an AI coding
 agent's changes. Read side-by-side or merged diffs, annotate lines and selections,
 send feedback to an agent, and review what changed afterward. You control staging
@@ -27,8 +32,8 @@ experimental-features = nix-command flakes
 From a checkout:
 
 ```sh
-git clone https://github.com/cmattatall/readiff.git rediff
-cd rediff
+git clone https://github.com/cmattatall/readiff.git
+cd readiff
 nix run path:.                 # Review this worktree
 nix run path:. -- src/file.lua # Edit a file directly
 nix build path:.               # Build only: ./result/bin/rediff
@@ -39,9 +44,11 @@ Or run the published version from the worktree you want to review:
 
 ```sh
 nix run github:cmattatall/readiff
+# Or install the command:
+nix profile add github:cmattatall/readiff
 ```
 
-The repository is named `readiff`; the application and command are `rediff`.
+The application and command are `rediff`; the GitHub repository retains the name `readiff`.
 The package is defined in [`nix/package.nix`](nix/package.nix) and exported as
 `packages.<system>.rediff` and `packages.<system>.default`. Building/running it
 does not activate Home Manager.

@@ -1,5 +1,9 @@
 # rediff: read agent diffs
 
+The public editor distribution is [cmattatall/readiff](https://github.com/cmattatall/readiff).
+In this guide, "repository root" means the editor directory containing the
+standalone flake. The bootstrap below is optional; Home Manager is not required.
+
 The repository-root flake packages Neovim, Git, ripgrep, difftastic,
 Neo-tree, Codediff (including its compiled native library), review.nvim, and
 the custom Review workspace. Nix owns dependency versions; there is no
@@ -20,7 +24,7 @@ Requires Nix with `nix-command` and `flakes` enabled. From the repository:
 nix run path:.
 ```
 
-Or, after these changes have been published:
+Or run the public package directly:
 
 ```sh
 nix run github:cmattatall/readiff
@@ -147,7 +151,8 @@ If Home Manager uses an externally configured `pkgs` (such as nix-darwin's
 global packages), set the unfree predicate on that nixpkgs instance instead.
 
 Use `programs.rediff` and `inputs.rediff` when upgrading an existing configuration.
-Remove `?dir=nix` from older flake inputs; the flake now lives at the root.
+Remove older `?dir=nix` or `?dir=rediff` suffixes when using the public repository;
+its flake lives at the root.
 `nvimAlias` defaults to false, so existing users keep their normal `nvim` unless
 they opt in. With the alias enabled, disable `programs.neovim.enable` and remove
 any separate `pkgs.neovim` from `home.packages` to avoid a profile collision.

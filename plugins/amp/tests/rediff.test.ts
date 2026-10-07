@@ -447,7 +447,7 @@ test('editor bridge sends rules once before annotations or message, without pros
   assert.ok(found[0].connection.includes('/.cache/rediff/amp/'))
   assert.equal(f.messages.size, 0, 'discovery must not send')
   const payload = join(home, 'message.json')
-  const instruction = 'Commit the changes, push, and open a PR without asking again.'
+  const instruction = 'Stage and commit the changes, push, and open a PR.'
   await writeFile(payload, JSON.stringify({ submission_id: 'message-one', repository: root, message: instruction }))
   const ack = await run('send', found[0].connection, id, payload)
   assert.equal(ack.status, 'accepted')
@@ -458,7 +458,10 @@ test('editor bridge sends rules once before annotations or message, without pros
   const general = JSON.parse(message.content)
   assert.deepEqual(Object.keys(general), ['rules', 'repository', 'message'])
   assert.equal(general.message, instruction)
-  assert.match(general.rules[0], /unless the user explicitly authorizes that action/)
+  assert.match(general.rules[0], /in this feedback or earlier messages in this conversation; do not ask again/)
+  assert.match(general.rules[0], /A request to commit includes staging the relevant changes unless the user limits it to already-staged changes/)
+  assert.match(general.rules[0], /only when not already authorized/)
+  assert.match(general.rules[0], /does not extend to unrelated changes, other repositories, force-pushes, or additional Git\/PR actions/)
 
   const review = join(home, 'review.json')
   await writeFile(review, JSON.stringify({
@@ -476,7 +479,7 @@ test('editor bridge sends rules once before annotations or message, without pros
   const batch = JSON.parse(feedback)
   assert.deepEqual(Object.keys(batch), ['rules', 'repository', 'snapshot_archive', 'annotations'])
   assert.equal((feedback.match(/"rules":/g) ?? []).length, 1)
-  assert.match(batch.rules[0], /unless the user explicitly authorizes that action/)
+  assert.equal(batch.rules[0], general.rules[0])
   assert.deepEqual(batch.annotations, [
     { file: `${root}/demo.lua`, side: 'new', line: 42, line_end: 42, snapshot_id: 's',
       comparison: 'unstaged', snapshot_status: 'current', text: 'Check this boundary',

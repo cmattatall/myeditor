@@ -250,7 +250,11 @@ class AmpLiveTests(unittest.TestCase):
         sent = Handler.requests[-1][2]
         self.assertEqual("one", sent["id"])
         self.assertIn("fix this", sent["content"])
-        self.assertIn("user owns staging", sent["content"])
+        self.assertIn("only when not already authorized", sent["content"])
+        self.assertIn(
+            "in this feedback or earlier messages in this conversation; do not ask again",
+            sent["content"],
+        )
         self.assertEqual(ack, amp_live.send(self.connection, THREAD, self.payload))
         self.assertEqual(1, sum(request[0] == "POST" for request in Handler.requests))
         self.payload = Path(self.temp.name) / "message.json"

@@ -26,6 +26,7 @@ REVIEW QUICK REFERENCE
   h / l in tree       Collapse/expand group (also Left/Right); restore selection
   Enter in tree       Expand group only; keep tree focus
   ] / [               Next/previous hunk within the current Git group
+  Ctrl+Shift+] / [    Next/previous unseen hunk within the current Git group
   :fs / :fu           Focus STAGED / UNSTAGED
   s / S               Stage/unstage hunk / whole file
   i                   Edit annotation here, or create one
@@ -76,6 +77,11 @@ cancels. i edits that note. } / { cycles in creation order across files/sides;
 counts work (3}). d deletes a note, not source or already-sent feedback. These
 bindings leave ordinary files/note text unchanged.
 
+A file with saved notes has an orange ● at the right edge of its tree row.
+Both rows are marked if the file appears in STAGED and UNSTAGED. The dot includes
+notes on older snapshots and disappears when the file's last note is deleted,
+archived, or cleared after successful delivery.
+
 Jumping to an older note shows its original snapshot and pauses refresh/staging.
 Space R returns to current files. Old-side notes switch merged view to split.
 Editing a note preserves its anchor. :w in diff/tree sends the saved notes.
@@ -111,6 +117,19 @@ tree. Context-only line shifts do not count as new hunks. No manual marks to man
 
 ] / [ wraps through hunks within the current group; counts work (3]). :fs / :fu
 switch groups without changing pane focus. Space j/k moves files across groups.
+Ctrl+Shift+] / Ctrl+Shift+[ does the same but skips seen and baseline hunks.
+It works in the tree and either diff pane, preserves focus, and reports when no
+unseen hunks remain. Use Space R first when viewing an older annotation snapshot.
+Kitty and tmux must forward the modified brackets. If needed, add to kitty.conf:
+>
+  map ctrl+shift+[ send_text all \x1b[91;6u
+  map ctrl+shift+] send_text all \x1b[93;6u
+<
+And to tmux.conf:
+>
+  bind-key -n C-S-[ send-keys -l "\033[91;6u"
+  bind-key -n C-S-] send-keys -l "\033[93;6u"
+<
 
 s in a source pane toggles its Git hunk; S toggles the selected/displayed file.
 UNSTAGED stages; STAGED unstages. These actions apply immediately, change only
@@ -231,6 +250,10 @@ use split for exact old-side selections. Old-side search/note jumps do this for 
   :setlocal [no]number  Show/hide line numbers
   :setlocal [no]wrap    Wrap/unwrap text
 
+In a Review diff pane, :set wrap / :set nowrap (also :setlocal) applies to both
+panes. The choice survives file changes, refreshes, and split/merged switches.
+Ordinary editing windows, the tree, and note editors keep their own wrap setting.
+
 Cmd-w is a prefix, then a direction. Your terminal must forward Command keys;
 Kitty needs `map cmd+w no_op`. Normal/Visual Ctrl-w window navigation is disabled;
 Insert Ctrl-w still deletes a word. Closing a required source pane exits Review.
@@ -246,6 +269,11 @@ Normal Neovim editing applies outside protected source panes. Space f searches
 project files; Space / searches saved contents. In Review these search changed
 entries and both snapshot sides, including deletions. Enter chooses; Esc cancels.
 / and n/N search the current buffer. ? opens this guide; use :? for backward search.
+
+Opening a directory (for example, rediff src) uses the filesystem explorer.
+Its Git markers are green A for added, green U for untracked, and yellow M for
+modified. Directories summarize changes inside them, even when expanded. Deleted
+files are absent from this explorer; they remain available in Review.
 
 In a Review source pane, Option+Enter (Alt+Enter / gd) finds definitions of the
 symbol under the cursor using Neovim's LSP client. Results open in a separate
@@ -331,10 +359,13 @@ and receipt before retrying uncertain delivery. Retries use the original payload
 Without a binding, submissions stay local. Credentials never belong in Nix/Git.
 
 Built-in harnesses receive JSON: rules once, then context and annotations/message.
-There is no prose prefix or epilogue. Explicit authorization in your feedback
-permits the named Git/PR actions; otherwise the agent must ask. Exact ranges and
-snapshot status remain. Source/patches stay in the private outbox, referenced by
-path; custom receivers get the full payload. Choose your receiver carefully.
+There is no prose prefix or epilogue. Explicit Git/PR authorization in your
+feedback or earlier conversation messages carries forward within its scope;
+the agent must not ask again. A commit request includes staging relevant changes
+unless you limit it to already-staged changes. Other Git/PR actions still require
+authorization. Exact ranges and snapshot status remain. Source/patches stay in
+the private outbox, referenced by path; custom receivers get the full payload.
+Choose your receiver carefully.
 
 LIMITS                                                        *rediff-parity*
 Binary files, merge conflicts and files over 2 MiB are unsupported. Notes are

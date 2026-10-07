@@ -126,10 +126,13 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertEqual(str(self.payload.absolute()), message["snapshot_archive"])
         self.assertEqual(1, prompt.count('"rules":'))
         self.assertEqual(
-            "The user owns staging. Ask before staging, unstaging, resetting, committing, "
-            "pushing, or opening a pull request unless the user explicitly authorizes that "
-            "action in this feedback. Explicit authorization covers only the named actions; "
-            "do not ask again for those actions.",
+            "Honor the user's explicit Git/PR authorization in this feedback or earlier "
+            "messages in this conversation; do not ask again while that authorization "
+            "remains in scope. A request to commit includes staging the relevant changes "
+            "unless the user limits it to already-staged changes. Ask before staging, "
+            "unstaging, resetting, committing, pushing, or opening a pull request only "
+            "when not already authorized. Authorization does not extend to unrelated "
+            "changes, other repositories, force-pushes, or additional Git/PR actions.",
             message["rules"][0],
         )
         self.assertEqual(
@@ -269,7 +272,7 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertFalse(self.receipt.exists())
 
     def test_general_message_does_not_send_review_context(self):
-        instruction = "Commit this change and open a PR without asking again."
+        instruction = "Commit this change and open a PR."
         self.payload.write_text(
             json.dumps(
                 {
@@ -288,7 +291,8 @@ class HarnessReceiverTests(unittest.TestCase):
         self.assertEqual(["rules", "repository", "message"], list(prompt))
         self.assertEqual(instruction, prompt["message"])
         self.assertIn(
-            "unless the user explicitly authorizes that action", prompt["rules"][0]
+            "in this feedback or earlier messages in this conversation; do not ask again",
+            prompt["rules"][0],
         )
 
     def amp_output(self, **overrides):

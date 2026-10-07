@@ -72,16 +72,44 @@ require("codediff").setup({
 	-- Blank filler rows preserve alignment without rendering wide patterns per line.
 	diff = { compute_moves = false, highlight_priority = 150, filler_text = "" },
 	highlights = {
-		line_insert = "#24352f",
-		line_delete = "#3b2833",
-		char_insert = "#354e40",
-		char_delete = "#593743",
+		line_insert = "#234b2c",
+		line_delete = "#602a2a",
+		char_insert = "#356b3e",
+		char_delete = "#8a3939",
 	},
 })
 require("review.config").setup({ export = { clipboard = false, clear_on_close = false } })
 require("review.highlights").setup()
 require("neo-tree").setup({
-	filesystem = { hijack_netrw_behavior = "disabled" },
+	default_component_configs = {
+		name = { use_git_status_colors = false },
+		icon = { use_git_status_colors = false },
+		git_status = {
+			symbols = {
+				added = "A",
+				modified = "M",
+				untracked = "U",
+				deleted = "",
+				renamed = "",
+				ignored = "",
+				unstaged = "",
+				staged = "",
+				conflict = "",
+			},
+		},
+	},
+	filesystem = {
+		hijack_netrw_behavior = "open_current",
+		renderers = {
+			directory = {
+				{ "indent" },
+				{ "icon" },
+				{ "current_filter" },
+				{ "name" },
+				{ "git_status", hide_when_expanded = false },
+			},
+		},
+	},
 	window = {
 		width = 28,
 		mappings = {
@@ -91,6 +119,13 @@ require("neo-tree").setup({
 		},
 	},
 })
+local function explorer_highlights()
+	vim.api.nvim_set_hl(0, "NeoTreeGitAdded", { fg = "#4ade80", bold = true })
+	vim.api.nvim_set_hl(0, "NeoTreeGitUntracked", { fg = "#4ade80", bold = true })
+	vim.api.nvim_set_hl(0, "NeoTreeGitModified", { fg = "#facc15", bold = true })
+end
+explorer_highlights()
+vim.api.nvim_create_autocmd("ColorScheme", { callback = explorer_highlights })
 vim.api.nvim_create_autocmd("VimEnter", {
 	once = true,
 	callback = vim.schedule_wrap(function()

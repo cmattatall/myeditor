@@ -113,6 +113,98 @@ class EditorUI(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, condition)
             pump(editor)
 
+    def test_ctrl_shift_brackets_skip_seen_and_baseline_hunks(self):
+        path = Path(self.root, "zeta.txt")
+        lines = [f"line {i}\n" for i in range(1, 61)]
+        path.write_text("".join(lines))
+        gone = Path(self.root, "gone.txt")
+        gone.write_text("delete this file\n")
+        for args in (
+            ["add", "zeta.txt", "gone.txt"],
+            ["commit", "-m", "Navigation fixture"],
+        ):
+            subprocess.run(
+                ["git", "-C", self.root, *args], check=True, capture_output=True
+            )
+        lines[44] = "baseline edit\n"
+        path.write_text("".join(lines))
+        editor = self.launch(self.root)
+        editor.ui_try_resize(132, 14)
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        self.lua(editor, "require('rediff.live').stop(s)")
+        lines[4], lines[24] = "first new edit\n", "second new edit\n"
+        path.write_text("".join(lines))
+        gone.unlink()
+        Path(self.root, "staged.txt").write_text("unseen in another Git group\n")
+        Path(self.root, "unseen-new.txt").write_text("unseen untracked addition\n")
+        subprocess.run(["git", "-C", self.root, "add", "staged.txt"], check=True)
+        self.lua(editor, "r.refresh()")
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        show_zeta = "for i,e in ipairs(s.entries) do if e.path=='zeta.txt' then r.show(i); break end end"
+        self.lua(editor, show_zeta)
+        self.wait_for(
+            editor,
+            "(function() local a=require('rediff.awareness'); local t=a.get(s.root); "
+            "local f='unstaged\\0zeta.txt'; return a.hunk_state(t,f,t.current[f].hunks[1].id)=='seen' end)()",
+        )
+        # Freeze exposure after genuinely viewing the first hunk; navigation must
+        # distinguish it from both the unseen second hunk and baseline third hunk.
+        self.lua(editor, "require('rediff.awareness').stop()")
+        for view, pane in (("split", "new"), ("split", "old"), ("merged", "tree")):
+            self.lua(
+                editor,
+                f"r.view('{view}'); {show_zeta}; vim.api.nvim_set_current_win(s.{pane}_win)",
+            )
+            for keys, expected in (
+                ("<C-S-]>", ["zeta.txt", 2]),
+                ("<C-S-]>", ["unseen-new.txt", 1]),
+                ("<C-S-]>", ["gone.txt", 1]),
+                ("<C-S-[>", ["unseen-new.txt", 1]),
+                ("<C-S-[>", ["zeta.txt", 2]),
+                ("<C-S-[>", ["gone.txt", 1]),
+                ("<C-S-]>", ["zeta.txt", 2]),
+                ("3<C-S-[>", ["zeta.txt", 2]),
+            ):
+                with self.subTest(view=view, pane=pane, keys=keys, expected=expected):
+                    self.keys(editor, keys)
+                    self.assertEqual(
+                        expected,
+                        self.lua(editor, "return {s.current.path,s.selected_hunk}"),
+                    )
+                    self.assertTrue(
+                        self.lua(
+                            editor,
+                            f"return vim.api.nvim_get_current_win()==s.{pane}_win",
+                        )
+                    )
+        # A fully acknowledged baseline has no unseen targets and must not move.
+        self.lua(
+            editor,
+            "local a=require('rediff.awareness'); a.accept(s.root,vim.deepcopy(a.get(s.root).current))",
+        )
+        self.wait_for(editor, "not require('rediff.awareness').get(s.root).scanning")
+        before = self.lua(
+            editor,
+            "return {s.current.id,s.selected_hunk,vim.api.nvim_win_get_cursor(s.new_win)}",
+        )
+        self.keys(editor, "<C-S-]>")
+        self.assertEqual(
+            before,
+            self.lua(
+                editor,
+                "return {s.current.id,s.selected_hunk,vim.api.nvim_win_get_cursor(s.new_win)}",
+            ),
+        )
+        self.assertEqual(
+            "No unseen hunks in this Git group",
+            self.lua(editor, "return vim.g.startup_notice"),
+        )
+        # The original bracket keys still visit baseline hunks.
+        self.keys(editor, "]")
+        self.assertEqual(
+            ["zeta.txt", 3], self.lua(editor, "return {s.current.path,s.selected_hunk}")
+        )
+
     def test_change_awareness_tracks_visible_hunks_not_tree_previews(self):
         editor = self.launch(self.root)
         editor.ui_try_resize(132, 14)
@@ -1583,6 +1675,80 @@ class EditorUI(unittest.TestCase):
             )
         )
 
+    def test_tree_annotation_indicators(self):
+        subprocess.run(["git", "-C", self.root, "add", "auth.lua"], check=True)
+        path = Path(self.root, "auth.lua")
+        path.write_text(path.read_text() + "-- unstaged edit\n")
+        Path(self.root, "sub").mkdir()
+        Path(self.root, "sub/auth.lua").write_text("return 'same basename'\n")
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+
+        def marked_files(expected):
+            marks = self.lua(
+                editor,
+                "local marks=vim.api.nvim_buf_get_extmarks(s.tree_buf, "
+                "vim.api.nvim_get_namespaces()['rediff.annotations'],0,-1,{details=true}); "
+                "local result={}; for _,m in ipairs(marks) do "
+                "table.insert(result,{s.entries[s.rows[m[2]+1]].path,m[2]+1,m[4]}) end; return result",
+            )
+            self.assertCountEqual(expected, [path for path, _, _ in marks])
+            for _, _, details in marks:
+                self.assertEqual([["●", "ReviewAnnotation"]], details["virt_text"])
+                self.assertEqual("right_align", details["virt_text_pos"])
+            return marks
+
+        marked_files([])
+        self.lua(
+            editor,
+            """
+            local selection=require('rediff.selection')
+            for _,note in ipairs({{'new',5,'First note'},{'old',17,'Second note'}}) do
+                r.add_comment({file=s.current.path,side=note[1],snapshot_id=s.current.id,
+                    selection=selection.line(note[1]=='old' and s.old_buf or s.new_buf,note[2])},note[3])
+            end
+            """,
+        )
+        # One marker per row, not per comment; both Git groups share the file's notes.
+        marked_files(["auth.lua", "auth.lua"])
+        self.lua(
+            editor,
+            "for i,e in ipairs(s.entries) do if e.path=='plan.md' then r.show(i); break end end; "
+            "r.add_comment({file=s.current.path,side='new',snapshot_id=s.current.id, "
+            "selection=require('rediff.selection').line(s.new_buf,1)},'Plan note')",
+        )
+        expected = ["auth.lua", "auth.lua", "plan.md"]
+        for columns in (132, 88):
+            editor.ui_try_resize(columns, 32)
+            editor.command("colorscheme rose-pine")
+            pump(editor)
+            for _, row, _ in marked_files(expected):
+                self.keys(editor, f" e{row}G")
+                for focus in (" e", " d"):
+                    self.keys(editor, focus)
+                    cell = self.lua(
+                        editor,
+                        f"local p=vim.fn.screenpos(s.tree_win,{row},1); "
+                        "local col=vim.api.nvim_win_get_position(s.tree_win)[2] "
+                        "+ vim.api.nvim_win_get_width(s.tree_win)-1; "
+                        "return vim.api.nvim__inspect_cell(1,p.row-1,col)",
+                    )
+                    self.assertEqual("●", cell[0])
+                    self.assertEqual(0xFF9E64, cell[1]["foreground"])
+        # Notes still refer to their saved snapshots after staging and new edits.
+        subprocess.run(["git", "-C", self.root, "add", "plan.md"], check=True)
+        path.write_text(path.read_text() + "-- newer snapshot\n")
+        self.lua(editor, "r.refresh()")
+        marked_files(expected)
+        self.lua(editor, "r.leave(); r.open(); require('rediff.live').stop(r.state)")
+        marked_files(expected)
+        self.lua(editor, "r.jump_comment(s.comments[1]); r.delete_comment()")
+        marked_files(expected)
+        self.lua(editor, "r.jump_comment(s.comments[1]); r.delete_comment()")
+        marked_files(["plan.md"])
+        self.lua(editor, "r.archive()")
+        marked_files([])
+
     def test_compact_orange_annotations(self):
         path = Path(self.root, "auth.lua")
         path.write_text(
@@ -1832,6 +1998,80 @@ class EditorUI(unittest.TestCase):
             self.lua(outside, "return s == nil and #vim.api.nvim_list_wins() == 1")
         )
 
+    def test_directory_argument_explorer_git_markers(self):
+        root = Path(self.root)
+        (root / "modified-dir").mkdir()
+        (root / "modified-dir" / "changed.txt").write_text("before\n")
+        (root / "modified-dir" / "deleted.txt").write_text("remove me\n")
+        (root / "clean.txt").write_text("unchanged\n")
+        for args in (
+            ["add", "modified-dir", "clean.txt"],
+            ["commit", "-m", "Explorer fixture"],
+        ):
+            subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
+        (root / "modified-dir" / "changed.txt").write_text("after\n")
+        (root / "modified-dir" / "deleted.txt").unlink()
+        (root / "new-dir").mkdir()
+        (root / "new-dir" / "brand-new.txt").write_text("new\n")
+        (root / "added.txt").write_text("staged addition\n")
+        subprocess.run(["git", "-C", self.root, "add", "added.txt", "auth.lua"], check=True)
+        # Launch from outside the repository, as with `nvim cortex`.
+        editor = self.launch(self.directory.name, file=self.root)
+        self.wait_for(editor, "vim.bo.filetype == 'neo-tree'")
+        self.assertTrue(self.lua(editor, "return s == nil"))
+        self.wait_for(
+            editor,
+            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):match('auth%.lua[^\\n]*M') ~= nil",
+        )
+        expected = {
+            "modified-dir": ("M", 0xFACC15),
+            "new-dir": ("U", 0x4ADE80),
+            "auth.lua": ("M", 0xFACC15),
+            "added.txt": ("A", 0x4ADE80),
+            "plan.md": ("U", 0x4ADE80),
+        }
+        for phase in ("collapsed", "expanded", "theme reload"):
+            if phase == "expanded":
+                for name in ("modified-dir", "new-dir"):
+                    self.assertGreater(editor.funcs.search(name, "w"), 0)
+                    self.keys(editor, "<CR>")
+                expected.update(
+                    {
+                        "changed.txt": ("M", 0xFACC15),
+                        "brand-new.txt": ("U", 0x4ADE80),
+                    }
+                )
+            elif phase == "theme reload":
+                editor.command("colorscheme rose-pine")
+                pump(editor)
+            lines = list(editor.current.buffer[:])
+            self.assertFalse(
+                any("deleted.txt" in line or "removed.lua" in line for line in lines)
+            )
+            for name, (marker, color) in expected.items():
+                with self.subTest(phase=phase, name=name):
+                    row = next(i for i, line in enumerate(lines, 1) if name in line)
+                    self.assertRegex(lines[row - 1], rf"\s{marker}(?:\s|$)")
+                    self.keys(editor, f"{row}G")
+                    cell = self.lua(
+                        editor,
+                        "local line=vim.api.nvim_get_current_line(); "
+                        "local col=line:find('%s[AMU]%s')+1; "
+                        f"local p=vim.fn.screenpos(0,{row},col); "
+                        "return vim.api.nvim__inspect_cell(1,p.row-1,p.col-1)",
+                    )
+                    self.assertEqual(marker, cell[0])
+                    self.assertEqual(color, cell[1]["foreground"])
+            clean = next(line for line in lines if "clean.txt" in line)
+            self.assertNotRegex(clean, r"\s[AMU](?:\s|$)")
+        self.assertGreater(editor.funcs.search("changed.txt", "w"), 0)
+        self.keys(editor, "<CR>")
+        self.wait_for(editor, "vim.bo.filetype ~= 'neo-tree'")
+        self.assertEqual(
+            (root / "modified-dir" / "changed.txt").resolve(),
+            Path(editor.current.buffer.name).resolve(),
+        )
+
     def test_leaving_startup_review_can_explore_worktree_subdirectories(self):
         worktree = Path(self.directory.name, "linked-worktree")
         subprocess.run(
@@ -1991,6 +2231,62 @@ class EditorUI(unittest.TestCase):
                 editor, "return vim.api.nvim_get_current_tabpage() == s.previous_tab"
             )
         )
+
+    def test_tree_status_marker_colors(self):
+        Path(self.root, "original.lua").write_text("return 'rename fixture'\n")
+        for args in (
+            ["add", "original.lua"],
+            ["commit", "-m", "Add rename fixture"],
+            ["mv", "original.lua", "renamed.lua"],
+        ):
+            subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
+        Path(self.root, "added.lua").write_text("return 'new file'\n")
+        subprocess.run(["git", "-C", self.root, "add", "added.lua"], check=True)
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        expected = {
+            "A": ("ReviewAdded", 0x4ADE80),
+            "M": ("ReviewModified", 0xFACC15),
+            "U": ("ReviewUntracked", 0x4ADE80),
+            "D": ("ReviewDeleted", 0xF87171),
+            "R": ("ReviewRenamed", 0xA3A3A3),
+        }
+        for phase in ("startup", "theme reload", "staging refresh"):
+            if phase == "theme reload":
+                editor.command("colorscheme rose-pine")
+            elif phase == "staging refresh":
+                subprocess.run(["git", "-C", self.root, "add", "auth.lua"], check=True)
+                self.lua(editor, "r.refresh()")
+            rows = self.lua(
+                editor,
+                "local rows = {}; for row, i in pairs(s.rows) do "
+                "table.insert(rows, {row, s.entries[i].status}) end; return rows",
+            )
+            self.assertEqual(set(expected), {status for _, status in rows})
+            for row, status in rows:
+                with self.subTest(phase=phase, status=status, row=row):
+                    group, color = expected[status]
+                    mark = self.lua(
+                        editor,
+                        "return vim.api.nvim_buf_get_extmark_by_id(s.tree_buf, "
+                        f"vim.api.nvim_get_namespaces()['rediff.tree'], {row}, {{details=true}})",
+                    )
+                    self.assertEqual([row - 1, 1], mark[:2])
+                    self.assertEqual(2, mark[2]["end_col"], "Color only the marker")
+                    self.assertEqual(group, mark[2]["hl_group"])
+                    self.assertEqual(color, editor.api.get_hl(0, {"name": group})["fg"])
+                    self.assertNotIn("bg", editor.api.get_hl(0, {"name": group}))
+                    # Read rendered cells with the row selected and with diff focus.
+                    self.keys(editor, f" e{row}G")
+                    for focus in (" e", " d"):
+                        self.keys(editor, focus)
+                        rendered = self.lua(
+                            editor,
+                            f"local p = vim.fn.screenpos(s.tree_win, {row}, 2); "
+                            "return vim.api.nvim__inspect_cell(1, p.row - 1, p.col - 1)",
+                        )
+                        self.assertEqual(status, rendered[0])
+                        self.assertEqual(color, rendered[1]["foreground"])
 
     def test_tree_row_selection(self):
         editor = self.launch(self.root)
@@ -2788,6 +3084,77 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
 
+    def test_wrap_changes_apply_to_both_diff_panes(self):
+        path = Path(self.root, "aaa-wrap.txt")
+        text = "The old configuration keeps this deliberately long line visible across several screen rows when wrapping is enabled in the diff viewer. END\n"
+        path.write_text(text)
+        for args in (["add", "aaa-wrap.txt"], ["commit", "-m", "Wrap fixture"]):
+            subprocess.run(
+                ["git", "-C", self.root, *args], check=True, capture_output=True
+            )
+        path.write_text(text.replace("old", "new"))
+        editor = self.launch(self.root, file="auth.lua")
+        editor.command("setlocal nowrap")
+        ordinary = editor.current.window.handle
+        self.keys(editor, " r")
+        self.lua(editor, "require('rediff.live').stop(s)")
+        tree_wrap = self.lua(editor, "return vim.wo[s.tree_win].wrap")
+
+        def both(value):
+            self.assertEqual(
+                [value, value],
+                self.lua(
+                    editor, "return {vim.wo[s.old_win].wrap,vim.wo[s.new_win].wrap}"
+                ),
+            )
+            self.assertEqual(
+                tree_wrap, self.lua(editor, "return vim.wo[s.tree_win].wrap")
+            )
+            if self.lua(editor, "return s.current.path == 'aaa-wrap.txt'"):
+                for pane in ("old", "new"):
+                    rows = self.lua(
+                        editor,
+                        f"return vim.api.nvim_win_text_height(s.{pane}_win,{{start_row=0,end_row=0}}).all",
+                    )
+                    self.assertEqual(value, rows > 1, f"{pane} pane rendered wrap")
+
+        both(False)
+        for pane, command, expected in (
+            ("new", "set wrap", True),
+            ("old", "set nowrap", False),
+            ("old", "setlocal wrap", True),
+            ("new", "setlocal invwrap", False),
+            ("new", "set wrap!", True),
+            ("old", "setglobal nowrap", True),
+        ):
+            with self.subTest(pane=pane, command=command):
+                self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane}_win)")
+                self.keys(editor, f":{command}<CR>")
+                both(expected)
+        for action in (
+            "r.show(#s.entries)",
+            "r.refresh()",
+            "r.view('merged'); r.view('split')",
+        ):
+            self.lua(editor, action)
+            both(True)
+        self.keys(editor, ":view merged<CR>:set nowrap<CR>:view split<CR>")
+        both(False)
+        # Options in ordinary editing windows must not affect the Review tab.
+        self.lua(editor, "vim.api.nvim_set_current_tabpage(s.previous_tab)")
+        self.assertFalse(editor.api.get_option_value("wrap", {"win": ordinary}))
+        self.keys(editor, ":setlocal wrap<CR>")
+        both(False)
+        self.lua(
+            editor,
+            "vim.api.nvim_set_current_tabpage(s.tab); vim.api.nvim_set_current_win(s.new_win)",
+        )
+        self.keys(editor, ":set wrap<CR>")
+        both(True)
+        self.lua(editor, "r.leave()")
+        self.keys(editor, ":setlocal nowrap<CR>")
+        self.assertFalse(editor.current.window.options["wrap"])
+
     def test_message_tab_returns_to_review_without_sending(self):
         editor = self.launch(self.root)
         self.keys(editor, ":harness send<CR>iDraft<Tab>message<Esc>")
@@ -3580,16 +3947,16 @@ class EditorUI(unittest.TestCase):
             )
         )
 
-    def test_muted_diff_backgrounds_preserve_syntax_after_theme_reload(self):
+    def test_red_green_diff_backgrounds_preserve_syntax_after_theme_reload(self):
         editor = self.launch(self.root)
         for reload_theme in (False, True):
             if reload_theme:
                 editor.command("colorscheme rose-pine")
             for name, background in (
-                ("CodeDiffLineInsert", 0x24352F),
-                ("CodeDiffLineDelete", 0x3B2833),
-                ("CodeDiffCharInsert", 0x354E40),
-                ("CodeDiffCharDelete", 0x593743),
+                ("CodeDiffLineInsert", 0x234B2C),
+                ("CodeDiffLineDelete", 0x602A2A),
+                ("CodeDiffCharInsert", 0x356B3E),
+                ("CodeDiffCharDelete", 0x8A3939),
             ):
                 highlight = editor.api.get_hl(0, {"name": name})
                 self.assertEqual(background, highlight["bg"])
@@ -3618,7 +3985,7 @@ class EditorUI(unittest.TestCase):
         """,
         )
         highlights = [editor.api.get_hl(0, {"name": group}) for group in deleted_groups]
-        self.assertEqual({0x3B2833, 0x593743}, {hl["bg"] for hl in highlights})
+        self.assertEqual({0x602A2A, 0x8A3939}, {hl["bg"] for hl in highlights})
         self.assertTrue(
             any("fg" in hl for hl in highlights),
             "Deleted virtual lines need syntax colors too",
