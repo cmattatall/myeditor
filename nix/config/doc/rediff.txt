@@ -1,8 +1,10 @@
 *rediff.txt*                    rediff help                          *rediff*
                                                                  *help.txt*
 
-? / Esc / q closes help. Space p finds commands. / searches; n/N repeats.
-Ctrl-] follows a topic link; Ctrl-t returns. Space is the leader key.
+Space / f pages down; b pages up. d/u moves half a page; g/G goes to top/bottom.
+/ searches; n/N repeats. ? / Esc / q closes help. :Commands finds commands.
+Ctrl-] follows a topic link; Ctrl-t returns. Space is a pager key in help;
+outside help it remains the leader key.
 
 HOW TO REVIEW                                                *rediff-workflow*
 

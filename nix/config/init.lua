@@ -55,12 +55,23 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
 			height = height,
 			style = "minimal",
 			border = "single",
-			title = " Help · ?/Esc/q close ",
+			title = " Help · Space/b page · / search · q close ",
 			title_pos = "center",
 		})
 		vim.wo.winhighlight = "FloatBorder:RediffHelpBorder"
 		vim.wo.wrap = true
 		vim.wo.linebreak = true
+		-- Help is a pager, not a leader-key workspace. Consume Space immediately.
+		for key, command in pairs({
+			["<Space>"] = "<C-f>",
+			f = "<C-f>",
+			b = "<C-b>",
+			d = "<C-d>",
+			u = "<C-u>",
+			g = "gg",
+		}) do
+			vim.keymap.set("n", key, command, { buffer = event.buf, nowait = true, desc = "Page through help" })
+		end
 		for _, key in ipairs({ "?", "q", "<Esc>" }) do
 			vim.keymap.set("n", key, "<Cmd>close<CR>", { buffer = event.buf, desc = "Close help overlay" })
 		end

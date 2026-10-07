@@ -1043,6 +1043,45 @@ class EditorUI(unittest.TestCase):
             ),
         )
 
+    def test_help_pages_like_man_without_changing_workspace_keys(self):
+        editor = self.launch(self.root, file="auth.lua")
+        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        # Space must page immediately, not wait for a possible leader sequence.
+        editor.options["timeoutlen"] = 5000
+        for mode in ("editing", "review"):
+            if mode == "review":
+                self.keys(editor, " r")
+            original = editor.current.window.handle
+            self.keys(editor, "?")
+            self.assertEqual("help", editor.current.buffer.options["filetype"])
+            height = editor.current.window.height
+            self.keys(editor, "g")
+            self.assertEqual(1, editor.current.window.cursor[0])
+            for forward in (" ", "f", "<PageDown>"):
+                self.keys(editor, forward)
+                self.assertGreater(editor.eval('line("w0")'), height // 2)
+                self.keys(editor, "b")
+                self.assertEqual(1, editor.eval('line("w0")'))
+            self.keys(editor, "d")
+            self.assertGreater(editor.eval('line("w0")'), 1)
+            self.keys(editor, "u")
+            self.assertEqual(1, editor.eval('line("w0")'))
+            self.keys(editor, "G")
+            self.assertEqual(
+                len(editor.current.buffer), editor.current.window.cursor[0]
+            )
+            self.keys(editor, "g/REVIEW QUICK REFERENCE<CR>")
+            self.assertEqual("REVIEW QUICK REFERENCE", editor.current.line)
+            self.keys(editor, "q")
+            self.assertEqual(original, editor.current.window.handle)
+            self.keys(editor, " p")
+            self.wait_for(editor, 'vim.bo.filetype == "fzf"')
+            self.keys(editor, "<Esc>")
+            self.wait_for(editor, f"vim.api.nvim_get_current_win() == {original}")
+        self.assertEqual(
+            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+        )
+
     def test_command_picker(self):
         editor = self.launch(self.root)
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
@@ -1056,7 +1095,7 @@ class EditorUI(unittest.TestCase):
             self.keys(editor, "?")
             self.assertEqual("help", editor.current.buffer.options["filetype"])
             help_window = editor.current.window.handle
-            self.keys(editor, " p")
+            self.keys(editor, ":Commands<CR>")
             self.wait_for(editor, 'vim.bo.filetype == "fzf"')
             self.assertFalse(editor.api.win_is_valid(help_window))
             self.keys(editor, "PaletteProbe")
