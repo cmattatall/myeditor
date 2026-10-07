@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
-import plugin from '../rediff.ts'
+import plugin from '../readiff.ts'
 
 type Command = (ctx: any) => Promise<void>
 
@@ -66,7 +66,7 @@ function fakeAmp(root = process.cwd()) {
 }
 
 async function connect(f: ReturnType<typeof fakeAmp>, id: string, append?: (...args: any[]) => Promise<void>) {
-  await f.commands.get('rediff-connect')!(f.context(id, append))
+  await f.commands.get('readiff-connect')!(f.context(id, append))
   const command = f.messages.get(id)!.at(-1)![0].content
   const path = command.match(/^Connection: (.+)$/m)![1]
   return { path, descriptor: JSON.parse(await readFile(path, 'utf8')) }
@@ -113,10 +113,10 @@ async function eventStream(descriptor: any) {
 
 test('connect posts editor instructions to its thread, reuses connections, and cleans up', async () => {
   const f = fakeAmp(); await plugin(f.amp)
-  assert.deepEqual([...f.commands.keys()], ['rediff-connect', 'rediff-disconnect'])
+  assert.deepEqual([...f.commands.keys()], ['readiff-connect', 'readiff-disconnect'])
   await Promise.all([
-    f.commands.get('rediff-connect')!(f.context('T-a')),
-    f.commands.get('rediff-connect')!(f.context('T-a')),
+    f.commands.get('readiff-connect')!(f.context('T-a')),
+    f.commands.get('readiff-connect')!(f.context('T-a')),
   ])
   assert.equal(f.messages.get('T-a')!.length, 2, 'each explicit connect shows the command')
   assert.deepEqual(f.notifications, [], 'the launch command must not be a transient popup')
@@ -136,7 +136,7 @@ test('connect posts editor instructions to its thread, reuses connections, and c
   assert.ok(!announcement.content.includes(a.descriptor.token), 'never publish the authentication token')
   assert.ok(!f.messages.get('T-b')![0][0].content.includes(a.path), 'commands stay in their own threads')
   assert.deepEqual(f.notifications, [], 'repeated connect also avoids the popup')
-  await f.commands.get('rediff-disconnect')!(f.context('T-a'))
+  await f.commands.get('readiff-disconnect')!(f.context('T-a'))
   await assert.rejects(access(a.path)); assert.equal((await fetch(a.descriptor.url).catch(() => null)), null)
   await Promise.all(f.disposers.map((dispose) => dispose()))
   await assert.rejects(access(b.path))
@@ -251,7 +251,7 @@ test('activity streams full safe snapshots to multiple clients and clean up', as
   await first.cancel()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(thread.state.observers.size, 1, 'one shared thread subscription remains for all clients')
-  await f.commands.get('rediff-disconnect')!(ctx)
+  await f.commands.get('readiff-disconnect')!(ctx)
   assert.equal(thread.state.observers.size, 0)
   assert.equal(thread.title.observers.size, 0)
   await second.cancel().catch(() => {})
@@ -358,7 +358,7 @@ test('session start registers silently, probes authenticate, and disconnect stay
   assert.equal((await post(descriptor, { id: 'review', content: 'automatic feedback' })).status, 204)
   assert.match(f.messages.get('T-auto')!.at(-1)![0].content, /automatic feedback/)
 
-  await f.commands.get('rediff-disconnect')!(ctx)
+  await f.commands.get('readiff-disconnect')!(ctx)
   await f.events.get('agent.start')!({}, ctx)
   await f.events.get('session.start')!({}, ctx)
   assert.deepEqual(await readdir(registry), [], 'disconnect suppresses automatic reconnect until manual connect or reload')

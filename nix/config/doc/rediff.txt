@@ -179,7 +179,7 @@ searchable panel for all available sessions. Each row shows its worktree directo
 long paths are shortened in the list, with the full path in the selected details.
 The open panel discovers sessions every second; closing it stops polling.
 Amp may run in another terminal emulator or tmux session on this machine under
-the same user account. Load the rediff plugin in each Amp instance. Remote
+the same user account. Load the readiff plugin in each Amp instance. Remote
 machines and orbs are not discoverable through this local connection.
   /           Filter by alias, provider, title, ID, worktree, or activity
   Enter       Connect/disconnect; connecting locally selects the annotation target

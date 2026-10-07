@@ -185,7 +185,7 @@ retains drafts and does not stop the agent. An ACK is not a completed agent turn
 Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate
 from `:ReviewHarness amp THREAD`, which starts an Amp CLI continuation. This
-repository owns the rediff plugin, installer, and tests under `plugins/amp/`.
+repository owns the readiff plugin, installer, and tests under `plugins/amp/`.
 Home Manager can install it; Home Manager and shell installs require a manual
 reload. The registry is
 `~/.cache/rediff/amp` with no legacy discovery. Feedback uses rules-first JSON

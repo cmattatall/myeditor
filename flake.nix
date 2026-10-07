@@ -118,6 +118,7 @@
                 test "$(nvim)" = updated-editor
                 test "$(cat ${standalone}/home-files/.config/rediff/standalone-owner)" = rediff-standalone-v1
                 test ! -e ${standalone}/home-files/.config/amp/plugins/rediff.ts
+                test ! -e ${standalone}/home-files/.config/amp/plugins/readiff.ts
                 test ! -e ${standalone}/home-files/.omp/agent/extensions/rediff.ts
                 touch "$out"
               '';

@@ -277,7 +277,7 @@ def request_reload(connection_path, expected_thread, root):
     body = json.dumps({
         "id": "reload-" + uuid.uuid4().hex,
         "content": (
-            "I just confirmed :harness install amp in rediff and installed the updated rediff plugin. "
+            "I just confirmed :harness install amp in rediff and installed the updated readiff plugin. "
             "Please call reload_plugins now to activate it. This request authorizes only that reload; "
             "do not install anything else, edit files, or change Git state. Continue any existing work afterward."
         ),

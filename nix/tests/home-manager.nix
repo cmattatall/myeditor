@@ -27,6 +27,10 @@ let
     }).config;
   disabled = evaluate { };
   enabled = evaluate { enable = true; };
+  ampEnabled = evaluate {
+    enable = true;
+    ampPlugin.enable = true;
+  };
   aliased = evaluate {
     enable = true;
     nvimAlias = true;
@@ -53,6 +57,11 @@ assert builtins.elem (toString extraPackage) (paths aliased.home.packages);
 assert builtins.elem "${aliased.home.profileDirectory}/bin" aliased.home.sessionPath;
 assert !(aliased.home.file ? ".config/rediff/standalone-owner");
 assert !(aliased.home.file ? ".config/amp/plugins/rediff.ts");
+assert !(aliased.home.file ? ".config/amp/plugins/readiff.ts");
+assert !(ampEnabled.home.file ? ".config/amp/plugins/rediff.ts");
+assert
+  builtins.readFile ampEnabled.home.file.".config/amp/plugins/readiff.ts".source
+  == builtins.readFile ../../plugins/amp/readiff.ts;
 assert !(aliased.home.file ? ".omp/agent/extensions/rediff.ts");
 assert
   builtins.fromJSON aliased.xdg.configFile."rediff/settings.json".text == {

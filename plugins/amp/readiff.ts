@@ -1,5 +1,5 @@
 /*
- * Derived from cmattatall/revdiff's Amp plugin; maintained here as rediff.
+ * Derived from cmattatall/revdiff's Amp plugin; maintained here as readiff.
  * MIT License
  * Copyright (c) 2026 Umputun
  *
@@ -29,7 +29,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 
-export const description = 'Rediff: receive editor review feedback in the current Amp thread.'
+export const description = 'Readiff: receive editor review feedback in the current Amp thread.'
 
 const MAX_BODY = 1024 * 1024
 const MAX_ID = 256
@@ -138,13 +138,13 @@ async function showConnection(thread: PluginThread, descriptor: string): Promise
   await thread.appendUserMessage({
     type: 'user-message',
     content: [
-      'Rediff is connected. Setup information for the human user, not a request for the agent to run commands or edit files.',
+      'Readiff is connected. Setup information for the human user, not a request for the agent to run commands or edit files.',
       'In rediff, open this same checkout and run :harness connect amp.',
       `If multiple sessions match, select thread ${thread.id} in the picker.`,
       'Use :harness send to compose a message, then :w to send it.',
       '',
       `Connection: ${descriptor}`,
-      'This connection is valid until the plugin disconnects or reloads. Run rediff: connect again to show setup information.',
+      'This connection is valid until the plugin disconnects or reloads. Run readiff: connect again to show setup information.',
     ].join('\n'),
   })
 }
@@ -155,7 +155,7 @@ async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 }
 
-export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
+export default async function readiffPlugin(amp: PluginAPI): Promise<void> {
   const connections = new Map<string, Connection>()
   const connecting = new Map<string, Promise<void>>()
   const disconnected = new Set<string>()
@@ -172,7 +172,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
 
   async function connect(ctx: PluginCommandContext, announce: boolean): Promise<void> {
     if (!ctx.thread) {
-      await ctx.ui.notify('Start a thread before connecting rediff.')
+      await ctx.ui.notify('Start a thread before connecting readiff.')
       return
     }
     const existing = connections.get(ctx.thread.id)
@@ -182,7 +182,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
     }
     const workspaceURI = ctx.system.workspaceRoot
     if (!workspaceURI) {
-      await ctx.ui.notify('Open a workspace before connecting rediff.')
+      await ctx.ui.notify('Open a workspace before connecting readiff.')
       return
     }
 
@@ -270,11 +270,11 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
           await outcome.result
           response.writeHead(204).end()
         } catch (error) {
-          amp.logger.log('rediff feedback append failed; id remains cached', id, error)
+          amp.logger.log('readiff feedback append failed; id remains cached', id, error)
           response.writeHead(500).end('feedback outcome is uncertain; check the thread before reconnecting and resending')
         }
       })().catch((error) => {
-        amp.logger.log('rediff request failed', error)
+        amp.logger.log('readiff request failed', error)
         if (!response.headersSent) response.writeHead(500)
         response.end('internal error')
       })
@@ -291,13 +291,13 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
       throw error
     })
     const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('rediff server has no TCP address')
+    if (!address || typeof address === 'string') throw new Error('readiff server has no TCP address')
     const directory = await (async () => {
       const registry = join(homedir(), '.cache/rediff/amp')
       await mkdir(registry, { recursive: true, mode: 0o700 })
       const info = await lstat(registry)
       if (!info.isDirectory() || (info.mode & 0o077) !== 0 || info.uid !== process.getuid?.()) {
-        throw new Error('rediff connection registry must be a private directory owned by you')
+        throw new Error('readiff connection registry must be a private directory owned by you')
       }
       return mkdtemp(join(registry, 'session-'))
     })().catch(async (error) => {
@@ -346,7 +346,7 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
     try {
       await ensureConnection(ctx, false)
     } catch (error) {
-      amp.logger.log('rediff automatic connection failed', error)
+      amp.logger.log('readiff automatic connection failed', error)
     }
   }
   amp.on('session.start', autoConnect)
@@ -366,25 +366,25 @@ export default async function rediffPlugin(amp: PluginAPI): Promise<void> {
         return path !== '' && path !== '..' && !path.startsWith('../') && !isAbsolute(path)
       })
     } catch (error) {
-      amp.logger.log('rediff file-change detection failed', error)
+      amp.logger.log('readiff file-change detection failed', error)
     }
     // Error/cancelled tools may have partially applied edits; Git decides what actually changed.
     connection.activity.result(event.toolUseID, filesChanged)
   })
-  amp.registerCommand('rediff-connect', {
-    category: 'rediff', title: 'connect', description: 'Connect editor review feedback to this thread',
+  amp.registerCommand('readiff-connect', {
+    category: 'readiff', title: 'connect', description: 'Connect editor review feedback to this thread',
   }, async (ctx) => {
     if (ctx.thread) disconnected.delete(ctx.thread.id)
     await ensureConnection(ctx, true)
   })
-  amp.registerCommand('rediff-disconnect', {
-    category: 'rediff', title: 'disconnect', description: 'Disconnect editor review feedback from this thread',
+  amp.registerCommand('readiff-disconnect', {
+    category: 'readiff', title: 'disconnect', description: 'Disconnect editor review feedback from this thread',
   }, async (ctx) => {
     if (!ctx.thread) return void await ctx.ui.notify('No current thread to disconnect.')
     disconnected.add(ctx.thread.id)
     await connecting.get(ctx.thread.id)
     const removed = await disconnect(ctx.thread.id)
-    await ctx.ui.notify(removed ? 'Rediff disconnected.' : 'Rediff is not connected to this thread.')
+    await ctx.ui.notify(removed ? 'Readiff disconnected.' : 'Readiff is not connected to this thread.')
   })
   amp.onDispose(async () => {
     await Promise.allSettled(connecting.values())

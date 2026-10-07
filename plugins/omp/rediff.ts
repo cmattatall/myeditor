@@ -1,6 +1,6 @@
 /*
  * Rediff for oh-my-pi (omp): receive editor review feedback in the current omp session.
- * Wire contract shared with plugins/amp/rediff.ts (derived from cmattatall/revdiff's Amp plugin).
+ * Wire contract shared with plugins/amp/readiff.ts (derived from cmattatall/revdiff's Amp plugin).
  * MIT License
  * Copyright (c) 2026 Umputun
  *

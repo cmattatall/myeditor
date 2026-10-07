@@ -392,7 +392,7 @@ includes the adapters, not the agent CLIs or credentials.
 
 ### Steer a live Amp process
 
-This repository owns the **rediff** Amp plugin in `plugins/amp/rediff.ts`,
+This repository owns the **readiff** Amp plugin in `plugins/amp/readiff.ts`,
 its installer, and tests. It publishes a private live registry at
 `~/.cache/rediff/amp`. It has no runtime dependency on the revdiff fork
 and does not discover older registries. The plugin forwards the editor's
@@ -427,7 +427,7 @@ programs.rediff = {
 ```
 
 `ampPlugin.enable` also defaults to true when `harness = "amp"`. The plugin
-is installed at `~/.config/amp/plugins/rediff.ts`; Amp itself and its
+is installed at `~/.config/amp/plugins/readiff.ts`; Amp itself and its
 authentication remain separate. Other plugin files are left untouched.
 Do not enable another copy in a project or global plugin scope.
 
@@ -437,7 +437,7 @@ Without Home Manager, install directly from the editor:
 :harness install amp
 ```
 
-This asks for confirmation before installing the bundled **rediff plugin**
+This asks for confirmation before installing the bundled **readiff plugin**
 (not the Amp CLI). Cancel is the default. No Git
 repository is required. With a selected live Amp target, the confirmation also
 authorizes a small request to that thread to call `reload_plugins` after a
@@ -453,13 +453,16 @@ The same installer can be run from this repository's root:
 bash plugins/amp/install.sh
 ```
 
-The installer only writes `rediff.ts` and refuses to replace symlinks
-(including Home Manager-owned files) or non-files. It installs
+The installer writes `readiff.ts` and moves a legacy `rediff.ts` to a unique backup
+under `~/.config/amp/plugin-backups/`, outside Amp's active plugin directory.
+It refuses symlinks (including Home Manager-owned files) or non-files at either
+name. Update Home Manager-managed plugins through Home Manager instead; it removes
+the old managed filename when switching to the new one. The installer installs
 only the plugin; use Nix for the editor. Shell and Home Manager installations
 still require a manual plugin reload. Reload invalidates the live connection;
 use `:harness connect amp` again once Amp has registered the new endpoint.
-In Amp's command palette, **rediff: connect** shows connection instructions;
-**rediff: disconnect** stops this thread's endpoint. Session/agent start
+In Amp's command palette, **readiff: connect** shows connection instructions;
+**readiff: disconnect** stops this thread's endpoint. Session/agent start
 registers silently by default.
 
 Relaunch rediff using the updated package, then connect in the same checkout:
@@ -484,7 +487,7 @@ activity streams. Closing it stops polling. Connecting sends nothing and does
 not start an agent.
 
 Amp can run in another terminal window, emulator, or tmux session on the same
-machine and user account. Each Amp instance must load the rediff plugin; discovery
+machine and user account. Each Amp instance must load the readiff plugin; discovery
 uses `~/.cache/rediff/amp`, not terminal environment variables. Remote machines
 and orbs do not share this local registry or loopback connection.
 
@@ -723,7 +726,7 @@ Format Nix files from the root with `nix fmt -- flake.nix nix/*.nix`.
 `flake check` builds a sample
 Home Manager generation without activating it, runs Neovim integration tests
 against a disposable Git repository, tests the harness adapters, and exercises
-the rediff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
+the readiff plugin, installer, and Python-to-plugin transport with a fake Amp thread.
 It does not contact a live LLM or alter your Home Manager profile.
 
 Update nixpkgs/Home Manager with `nix flake update --flake path:.` and rerun

@@ -1,6 +1,6 @@
 // A separate plugin host, with no shared memory or terminal state with the editor.
 import { pathToFileURL } from 'node:url'
-import plugin from '../rediff.ts'
+import plugin from '../readiff.ts'
 
 const [root, id] = process.argv.slice(2)
 const handlers = new Map<string, (event: unknown, context: any) => unknown>()

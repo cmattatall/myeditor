@@ -592,9 +592,9 @@ function M.install(provider)
 	local target = has_session and vim.deepcopy(session.target) or {}
 	local reload = provider == "amp" and target.name == "amp-live"
 	local directory = assert(vim.env.HOME, "HOME must be set") .. "/.config/amp/plugins/"
-	local prompt = "Install the bundled rediff Amp plugin at "
+	local prompt = "Install the bundled readiff Amp plugin at "
 		.. directory
-		.. "rediff.ts?\n"
+		.. "readiff.ts?\n"
 		.. "This does not install the Amp CLI.\n"
 		.. (
 			reload and ("Ask Amp thread " .. target.session .. " to reload its plugins after installation?")
@@ -620,7 +620,7 @@ function M.install(provider)
 				)
 				return
 			end
-			notify("Installed rediff; requesting plugin reload from Amp.")
+			notify("Installed readiff; requesting plugin reload from Amp.")
 			local started, reload_err = pcall(vim.system, {
 				"rediff-amp-live",
 				"reload",

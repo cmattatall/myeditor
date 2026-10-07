@@ -89,7 +89,7 @@ Add these settings to `home.nix`:
 programs.rediff = {
   enable = true;
   nvimAlias = true;           # Use this editing configuration when running nvim
-  ampPlugin.enable = false;  # Opt in to managing the rediff Amp plugin
+  ampPlugin.enable = false;  # Opt in to managing the readiff Amp plugin
   reviewRefreshInterval = 3; # Seconds; 0 disables fallback polling, not events
 };
 
@@ -188,7 +188,7 @@ PATH precedence, and integration with an existing home configuration.
 5. Review the next edits: violet **◆** means changed/unseen, cyan **◇** means
    changed/seen. **s** stages a hunk; **S** stages a file. **Space R** refreshes.
 
-For a live Amp session, install the rediff plugin with `:harness install amp`,
+For a live Amp session, install the readiff plugin with `:harness install amp`,
 or opt into `programs.rediff.ampPlugin.enable` in Home Manager. Reload Amp's
 plugins, then run `:harness connect amp`. `:harness list` shows available and
 connected sessions, their worktrees, and activity. Multiple connections are

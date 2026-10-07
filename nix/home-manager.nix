@@ -34,7 +34,7 @@ in
     ampPlugin.enable = lib.mkOption {
       type = lib.types.bool;
       default = cfg.harness == "amp";
-      description = "Install the rediff Amp plugin from this flake. Does not install or authenticate Amp.";
+      description = "Install the readiff Amp plugin from this flake. Does not install or authenticate Amp.";
     };
     ompPlugin.enable = lib.mkOption {
       type = lib.types.bool;
@@ -72,8 +72,8 @@ in
     home.packages = [ cfg.package ] ++ lib.optional cfg.nvimAlias nvim;
     # A store path here pins existing shells to an obsolete editor after switch.
     home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
-    home.file.".config/amp/plugins/rediff.ts" = lib.mkIf cfg.ampPlugin.enable {
-      source = ../plugins/amp/rediff.ts;
+    home.file.".config/amp/plugins/readiff.ts" = lib.mkIf cfg.ampPlugin.enable {
+      source = ../plugins/amp/readiff.ts;
     };
     home.file.".omp/agent/extensions/rediff.ts" = lib.mkIf cfg.ompPlugin.enable {
       source = ../plugins/omp/rediff.ts;

@@ -97,7 +97,7 @@ stdenv.mkDerivation {
     makeWrapper ${python3}/bin/python3 "$out/bin/rediff-live" \
       --add-flags "$out/share/rediff/amp_live.py" --add-flags '--provider all'
     mkdir -p "$out/share/rediff/amp"
-    cp ${../plugins/amp/rediff.ts} "$out/share/rediff/amp/rediff.ts"
+    cp ${../plugins/amp/readiff.ts} "$out/share/rediff/amp/readiff.ts"
     cp ${../plugins/amp/install.sh} "$out/share/rediff/amp/install.sh"
     makeWrapper ${bash}/bin/bash "$out/bin/rediff-install-amp-plugin" \
       --prefix PATH : ${lib.makeBinPath [ coreutils ]} \

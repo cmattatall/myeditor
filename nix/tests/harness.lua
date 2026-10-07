@@ -14,13 +14,17 @@ return function(root, equal, fails, keys)
 	local home, confirm, notify = vim.env.HOME, vim.fn.confirm, vim.notify
 	local install_home = vim.fn.tempname()
 	vim.env.HOME = install_home
-	local plugin = install_home .. "/.config/amp/plugins/rediff.ts"
+	local plugin = install_home .. "/.config/amp/plugins/readiff.ts"
 	local notices, choice = {}, 2
 	vim.notify = function(message)
 		table.insert(notices, message)
 	end
 	vim.fn.confirm = function(message, _, default)
-		equal(true, message:find("rediff.ts", 1, true) ~= nil, "Confirmation names the installed plugin")
+		equal(
+			true,
+			message:find("readiff.ts", 1, true) ~= nil or message:find("oh-my-pi", 1, true) ~= nil,
+			"Confirmation names the installed plugin"
+		)
 		equal(2, default, "Plugin installation defaults to cancel")
 		return choice
 	end
@@ -34,7 +38,7 @@ return function(root, equal, fails, keys)
 			return #notices > 0
 		end))
 		equal(true, notices[1]:find("Installed", 1, true) ~= nil, "Installer reports success")
-		local bundled = vim.env.REDIFF_RUNTIME .. "/amp/rediff.ts"
+		local bundled = vim.env.REDIFF_RUNTIME .. "/amp/readiff.ts"
 		equal(vim.fn.readfile(bundled), vim.fn.readfile(plugin), "Editor installs its exact bundled plugin")
 		vim.fn.delete(plugin)
 		assert(vim.uv.fs_symlink(bundled, plugin))
