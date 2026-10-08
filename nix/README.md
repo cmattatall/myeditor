@@ -353,14 +353,27 @@ Bare **s/S** retains native substitution inside annotations and ordinary files.
 :worktree switch feature-branch
 :worktree new
 :worktree new feature-branch ../rediff-feature
+:worktree delete feature-branch
 ```
 
-`list` and `switch` open a chooser showing paths and branches; `switch` also
-accepts a branch or path directly. `new` asks for a branch when omitted, otherwise
+`list` and `switch` open a pane showing paths and branches. Use **j/k** to select,
+**Enter** to switch, **n** to create a worktree and launch its harness, **dd** to
+confirm deletion, **R** to refresh, and **q/Esc** to close. The current checkout
+is marked `*`. `switch` also accepts a branch or path directly.
+`new` asks for a branch when omitted, otherwise
 uses `new branch [path]`. Its default directory is `<current-root>-<branch>` beside
 the current checkout (branch slashes become hyphens). It runs `git worktree add -b`
 from the current HEAD, preserving the original index and working files. It never
 forces an existing path/branch, commits, or pushes.
+
+`delete branch|path` removes a linked worktree and stops its terminal harness jobs
+launched by this Neovim instance. It keeps the Git branch and saved review metadata.
+It refuses the main checkout, locked/unavailable worktrees, live reviews in another
+editor, unsaved file buffers, and staged/unstaged/untracked changes. Git removal is
+never forced; ignored files follow Git's normal removal behavior. Deleting the
+current checkout switches to the main checkout first. Separately started or merely
+connected harnesses are not killed. If Git refuses removal after a harness stops
+(for example, because it wrote a final change), the worktree is retained.
 
 `:harness use amp` or `:harness use claude` persists the launch type per worktree;
 it does not start a process or send feedback. `use amp` also discovers live
@@ -369,9 +382,18 @@ for several. No matches or cancelling keeps any compatible binding. Claude has
 no live discovery adapter; use `:ReviewHarness claude SESSION_ID` for feedback.
 `new` checks that CLI is on PATH,
 creates and switches to the new Review, then starts a fresh interactive `amp` or
-`claude` process in a terminal tab with that worktree as its working directory.
+`claude` process in a bottom terminal split with that worktree as its working directory.
 Install/authenticate the CLI separately. Exit Terminal mode with **Ctrl-\\ Ctrl-N**,
-then **gT** returns to the Review tab. Editor exit stops its terminal processes.
+then **:hide** hides the pane without stopping the process. **Ctrl-W Ctrl-W**
+returns directly to the previous editor window, leaving the harness running.
+**:harness open** / **:ho** reopens a terminal and offers a chooser when multiple
+sessions are connected or running in the editor. Selecting another worktree's
+TUI does not change the review's annotation recipient. With no available/selected
+session, it starts the selected CLI in the current worktree.
+For an external Amp/Claude session, opening it (or **:harness resume**) asks before
+starting a new TUI for that session; stop using its other terminal first. This is not process
+attachment. OMP resumption is unsupported; live feedback may need reconnecting.
+Editor exit stops its terminal processes.
 If a launch fails, the new worktree is retained and an error is reported.
 
 New worktrees inherit only the selected harness type, not a thread ID, feedback

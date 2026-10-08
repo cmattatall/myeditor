@@ -919,13 +919,19 @@ function M.stage(whole_file, unstage)
 	assert(not s.annotation_id, "Press Space R to return to current files before staging")
 	local win = api.nvim_get_current_win()
 	local snapshot, side, line = s.current, "new", 1
+	local index = s.index
 	local next_entry, tree_group
 	if win == s.tree_win then
 		assert(whole_file, "Focus a source pane to stage/unstage a hunk; S acts on the selected file")
-		local index = s.rows[api.nvim_win_get_cursor(win)[1]]
+		index = s.rows[api.nvim_win_get_cursor(win)[1]]
 		local entry = assert(s.entries[index], "Select a changed file")
 		snapshot = index == s.index and s.current or git.snapshot(s.root, entry)
-		tree_group = entry.group == "staged" and "staged" or "unstaged"
+	else
+		side, line = side_at_cursor(), api.nvim_win_get_cursor(win)[1]
+	end
+	assert(snapshot, "No changed file selected")
+	if whole_file then
+		tree_group = snapshot.group == "staged" and "staged" or "unstaged"
 		for i = index + 1, #s.entries do
 			if (s.entries[i].group == "staged") == (tree_group == "staged") then
 				next_entry = s.entries[i]
@@ -940,17 +946,14 @@ function M.stage(whole_file, unstage)
 				end
 			end
 		end
-	else
-		side, line = side_at_cursor(), api.nvim_win_get_cursor(win)[1]
 	end
-	assert(snapshot, "No changed file selected")
 	if unstage ~= nil then
 		assert(
 			(snapshot.group == "staged") == unstage,
 			unstage and "Select a STAGED entry" or "Select an UNSTAGED entry"
 		)
 	end
-	local entries, index = s.entries, s.index
+	local entries = s.entries
 	local hunk = git.stage(s.root, snapshot, side, line, whole_file)
 	local ok, err = pcall(awareness.acknowledge, s.root, snapshot)
 	if not ok then

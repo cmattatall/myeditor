@@ -2959,6 +2959,7 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "<Tab>")
         changed = Path(self.root, "auth.lua").read_bytes()
         self.keys(editor, "S")
+        self.keys(editor, ":fs<CR>")
         self.assertEqual("staged", self.lua(editor, "return s.current.group"))
         self.keys(editor, "s")
         # The first hunk returns to HEAD while the second stays staged.
@@ -2995,7 +2996,7 @@ class EditorUI(unittest.TestCase):
         self.assertEqual(2, self.lua(editor, "return #s.diff.changes"))
         # Both old/new panes, both layouts, and mappings after refresh.
         for layout, pane in (("split", "new"), ("split", "old"), ("merged", "new")):
-            self.keys(editor, f":view {layout}<CR>")
+            self.keys(editor, f":view {layout}<CR>:fu<CR>")
             self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane}_win)")
             self.keys(editor, " R")
             self.keys(editor, "S")
@@ -3003,6 +3004,11 @@ class EditorUI(unittest.TestCase):
                 changed,
                 subprocess.check_output(["git", "-C", self.root, "show", ":auth.lua"]),
             )
+            self.assertEqual(
+                ["removed.lua", "unstaged"],
+                self.lua(editor, "return {s.current.path, s.current.group}"),
+            )
+            self.keys(editor, ":fs<CR>")
             self.assertEqual("staged", self.lua(editor, "return s.current.group"))
             self.keys(editor, "S")
             self.assertEqual(
@@ -3040,6 +3046,78 @@ class EditorUI(unittest.TestCase):
                 editor, "return s.composer == nil and not vim.bo[s.new_buf].modifiable"
             )
         )
+
+    def test_diff_file_staging_keeps_tree_selection_in_original_group(self):
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        initial_index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+
+        def selected(path, group, pane):
+            self.assertEqual(
+                [path, group, True, True, True],
+                self.lua(
+                    editor,
+                    "local row=vim.api.nvim_win_get_cursor(s.tree_win)[1]; "
+                    "local marks=vim.api.nvim_buf_get_extmarks(s.tree_buf, "
+                    "vim.api.nvim_create_namespace('rediff.active-file'), 0, -1, {}); "
+                    "return {s.current.path,s.current.group,s.rows[row]==s.index, "
+                    f"vim.api.nvim_get_current_win()==s.{pane}_win, "
+                    "#marks==1 and marks[1][2]==row-1}",
+                ),
+            )
+
+        def exhausted(group, pane):
+            self.wait_for(editor, "s.current == nil and s.index == nil")
+            index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
+            self.lua(editor, "r.refresh_live()")
+            self.keys(editor, " RSS")
+            self.assertEqual(
+                [group, True, True, 0],
+                self.lua(
+                    editor,
+                    "return {s.exhausted_group, "
+                    f"vim.api.nvim_win_get_cursor(s.tree_win)[1]==s.group_rows.{group}, "
+                    f"vim.api.nvim_get_current_win()==s.{pane}_win, "
+                    "#vim.api.nvim_buf_get_extmarks(s.tree_buf, "
+                    "vim.api.nvim_create_namespace('rediff.active-file'), 0, -1, {})}",
+                ),
+            )
+            self.assertEqual(
+                index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
+            )
+
+        for layout, pane in (("split", "new"), ("split", "old"), ("merged", "new")):
+            with self.subTest(layout=layout, pane=pane):
+                # A partially staged file exists in both lists before S.
+                subprocess.run(["git", "-C", self.root, "add", "auth.lua"], check=True)
+                path = Path(self.root, "auth.lua")
+                path.write_text(path.read_text() + "-- another edit\n")
+                self.lua(editor, "r.refresh()")
+                self.keys(editor, f":view {layout}<CR>:fu<CR>")
+                self.lua(editor, f"vim.api.nvim_set_current_win(s.{pane}_win)")
+                self.keys(editor, "S")
+                selected("removed.lua", "unstaged", pane)
+                self.keys(editor, "S")
+                selected("plan.md", "untracked", pane)
+                self.keys(editor, "S")
+                exhausted("unstaged", pane)
+
+                # Delete a middle staged row: next, not previous or same-path unstaged.
+                self.keys(editor, ":fs<CR>")
+                self.lua(
+                    editor, f"r.show(2); vim.api.nvim_set_current_win(s.{pane}_win)"
+                )
+                self.keys(editor, "S")
+                selected("removed.lua", "staged", pane)
+                # Last row falls back to previous, and final row leaves an empty group.
+                self.keys(editor, "S")
+                selected("auth.lua", "staged", pane)
+                self.keys(editor, "S")
+                exhausted("staged", pane)
+                self.assertEqual(
+                    initial_index,
+                    subprocess.check_output(["git", "-C", self.root, "write-tree"]),
+                )
 
     def test_navigation_and_layouts(self):
         path = Path(self.root, "auth.lua")
@@ -3702,10 +3780,10 @@ class EditorUI(unittest.TestCase):
             index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
         )
         self.keys(editor, ":worktree list<CR>")
-        self.keys(editor, "2<CR>")
+        self.keys(editor, "j<CR>")
         self.assertEqual(target, self.lua(editor, "return s.root"))
         self.keys(editor, ":worktree switch<CR>")
-        self.keys(editor, "1<CR>")
+        self.keys(editor, "k<CR>")
         self.assertEqual(self.root, self.lua(editor, "return s.root"))
         # Changing provider clears an incompatible feedback connection, not drafts.
         self.keys(editor, ":harness use claude<CR>")
@@ -3740,6 +3818,375 @@ class EditorUI(unittest.TestCase):
         self.assertFalse(Path(self.root + "-missing-cli").exists())
         self.assertFalse(
             self.lua(editor, "return pcall(require('rediff.worktree').new, '--bad')")
+        )
+        self.assertEqual(
+            2, self.lua(editor, "return #require('rediff.worktree').list()")
+        )
+
+    def test_worktree_panel_create_delete_and_owned_processes(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        executable = binary / "claude"
+        log = Path(self.directory.name, "harness-pids")
+        executable.write_text(
+            '#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$$" >> "$HARNESS_TEST_LOG"\n'
+            'echo "Fake harness ready"\nexec sleep 600\n'
+        )
+        executable.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        editor = self.launch(self.root)
+        self.keys(editor, ":harness use claude<CR>")
+        self.lua(editor, "require('rediff.harness').launch(s.root)")
+        self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG) == 1")
+        main_pid = int(log.read_text().split("|")[1])
+        self.keys(editor, "<C-\\><C-n>:worktree list<CR>ntopic<CR>")
+        target = Path(self.root + "-topic")
+        self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG) == 2")
+        topic_pid = int(log.read_text().splitlines()[1].split("|")[1])
+        self.assertEqual(str(target), self.lua(editor, "return s.root"))
+        self.assertEqual("terminal", editor.current.buffer.options["buftype"])
+        # A separately started harness in the same directory is not ours to kill.
+        external = subprocess.Popen(["sleep", "600"], cwd=target)
+        try:
+            self.keys(editor, "<C-\\><C-n>:worktree list<CR>dd1<CR>")
+            self.assertTrue(target.exists(), "Cancel leaves the worktree intact")
+            os.kill(topic_pid, 0)
+            self.assertEqual(
+                "rediff-worktrees", editor.current.buffer.options["filetype"]
+            )
+            self.keys(editor, "dd2<CR>")
+            self.assertFalse(
+                target.exists(), self.lua(editor, "return vim.g.startup_notice")
+            )
+            self.assertEqual(self.root, self.lua(editor, "return s.root"))
+            self.assertEqual(
+                "rediff-worktrees", editor.current.buffer.options["filetype"]
+            )
+            self.assertNotIn("topic", "\n".join(editor.current.buffer[:]))
+            with self.assertRaises(ProcessLookupError):
+                os.kill(topic_pid, 0)
+            os.kill(main_pid, 0)
+            self.assertIsNone(
+                external.poll(), "Externally started harness must survive"
+            )
+            subprocess.run(
+                ["git", "-C", self.root, "show-ref", "--verify", "refs/heads/topic"],
+                check=True,
+                capture_output=True,
+            )
+            self.assertTrue(
+                self.lua(
+                    editor,
+                    """
+                for _,win in ipairs(vim.api.nvim_list_wins()) do
+                    local cwd=vim.api.nvim_win_call(win, vim.fn.getcwd)
+                    if vim.fn.isdirectory(cwd) ~= 1 then return false end
+                end
+                return true
+            """,
+                )
+            )
+            # Reuse the pane to create another worktree, then delete by typed command.
+            self.keys(editor, "nsecond<CR>")
+            self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG) == 3")
+            self.keys(editor, "<C-\\><C-n>:worktree delete second<CR>")
+            self.assertFalse(Path(self.root + "-second").exists())
+            self.assertEqual(self.root, self.lua(editor, "return s.root"))
+            os.kill(main_pid, 0)
+        finally:
+            external.terminate()
+            external.wait(timeout=5)
+
+    def test_harness_terminal_pane_reuses_process_across_layouts_and_reviews(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        executable = binary / "claude"
+        log = Path(self.directory.name, "pane-launches")
+        executable.write_text(
+            '#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$$" >> "$HARNESS_TEST_LOG"\n'
+            'echo "Interactive harness ready"\n'
+            'while IFS= read -r line; do printf "Reply: %s\\n" "$line"; done\n'
+        )
+        executable.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        editor = self.launch(self.root)
+        self.lua(editor, "require('rediff.live').stop(s)")
+        tabs = len(editor.api.list_tabpages())
+        self.keys(editor, ":harness use claude<CR>:harness open<CR>")
+        self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1")
+        buf = editor.current.buffer.number
+        job = editor.current.buffer.vars["terminal_job_id"]
+        self.assertEqual("terminal", editor.current.buffer.options["buftype"])
+        self.assertEqual("hide", editor.current.buffer.options["bufhidden"])
+        self.assertEqual(tabs, len(editor.api.list_tabpages()))
+        self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
+        self.assertEqual(self.root, log.read_text().split("|")[0])
+        self.keys(editor, "hello pane<CR>")
+        self.wait_for(
+            editor,
+            f"table.concat(vim.api.nvim_buf_get_lines({buf},0,-1,false),'\\n'):find('Reply: hello pane',1,true) ~= nil",
+        )
+        self.keys(editor, "<C-w><C-w>")
+        self.assertNotEqual("terminal", editor.current.buffer.options["buftype"])
+        self.assertEqual("n", editor.api.get_mode()["mode"])
+        self.keys(editor, ":ho<CR>")
+        self.assertEqual(buf, editor.current.buffer.number)
+        self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
+        for layout, count in (("merged", 3), ("split", 4)):
+            self.keys(
+                editor, f"<C-\\><C-n>:hide<CR>:view {layout}<CR>:harness open<CR>"
+            )
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+            self.assertEqual(count, len(editor.api.tabpage_list_wins(0)))
+            self.keys(editor, "<C-\\><C-n>")
+            self.lua(editor, "r.refresh_live()")
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.keys(editor, "i<C-w><C-w>")
+            self.assertNotEqual("terminal", editor.current.buffer.options["buftype"])
+            self.keys(editor, ":ho<CR>")
+        self.keys(editor, "<C-\\><C-n>")
+        self.lua(editor, "r.leave(); r.open()")
+        self.keys(editor, ":harness open<CR>")
+        self.assertEqual(buf, editor.current.buffer.number)
+        self.assertEqual(
+            1, len(log.read_text().splitlines()), "Reopening must not restart the agent"
+        )
+        self.keys(editor, "<C-\\><C-n>")
+        self.lua(editor, "require('rediff.harness').stop(s.root)")
+        self.assertFalse(editor.api.buf_is_valid(buf))
+        self.assertEqual(-3, editor.funcs.jobwait([job], 0)[0])
+
+    def test_harness_resume_requires_confirmation_and_uses_selected_session(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        log = Path(self.directory.name, "resume-args")
+        for provider in ("amp", "claude"):
+            executable = binary / provider
+            executable.write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$0" "$PWD" "$@" > "$HARNESS_TEST_LOG"\n'
+                'echo "Resumed harness ready"\nexec sleep 600\n'
+            )
+            executable.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        editor = self.launch(self.root)
+        thread = "T-00000000-1111-2222-3333-444444444444"
+        for provider, session, argv in (
+            ("amp", thread, ["threads", "continue", thread]),
+            ("claude", "claude-session", ["--resume", "claude-session"]),
+        ):
+            with self.subTest(provider=provider):
+                name = "amp-live" if provider == "amp" else provider
+                self.lua(
+                    editor,
+                    f"""
+                    require('rediff.harness').select(s.root, {{name='{name}',session='{session}',connection='/fake/connection.json'}})
+                    vim.g.resume_choice = 2
+                    vim.fn.confirm = function(prompt, choices, default)
+                        vim.g.resume_prompt = prompt
+                        assert(default == 2)
+                        return vim.g.resume_choice
+                    end
+                """,
+                )
+                self.keys(editor, ":harness open<CR>")
+                self.assertFalse(
+                    log.exists(),
+                    "Open must confirm before resuming an external session",
+                )
+                self.keys(editor, ":harness resume<CR>")
+                self.assertFalse(
+                    log.exists(), "Cancelling resume must not spawn a process"
+                )
+                self.assertIn(session, self.lua(editor, "return vim.g.resume_prompt"))
+                self.assertIn(
+                    "other terminal", self.lua(editor, "return vim.g.resume_prompt")
+                )
+                self.lua(editor, "vim.g.resume_choice=1")
+                self.keys(editor, ":harness resume<CR>")
+                self.wait_for(
+                    editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1"
+                )
+                self.assertEqual(
+                    [str(binary / provider), self.root, *argv],
+                    log.read_text().splitlines(),
+                )
+                job = editor.current.buffer.vars["terminal_job_id"]
+                self.keys(editor, "<C-\\><C-n>:harness resume<CR>")
+                self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+                self.keys(editor, "<C-\\><C-n>:hide<CR>:ho<CR>")
+                self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+                self.keys(editor, "<C-\\><C-n>")
+                self.lua(editor, "require('rediff.harness').stop(s.root)")
+                self.lua(
+                    editor,
+                    "for _,entry in ipairs(require('rediff.connections').connected()) do require('rediff.connections').disconnect(entry.key) end",
+                )
+                log.unlink()
+        # A selection change while the confirmation is open must not resume a stale thread.
+        self.lua(
+            editor,
+            """
+            vim.fn.confirm = function()
+                require('rediff.harness').select(s.root, {name='none'})
+                return 1
+            end
+        """,
+        )
+        self.keys(editor, ":harness resume<CR>")
+        self.assertIn(
+            "Checkout or harness changed",
+            self.lua(editor, "return vim.g.startup_notice"),
+        )
+        self.assertFalse(log.exists())
+
+    def test_harness_open_chooses_connected_session_without_rebinding_review(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        log = Path(self.directory.name, "chosen-harnesses")
+        cli = binary / "claude"
+        cli.write_text(
+            '#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$2" >> "$HARNESS_TEST_LOG"\n'
+            'echo "Selected harness ready"\nexec sleep 600\n'
+        )
+        cli.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        other = Path(self.directory.name, "other-worktree")
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "add", "-b", "other", str(other)],
+            check=True,
+            capture_output=True,
+        )
+        editor = self.launch(self.root)
+        editor.exec_lua(
+            """
+            local c=require('rediff.connections')
+            local root=require('rediff.review').state.root
+            c.connect({name='claude',root=root,session='session-a'})
+            c.connect({name='claude',root=...,session='session-b'})
+            vim.fn.confirm=function() return 1 end
+        """,
+            str(other),
+        )
+        self.keys(editor, ":ho<CR><CR>")
+        self.assertFalse(
+            log.exists(), "Cancelling the picker must not start any harness"
+        )
+        self.keys(editor, ":ho<CR>2<CR>")
+        self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1")
+        self.assertEqual([str(other) + "|session-b"], log.read_text().splitlines())
+        other_job = editor.current.buffer.vars["terminal_job_id"]
+        self.assertEqual(str(other), editor.funcs.getcwd())
+        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+        self.keys(editor, "<C-w><C-w>")
+        self.assertEqual(self.root, editor.funcs.getcwd())
+        self.keys(editor, ":ho<CR>1<CR>")
+        self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG)==2")
+        local_job = editor.current.buffer.vars["terminal_job_id"]
+        self.assertNotEqual(other_job, local_job)
+        self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
+        self.keys(editor, "<C-w><C-w>:ho<CR>2<CR>")
+        self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
+        self.assertEqual(
+            2,
+            len(log.read_text().splitlines()),
+            "Selecting an owned session must reuse it",
+        )
+        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+
+    def test_worktree_delete_protects_data_and_other_editors(self):
+        target = Path(self.directory.name, "linked worktree")
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "add", "-b", "topic", str(target)],
+            check=True,
+            capture_output=True,
+        )
+        editor = self.launch(self.root)
+
+        def rejected(message, name="topic"):
+            ok, error = editor.exec_lua(
+                "return {pcall(require('rediff.worktree').delete, ...)}", name
+            )
+            self.assertFalse(ok)
+            self.assertIn(message, error)
+            self.assertTrue(target.exists())
+
+        rejected("main worktree", "main")
+        rejected("Unknown worktree", "not-a-worktree")
+        untracked = target / "untracked"
+        untracked.write_text("do not lose me")
+        rejected("uncommitted or untracked")
+        untracked.unlink()
+        tracked = target / "auth.lua"
+        original = tracked.read_text()
+        tracked.write_text(original + "-- changed\n")
+        rejected("uncommitted or untracked")
+        subprocess.run(["git", "-C", target, "add", "auth.lua"], check=True)
+        rejected("uncommitted or untracked")
+        subprocess.run(
+            ["git", "-C", target, "reset", "--hard", "HEAD"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "lock", str(target)], check=True
+        )
+        rejected("locked")
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "unlock", str(target)], check=True
+        )
+        self.lua(editor, "require('rediff.harness').get(s.root)")
+        # A second editor has a live review lock for this otherwise clean checkout.
+        other = self.launch(str(target))
+        rejected("Another editor owns")
+        self.lua(other, "r.leave()")
+        buf = editor.exec_lua(
+            "local b=vim.fn.bufadd(...); vim.fn.bufload(b); return b", str(tracked)
+        )
+        editor.api.buf_set_lines(buf, 0, 1, False, ["-- unsaved edit"])
+        rejected("unsaved buffer")
+        editor.api.buf_set_option(buf, "modified", False)
+        # Prefix-sharing buffers in a different directory must be preserved.
+        sibling = editor.exec_lua(
+            "return vim.fn.bufadd(...)", str(target) + "-other/file"
+        )
+        editor.api.buf_set_lines(sibling, 0, -1, False, ["keep this unrelated draft"])
+        editor.exec_lua("require('rediff.worktree').delete(...)", str(target))
+        self.assertFalse(target.exists())
+        self.assertFalse(editor.api.buf_is_valid(buf))
+        self.assertTrue(editor.api.buf_is_valid(sibling))
+        self.assertTrue(editor.api.buf_get_option(sibling, "modified"))
+
+    def test_worktree_delete_rechecks_git_after_stopping_harness(self):
+        target = Path(self.directory.name, "late-write")
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "add", "-b", "topic", str(target)],
+            check=True,
+            capture_output=True,
+        )
+        editor = self.launch(self.root)
+        result = self.lua(
+            editor,
+            """
+            local h = require('rediff.harness')
+            local stop = h.stop
+            h.stop = function(path)
+                stop(path)
+                vim.fn.writefile({'last-minute harness edit'}, path .. '/late.txt')
+            end
+            local ok,err = pcall(require('rediff.worktree').delete, 'topic')
+            h.stop = stop
+            return {ok,err}
+        """,
+        )
+        self.assertFalse(result[0])
+        self.assertIn("untracked", result[1])
+        self.assertEqual(
+            "last-minute harness edit\n", (target / "late.txt").read_text()
         )
         self.assertEqual(
             2, self.lua(editor, "return #require('rediff.worktree').list()")

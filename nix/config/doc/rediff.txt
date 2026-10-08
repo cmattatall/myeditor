@@ -205,6 +205,22 @@ Amp streams running/idle/approval/error state and active tool names to the panel
 Offline or unsupported activity is shown as such, never inferred from an ACK.
 Aliases persist locally; connection subscriptions end when this editor exits.
 
+:harness open (alias :ho) opens a bottom terminal split. With multiple connected
+sessions or editor-owned TUIs, a chooser shows aliases/session IDs and worktrees.
+An editor-owned TUI reuses its process and buffer; switching choices reuses the
+pane, not the process. Opening another worktree's TUI does not rebind annotations.
+With no available or selected session, open starts this worktree's selected CLI.
+
+Ctrl-W Ctrl-W returns to the previous editor window from Terminal mode, leaving
+the TUI running. Ctrl-\ Ctrl-N enters Terminal-Normal mode for native window
+commands; :hide hides the pane. Leaving Review also hides it; :ho brings it back.
+
+An external TUI cannot be moved into Neovim. For a selected Amp or Claude session,
+open (or :harness resume) confirms before starting a new interactive TUI for that exact
+session. Stop using the other terminal first. This does not attach to or kill its
+process, and sends no prompt. OMP session resumption is not supported here.
+Live feedback may need :harness connect again after the old TUI exits.
+
 Plugin installation asks for confirmation, preserves Home Manager symlinks, and
 does not install/authenticate the Amp CLI. With a live target, it also requests
 an agent-mediated reload; queued does not mean reloaded. Without one, reload Amp
@@ -225,15 +241,31 @@ its submission ID. See nix/README.md for installation and receiver details.
 ==============================================================================
 WORKTREES                                                  *rediff-worktrees*
 
-:worktree list or :worktree switch opens a chooser. Supply a branch/path to switch
-directly. :harness use amp|omp|claude selects the launch type for this worktree.
+:worktree list or :worktree switch opens a pane. Supply a branch/path to switch
+directly. The current checkout is marked *. In the list:
+  j/k         Select worktree
+  Enter       Switch to selected worktree
+  n           Prompt for new branch, create worktree, and launch harness
+  dd          Confirm deletion and stop editor-owned harness jobs
+  R           Refresh list
+  q / Esc     Close list
+
+:harness use amp|omp|claude selects the launch type for this worktree.
 
 :worktree new [branch [path]] creates from current HEAD and starts that harness in
-a terminal tab. Omitted branch prompts; omitted path uses a sibling directory.
+a bottom terminal split. Omitted branch prompts; omitted path uses a sibling directory.
 The CLI must already be installed/authenticated. Existing branches/paths are never
 forced. A launch failure keeps the worktree; inspect its terminal and :messages.
-Ctrl-\ Ctrl-N leaves Terminal mode; gT returns to Review. Editor exit stops its
+Ctrl-\ Ctrl-N leaves Terminal mode; :hide hides the pane. Editor exit stops its
 terminal processes. Switching alone never launches a harness.
+
+:worktree delete branch|path deletes a linked checkout, keeping its branch and
+saved review metadata. It stops only harness jobs launched by this editor, never
+external or merely connected agents. The main checkout, locked/unavailable trees,
+another editor's live review, unsaved file buffers, and staged/unstaged/untracked
+files prevent deletion. Git removal is never forced (ignored files follow Git's
+normal behavior). Deleting the current checkout switches to the main one first.
+If Git refuses removal after a harness stops, the checkout is retained.
 
 New worktrees inherit launch type, not connections or drafts. Dirty files and
 saved notes stay with their checkout; save/close an open note before switching.
@@ -328,6 +360,8 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :ReviewOutbox               Browse payloads and receipts
   :ReviewArchive              Clear round/drafts after confirmation
   :Harness status             Show connection and delivery receipt
+  :Harness open / :ho         Choose/open/reopen a terminal harness pane
+  :Harness resume             Confirm resuming the selected Amp/Claude session
   :Harness use amp|omp|claude Select type; Amp/OMP discover live sessions
   :Harness install amp|omp    Install bridge; OMP needs an explicit /restart
   :Harness connect [amp|omp]  Discover/select live session
@@ -337,9 +371,10 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :Harness send [alias]       Choose recipient and compose a general message
   :Harness retry              Retry last delivery, not edited drafts
   :Harness disconnect [alias] Disconnect chosen harness; do not stop the agent
-  :Worktree list              Choose a worktree
+  :Worktree list              Switch/create/delete worktrees
   :Worktree switch [target]   Switch by branch/path, or choose
   :Worktree new [branch [path]] Create worktree and launch harness
+  :Worktree delete target     Delete by branch/path and stop owned harness jobs
 
 :help {topic} opens native/plugin help. :messages shows errors/notifications.
 :qa exits; :qa! also discards unsaved ordinary files. Both lose session-only drafts.
