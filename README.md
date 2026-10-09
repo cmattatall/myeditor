@@ -184,7 +184,7 @@ PATH precedence, and integration with an existing home configuration.
 3. Press **i** to add/edit an annotation, or select text and press **a** to
    annotate a range. Save the note with `:w`. **@** lists/searches annotations.
 4. Connect a harness, then `:w` in the tree/diff sends saved annotations.
-   `:harness send` composes a general message.
+   `:harness open` shows an agent terminal for typing to it directly.
 5. Review the next edits: violet **◆** means changed/unseen, cyan **◇** means
    changed/seen. **s** stages a hunk; **S** stages a file. **Space R** refreshes.
 

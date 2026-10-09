@@ -1433,6 +1433,10 @@ function M.leave()
 	M.state = nil
 	vim.uv.fs_unlink(s.directory .. "/editor.lock")
 	if api.nvim_tabpage_is_valid(s.tab) then
+		if api.nvim_tabpage_is_valid(s.previous_tab) then
+			api.nvim_set_current_tabpage(s.previous_tab)
+			harness.move_pane(s.tab)
+		end
 		api.nvim_set_current_tabpage(s.tab)
 		vim.cmd("tabclose!")
 	end
@@ -1606,6 +1610,7 @@ function M.open()
 	end
 	M.refresh()
 	api.nvim_set_current_win(s.tree_win)
+	harness.move_pane(s.previous_tab)
 	require("rediff.live").start(s)
 	awareness.start(s.root)
 	api.nvim_exec_autocmds("User", { pattern = "ReviewEnter" })

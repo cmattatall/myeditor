@@ -14,7 +14,7 @@ HOW TO REVIEW                                                *rediff-workflow*
    Press i to add/edit a note, or select lines with V then a for a range note.
 3. Write the note, Esc then :w to save it locally. @ lists/searches saved notes.
 4. :harness use amp connects to your local agent (see |rediff-harness| for setup).
-   :w from the tree/diff sends saved notes. :hs sends a separate general message.
+   :w from the tree/diff sends saved notes. :ho opens an agent terminal.
 5. As the agent edits, files refresh. Violet ◆ means changed/unseen; cyan ◇ means
    changed/seen after 1s in the focused diff. See |rediff-git| for baseline rules.
 6. Stage deliberately with s (hunk) or S (file); sending notes never stages code.
@@ -38,14 +38,14 @@ REVIEW QUICK REFERENCE
   d                   Delete annotation here (source panes only)
   :w in annotation    Save note locally and close
   :w in diff/tree     Send saved annotations
-  :hs                 Compose a general harness message
+  :ho                 Open/reopen a harness terminal
   Space R             Refresh files and snapshots
   :view               Toggle split/merged diff
   Space r / Space q   Toggle / leave Review
 
 TOPICS
   |rediff-review|      Annotations       |rediff-git|         Staging
-  |rediff-harness|     Agent messages    |rediff-worktrees|   Worktrees
+  |rediff-harness|     Agent harnesses   |rediff-worktrees|   Worktrees
   |rediff-view|        Panes and layout  |rediff-editing|     Editing
   |rediff-commands|    Command index     |rediff-drafts|      Delivery
 
@@ -113,7 +113,7 @@ back does not restore purple; new edits do. Other unread hunks stay unread.
 A file stays unseen while any changed hunk is unseen. This records exposure, not
 approval. The baseline starts with Review's initial contents.
 Accepted local-harness sends reset the baseline to pre-send contents;
-failed/local-only sends and messages to other worktrees do not. Changes are detected
+failed/local-only sends do not. Changes are detected
 on refresh regardless of who edited them. Paths no longer in Git's diff leave the
 tree. Context-only line shifts do not count as new hunks. No manual marks to manage.
 
@@ -147,9 +147,9 @@ Git may combine nearby displayed changes into one staging hunk.
 
 Connected Amp file-edit events trigger refreshes in this worktree. Polling every
 three seconds catches other edits/index changes. Refresh runs with Normal-mode
-tree/diff/harness-message focus, preserves selection/focus, and pauses for
+tree/diff focus, preserves selection/focus, and pauses for
 annotation editing, typing, selections, commands, pickers and delivery.
-Typing in the harness send pane does not pause refresh or interrupt the draft.
+Typing in an embedded harness terminal does not pause refresh.
 Notes keep their original snapshots.
 Space R / :ReviewRefresh refreshes immediately without sending feedback.
 Use it instead of :bufdo e: Review panes are snapshots, not ordinary file buffers.
@@ -166,6 +166,9 @@ Amp file events and Space R still work with polling disabled.
 AGENT HARNESSES                                               *rediff-harness*
 
 For a running Amp session, use :harness install amp once, then :harness connect amp.
+The installer also sets thread.interrupt to Ctrl-L in ~/.config/amp/settings.json,
+replacing Esc Esc for all Amp sessions for this user. Other settings/keybindings
+are preserved. Home Manager-managed settings must be updated in Home Manager.
 For oh-my-pi (OMP), use :harness install omp, then /restart in OMP and
 :harness connect omp. Home Manager can manage the CLI (programs.harnesses.omp.enable)
 and extension (programs.rediff.ompPlugin.enable) independently. Upstream pi is not
@@ -183,24 +186,12 @@ the same user account. Load the readiff plugin in each Amp instance. Remote
 machines and orbs are not discoverable through this local connection.
   /           Filter by alias, provider, title, ID, worktree, or activity
   Enter       Connect/disconnect; connecting locally selects the annotation target
-  s / r / d   Message / rename locally / disconnect selected harness
+  r / d       Rename locally / disconnect selected harness
   c / R / q   Connected-only filter / rediscover / close
 
-Multiple harnesses can stay connected. :hs asks which one when there is more than
-one; :harness send ALIAS chooses directly. Each recipient has its own message draft:
-  :w          Send; keep panel open
-  :wq         Send and close
-  :q / :q!    Close without sending; retain draft until editor exit
-
-Accepted/completed delivery clears sent text, preserving newer edits. Failed,
-pending and local-only messages remain drafts. In Normal mode, Tab returns to
-the Review tree without closing/sending; Insert-mode Tab remains text input.
-:hs takes no inline message argument. General messages never include review notes.
-
-Annotations only go to this worktree's selected harness. General messages may go
-to another worktree and include sender directory, Neovim instance, and recipient.
-External recipients are instructed not to edit the sender's worktree. This is
-agent policy, not a filesystem sandbox. Separate editors can watch the same agent.
+Multiple harnesses can stay connected. Annotations only go to this worktree's
+selected harness; :w from the tree/diff sends them. To type to an agent
+directly, use :harness open (below). Separate editors can watch the same agent.
 Amp streams running/idle/approval/error state and active tool names to the panel.
 Offline or unsupported activity is shown as such, never inferred from an ACK.
 Aliases persist locally; connection subscriptions end when this editor exits.
@@ -210,10 +201,18 @@ sessions or editor-owned TUIs, a chooser shows aliases/session IDs and worktrees
 An editor-owned TUI reuses its process and buffer; switching choices reuses the
 pane, not the process. Opening another worktree's TUI does not rebind annotations.
 With no available or selected session, open starts this worktree's selected CLI.
+Space r moves an open harness pane between Review and editing, keeping its
+window, buffer, and process. Hiding it in either mode keeps it hidden across
+toggles until :ho reopens it.
 
-Ctrl-W Ctrl-W returns to the previous editor window from Terminal mode, leaving
-the TUI running. Ctrl-\ Ctrl-N enters Terminal-Normal mode for native window
-commands; :hide hides the pane. Leaving Review also hides it; :ho brings it back.
+Escape returns control to Neovim in the same pane (Terminal-Normal mode), without
+sending Escape to the harness. Repeated Escape does not interrupt the agent.
+Use Cmd-W then an arrow to switch panes, or i to resume harness input. In Amp
+input, Ctrl-L interrupts the agent after :harness install amp configures it.
+Cmd-W p returns to the previous editor window from Terminal mode, leaving the
+TUI running. Cmd-W also accepts other window commands, such as h/j/k/l. Ctrl-W
+passes through to the TUI for word deletion, including repeated presses.
+Ctrl-\ Ctrl-N enters Terminal-Normal mode; :hide hides the pane; :ho brings it back.
 
 An external TUI cannot be moved into Neovim. For a selected Amp or Claude session,
 open (or :harness resume) confirms before starting a new interactive TUI for that exact
@@ -269,7 +268,7 @@ If Git refuses removal after a harness stops, the checkout is retained.
 
 New worktrees inherit launch type, not connections or drafts. Dirty files and
 saved notes stay with their checkout; save/close an open note before switching.
-Changing harness type disconnects incompatible bindings but retains drafts.
+Changing harness type disconnects incompatible bindings but retains notes.
 
 ==============================================================================
 PANES AND VIEW                                                   *rediff-view*
@@ -288,9 +287,14 @@ In a Review diff pane, :set wrap / :set nowrap (also :setlocal) applies to both
 panes. The choice survives file changes, refreshes, and split/merged switches.
 Ordinary editing windows, the tree, and note editors keep their own wrap setting.
 
-Cmd-w is a prefix, then a direction. Your terminal must forward Command keys;
-Kitty needs `map cmd+w no_op`. Normal/Visual Ctrl-w window navigation is disabled;
-Insert Ctrl-w still deletes a word. Closing a required source pane exits Review.
+Cmd-w is a prefix, then a direction (arrows or h/j/k/l), also from harness input.
+Kitty must forward Command keys explicitly. In kitty.conf: >
+  map cmd+w send_text all \x1b[119;9:1u
+<
+The explicit press event (:1) preserves Command through tmux 3.6 instead of
+normalizing it to Alt. Reload Kitty after changing its configuration.
+Normal/Visual Ctrl-w window navigation is disabled; Insert Ctrl-w still deletes
+a word. Closing a required source pane exits Review.
 
 Additions are green, deletions red. Difftastic supplies structural token highlights;
 text highlights remain on failure/timeout or files over 1 MB. Git defines staging
@@ -337,7 +341,7 @@ add arguments and press Enter again to run. Tab accepts inline suggestions or
 completes arguments; Ctrl-d lists matches. :command lists user/plugin commands.
 
 Scripts use uppercase names below. Typed aliases: :harness = :Harness,
-:hs = :Harness send, :hl = :Harness list, :hc = :Harness connect,
+:ho = :Harness open, :hl = :Harness list, :hc = :Harness connect,
 :ft = :Explorer, :annotations = :Annotations,
 :al = :Annotations list, :worktree = :Worktree. In Review, :view = :View,
 :focus = :Focus, :fs = :Focus staged, :fu = :Focus unstaged.
@@ -368,8 +372,7 @@ Scripts use uppercase names below. Typed aliases: :harness = :Harness,
   :Harness list               Search and manage harnesses across worktrees
   :Harness panel              Same panel with live activity
   :Harness rename ID ALIAS     Set a local alias, without renaming the agent thread
-  :Harness send [alias]       Choose recipient and compose a general message
-  :Harness retry              Retry last delivery, not edited drafts
+  :Harness retry              Retry last annotation delivery, not edited notes
   :Harness disconnect [alias] Disconnect chosen harness; do not stop the agent
   :Worktree list              Switch/create/delete worktrees
   :Worktree switch [target]   Switch by branch/path, or choose
@@ -383,7 +386,7 @@ Shell commands (:!) can change files/index outside the editor's protections.
 ==============================================================================
 DRAFTS AND DELIVERY                                            *rediff-drafts*
 
-Accepted/completed delivery deletes sent notes/text but preserves newer edits.
+Accepted/completed delivery deletes sent notes but preserves newer edits.
 Failed, pending and local-only batches stay in this process. Leaving/re-entering
 Review retains drafts; exiting discards them without an unsent-note quit guard.
 Every fresh editor starts empty. Submitted payloads/receipts persist in the outbox.
@@ -395,7 +398,7 @@ means the turn finished, not that its changes are correct. Inspect the session
 and receipt before retrying uncertain delivery. Retries use the original payload.
 Without a binding, submissions stay local. Credentials never belong in Nix/Git.
 
-Built-in harnesses receive JSON: rules once, then context and annotations/message.
+Built-in harnesses receive JSON: rules once, then context and annotations.
 There is no prose prefix or epilogue. Explicit Git/PR authorization in your
 feedback or earlier conversation messages carries forward within its scope;
 the agent must not ask again. A commit request includes staging relevant changes

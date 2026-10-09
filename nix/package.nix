@@ -100,7 +100,7 @@ stdenv.mkDerivation {
     cp ${../plugins/amp/readiff.ts} "$out/share/rediff/amp/readiff.ts"
     cp ${../plugins/amp/install.sh} "$out/share/rediff/amp/install.sh"
     makeWrapper ${bash}/bin/bash "$out/bin/rediff-install-amp-plugin" \
-      --prefix PATH : ${lib.makeBinPath [ coreutils ]} \
+      --prefix PATH : ${lib.makeBinPath [ coreutils python3 ]} \
       --add-flags "$out/share/rediff/amp/install.sh"
     mkdir -p "$out/share/rediff/omp"
     cp ${../plugins/omp/rediff.ts} "$out/share/rediff/omp/rediff.ts"

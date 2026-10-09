@@ -45,8 +45,8 @@ for editing. Outside Git, startup stays in ordinary editing without a sidebar.
 If Review is locked by another editor or cannot open, startup reports the
 reason and leaves ordinary editing available. Startup never sends feedback.
 
-**Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode (files,
-annotations, and harness messages) and in command/search input. Normal-mode
+**Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode (files
+and annotations) and in command/search input. Normal-mode
 Vim bindings remain unchanged. Typed **:ft** expands to `:Explorer` and focuses
 the Git sidebar in Review; scripts should use `:Explorer` directly.
 
@@ -223,10 +223,10 @@ your nixpkgs, including its Neovim and plugin versions. Update the editor with
 Connected Amp tool-result hooks trigger Review refreshes after reported file edits
 in this worktree. Git determines which hunks changed since the last accepted send.
 Polling every three seconds catches other edits and index changes. Refresh runs
-with Normal-mode tree, diff, or harness-message focus and keeps the selected
+with Normal-mode tree or diff focus and keeps the selected
 file, pane focus, and cursor/scroll positions where possible. It pauses for
 annotation editing, typing, selections, commands/pickers, and feedback delivery.
-Typing in the harness send pane is allowed without interrupting the draft.
+Typing in an embedded harness terminal does not pause refresh.
 Annotation snapshots stay unchanged. Refresh never saves buffers, stages files,
 or sends feedback.
 The bottom Review bar shows the branch or `@short-SHA` for detached HEAD.
@@ -284,7 +284,7 @@ comparison; missing/failed tools, a two-second timeout, or files over 1 MB retai
 the ordinary text renderer. The bottom bar shows `difftastic` or `text`.
 
 **?** in Normal mode (or **:help**) opens a centered overlay from editing,
-either tree, Review, annotations, or harness messages. Press **?**, **q**, or
+either tree, Review, or annotations. Press **?**, **q**, or
 **Esc** to dismiss it without changing the underlying splits. Insert-mode `?`
 still types normally; backward search is available via `:?pattern` or `/` then
 `N`. The guide includes navigation, annotations, harnesses, Git actions, view
@@ -339,8 +339,8 @@ are shown as deletion/addition pairs. Stage before commenting if possible:
 staging changes the index comparison and can make existing anchors stale.
 
 **Option+Left/Up/h/k** moves backward by a word; **Option+Right/Down/l/j** moves
-forward in Normal, Visual, Insert, and command/search input, including annotations
-and harness messages. Configure the terminal to send Option as Alt/Meta rather
+forward in Normal, Visual, Insert, and command/search input, including
+annotations. Configure the terminal to send Option as Alt/Meta rather
 than special characters; Esc-b/Esc-f word-key sequences are also supported.
 Bare **s/S** retains native substitution inside annotations and ordinary files.
 
@@ -383,9 +383,17 @@ no live discovery adapter; use `:ReviewHarness claude SESSION_ID` for feedback.
 `new` checks that CLI is on PATH,
 creates and switches to the new Review, then starts a fresh interactive `amp` or
 `claude` process in a bottom terminal split with that worktree as its working directory.
-Install/authenticate the CLI separately. Exit Terminal mode with **Ctrl-\\ Ctrl-N**,
-then **:hide** hides the pane without stopping the process. **Ctrl-W Ctrl-W**
+Install/authenticate the CLI separately. **Escape** returns control to Neovim in
+the same pane without forwarding Escape to the harness; **i** resumes harness input.
+Then **Cmd-W + arrow** switches panes, or **:hide** hides the pane without stopping
+the process. In Amp input, **Ctrl-L** interrupts the agent after running
+`:harness install amp`. **Cmd-W p**
 returns directly to the previous editor window, leaving the harness running.
+**Cmd-W** also accepts other window commands such as **h/j/k/l**. **Ctrl-W**
+passes through to the harness for word deletion, including repeated presses.
+Toggling Review with **Space r** moves an open harness pane between Review and
+editing, using the same window, process, and terminal buffer. Hiding the pane in
+either mode keeps it hidden across toggles until **:ho** reopens it.
 **:harness open** / **:ho** reopens a terminal and offers a chooser when multiple
 sessions are connected or running in the editor. Selecting another worktree's
 TUI does not change the review's annotation recipient. With no available/selected
@@ -421,10 +429,11 @@ and does not discover older registries. The plugin forwards the editor's
 content unchanged, without adding instructions.
 
 Built-in Amp and Claude delivery uses JSON: `rules` first, `repository` and
-`snapshot_archive` context next, then `annotations`. General messages use
-`rules`, `repository`, and `message`, without review context. Rules appear once;
-there is no prose prefix or epilogue. Ask-first defaults explicitly permit actions
-the user authorizes in the feedback, including commits, pushes, and pull requests.
+`snapshot_archive` context next, then `annotations`. The protocol's non-review
+message payloads use `rules`, `repository`, and `message`, without review
+context. Rules appear once; there is no prose prefix or epilogue. Ask-first
+defaults explicitly permit actions the user authorizes in the feedback,
+including commits, pushes, and pull requests.
 Annotations retain absolute file paths, old/new side, line ranges, Git group,
 snapshot identity/status, and exact selection spans. Stale/unverified, old-side,
 and character/block annotations also carry `selected_text`: up to five lines
@@ -460,12 +469,17 @@ Without Home Manager, install directly from the editor:
 ```
 
 This asks for confirmation before installing the bundled **readiff plugin**
-(not the Amp CLI). Cancel is the default. No Git
+(not the Amp CLI) and setting **Ctrl-L** as Amp's interrupt shortcut instead of
+**Esc Esc**. It merges `amp.keymap.thread.interrupt = "ctrl+l"` into
+`~/.config/amp/settings.json`, preserving other settings and keybindings. This
+affects all Amp sessions for this user, not only embedded ones. Invalid JSON and
+managed settings symlinks are left untouched and installation stops.
+Cancel is the default. No Git
 repository is required. With a selected live Amp target, the confirmation also
 authorizes a small request to that thread to call `reload_plugins` after a
 successful installation. Amp's plugin API has no direct reload method, so this
-is agent-mediated: queued does not mean reloaded. It never sends annotations or
-composer text, changes the binding, or replaces the last feedback retry target.
+is agent-mediated: queued does not mean reloaded. It never sends annotations,
+changes the binding, or replaces the last feedback retry target.
 Without a live target, reload manually once, then `:harness connect amp`.
 Home Manager-owned symlinks are never overwritten; update those through Home Manager.
 
@@ -479,8 +493,8 @@ The installer writes `readiff.ts` and moves a legacy `rediff.ts` to a unique bac
 under `~/.config/amp/plugin-backups/`, outside Amp's active plugin directory.
 It refuses symlinks (including Home Manager-owned files) or non-files at either
 name. Update Home Manager-managed plugins through Home Manager instead; it removes
-the old managed filename when switching to the new one. The installer installs
-only the plugin; use Nix for the editor. Shell and Home Manager installations
+the old managed filename when switching to the new one. The installer sets up
+the plugin and interrupt shortcut; use Nix for the editor. Shell and Home Manager installations
 still require a manual plugin reload. Reload invalidates the live connection;
 use `:harness connect amp` again once Amp has registered the new endpoint.
 In Amp's command palette, **readiff: connect** shows connection instructions;
@@ -492,7 +506,7 @@ Relaunch rediff using the updated package, then connect in the same checkout:
 ```vim
 :Harness install amp
 :Harness connect amp
-:Harness send
+:Harness open
 :Harness status
 :Harness retry
 :Harness disconnect
@@ -500,7 +514,7 @@ Relaunch rediff using the updated package, then connect in the same checkout:
 
 `connect amp` and `list` open the same searchable panel across worktrees. `/`
 filters aliases, titles, providers, IDs, directories, and activity. Enter toggles
-the selected harness's connection without stopping its agent or discarding drafts;
+the selected harness's connection without stopping its agent or discarding notes;
 `r` assigns a local alias, `d` disconnects, `c` shows connected sessions, and `R`
 rediscovers. `use amp` selects the launch type and connects to the only live match
 in this checkout, or opens the panel for multiple matches. While open, the panel
@@ -513,14 +527,10 @@ machine and user account. Each Amp instance must load the readiff plugin; discov
 uses `~/.cache/rediff/amp`, not terminal environment variables. Remote machines
 and orbs do not share this local registry or loopback connection.
 
-Multiple harnesses can remain connected. `:Harness send` asks which recipient
-when there is more than one, or `:Harness send ALIAS` selects directly. Drafts
-are separate per sender worktree and recipient. Selecting a local harness also
-sets the worktree's annotation target; selecting an external harness never does.
-Annotations cannot be sent across worktrees. General messages include sender
-directory, editor instance/PID, and recipient identity. External recipients get
-an explicit rule not to edit the sender's worktree. This is agent policy, not a
-filesystem sandbox: an existing agent retains its own filesystem permissions.
+Multiple harnesses can remain connected. Selecting a local harness also sets
+the worktree's annotation target; selecting an external harness never does.
+Annotations cannot be sent across worktrees. To type to an agent directly, use
+`:harness open` / `:ho` and its embedded terminal.
 
 The panel receives authenticated Amp activity snapshots asynchronously: running,
 idle, awaiting approval, error, and active tool name, without tool inputs/outputs.
@@ -532,41 +542,28 @@ Aliases persist locally; live subscriptions end when the editor exits.
 On startup, a saved live Amp binding is checked asynchronously against the live
 registry. The same thread in the same worktree can acquire a new endpoint after
 a plugin reload. If it is gone, a single live session in the current worktree
-connects automatically. With multiple matches (or none), `:harness send` opens
-the connection picker. Sessions in other worktrees are never selected as an
-automatic fallback. Failed feedback is never resent by reconnecting.
+connects automatically. With multiple matches (or none), run
+`:harness connect amp` to choose one. Sessions in other worktrees are never
+selected as an automatic fallback. Failed feedback is never resent by reconnecting.
 
-`:Harness send` opens a general-message `acwrite` buffer with normal Vim editing: `:w` submits and
-stays open, `:wq` submits and closes, and `:q` (or `:q!`) closes while retaining
-the draft locally without sending. Hidden message drafts do not block quitting;
-ordinary unsaved files remain protected. An `accepted` ACK means the steering
-message was queued, not that the agent completed a turn. Disconnect retains
-local drafts in this editor process and does not stop the agent. Every fresh
-editor starts with an empty composer, even if an older version saved a draft.
-
-Accepted/completed messages clear from the open composer and its session draft,
-so the next `:harness send` opens empty. Pending, failed/uncertain, and local-only
-queued messages are retained only until the editor exits; submitted payloads
-and receipts remain in the outbox for retry. A late acknowledgment never clears
-different text typed while sending. An empty `:w` sends nothing, and `:wq` can close a cleared
-composer. **General-message sends do not clear review annotations**: `:w` in a
-Review diff pane or sidebar sends the saved annotation batch, and its successful
-acknowledgment clears only those sent notes.
+`:w` in a Review diff pane or sidebar sends the saved annotation batch; its
+successful acknowledgment clears only those sent notes. An `accepted` ACK means
+the feedback was queued, not that the agent completed a turn. Disconnect keeps
+saved notes in this editor process and does not stop the agent.
 
 The bottom status bar shows the harness, session suffix, and delivery state in
 both Editing and Review. Use `:harness status` for the full session ID and last
 receipt status. This shows the selected binding and feedback delivery, not a
 live agent health check. `local` means feedback stays in the local outbox.
 
-Message writes never include pending review comments. Repeated writes of the
-same text to the same target reuse the existing submission. `:Harness retry`
-retries the current composer's last immutable submission (or the worktree's last
-annotation submission outside a composer), not newly edited text, and refuses a
-changed target. Live uncertain retries are allowed only on the same connection
-generation; reconnecting does not make an uncertain delivery safe to resend.
+Repeated writes of an unchanged annotation batch to the same target reuse the
+existing submission. `:Harness retry` retries the worktree's last immutable
+annotation submission, not newly edited notes, and refuses a changed target.
+Live uncertain retries are allowed only on the same connection generation;
+reconnecting does not make an uncertain delivery safe to resend.
 
-For interactive typing, lowercase `:harness` and `:hs` abbreviate `:Harness`
-and `:Harness send`. Plugins/scripts must use uppercase because Neovim custom
+For interactive typing, lowercase `:harness` and `:ho` abbreviate `:Harness`
+and `:Harness open`. Plugins/scripts must use uppercase because Neovim custom
 commands are uppercase. Credentials never belong in Nix or Git.
 
 ### Steer a live oh-my-pi process
@@ -678,7 +675,7 @@ absolute submission JSON path and launches it asynchronously in the repository.
 Without Home Manager, use `{"harness":"custom","feedback_command":["/path/to/receiver"]}`.
 
 Every payload contains `protocol_version`, `submission_id`, `repository`, and
-`target`. Review payloads contain `comments` and `snapshots`; general-message
+`target`. Review payloads contain `comments` and `snapshots`; non-review message
 payloads contain `message` instead. Each comment includes old/new side,
 file, line range, snapshot ID, exact selected text, and selection spans.
 Snapshots include both file versions and the Git patch. `snapshot_status`
@@ -716,7 +713,7 @@ to be sent to another agent; verify the binding before submitting.
 
 - Outbox payloads/receipts live under `stdpath("state")/reviews/<repository-hash>/`,
   normally `~/.local/state/rediff/reviews/`. Files are private (0600), with
-  atomic replacement. Annotation and message drafts live only in this editor
+  atomic replacement. Annotation drafts live only in this editor
   process; closing and reopening their views retains them, but quitting discards
   them. Reviewed marks and harness bindings persist. Drafts, snapshots and agent
   results stay out of Git.

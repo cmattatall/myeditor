@@ -217,10 +217,9 @@ local function render()
 		table.insert(lines, "")
 		table.insert(lines, "")
 	end
-	local action = s.purpose == "send" and "Enter send"
-		or (entry and entry.connected and "Enter disconnect" or "Enter connect")
+	local action = entry and entry.connected and "Enter disconnect" or "Enter connect"
 	table.insert(lines, " " .. action .. "  / filter  c connected  R discover  q close")
-	table.insert(lines, " s message  r rename  d disconnect")
+	table.insert(lines, " r rename  d disconnect")
 	vim.bo[s.buf].modifiable = true
 	api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
 	vim.bo[s.buf].modifiable = false
@@ -241,14 +240,11 @@ local function safely(fn)
 	end
 end
 
-local function act(callback, should_close)
+local function act(callback)
 	local s = M.state
 	local entry = s and selected_entry(s)
 	if not entry or not callback then
 		return
-	end
-	if should_close then
-		close()
 	end
 	safely(function()
 		callback(entry)
@@ -273,13 +269,11 @@ function M.open(opts)
 	opts = opts or {}
 	close()
 	local registry = require("rediff.connections")
-	local purpose = opts.purpose or "manage"
 	local s = {
 		registry = registry,
 		root = opts.root,
 		provider = opts.provider,
-		purpose = purpose,
-		connected_only = purpose == "send" or opts.connected_only == true,
+		connected_only = opts.connected_only == true,
 		filter = "",
 		entries = {},
 		rows = {},
@@ -364,19 +358,13 @@ function M.open(opts)
 		move(-1)
 	end, "Previous harness")
 	map(s.buf, "<CR>", function()
-		act(opts.on_select, purpose == "send")
+		act(opts.on_select)
 	end, "Select harness")
-	map(s.buf, "s", function()
-		local entry = selected_entry(s)
-		if entry and entry.connected then
-			act(opts.on_message, true)
-		end
-	end, "Message connected harness")
 	map(s.buf, "d", function()
 		local callback = opts.on_disconnect or function(entry)
 			registry.disconnect(entry.key)
 		end
-		act(callback, false)
+		act(callback)
 	end, "Disconnect harness")
 	map(s.buf, "r", function()
 		local entry = selected_entry(s)
@@ -395,11 +383,9 @@ function M.open(opts)
 		vim.cmd.startinsert()
 	end, "Filter harnesses")
 	map(s.buf, "c", function()
-		if purpose ~= "send" then
-			s.connected_only = not s.connected_only
-			s.selected, s.offset = 1, 1
-			render()
-		end
+		s.connected_only = not s.connected_only
+		s.selected, s.offset = 1, 1
+		render()
 	end, "Toggle connected harnesses")
 	map(s.buf, "R", function()
 		discover(true)

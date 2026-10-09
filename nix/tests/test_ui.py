@@ -395,7 +395,7 @@ class EditorUI(unittest.TestCase):
         self.lua(editor, "r.stage(false); r.focus('staged'); r.stage(false)")
         self.assertEqual(["quiet", "quiet"], states("untracked", "fresh.lua"))
 
-    def test_saved_amp_connection_is_rediscovered_before_sending(self):
+    def test_saved_amp_connection_is_rediscovered_before_feedback(self):
         for outcome in ("renewed", "replacement", "gone", "superseded"):
             with self.subTest(outcome=outcome):
                 self.fixture.exec_lua(
@@ -433,7 +433,6 @@ class EditorUI(unittest.TestCase):
                 editor.exec_lua(
                     "_G.saved_session = require('rediff.harness').get(...)", self.root
                 )
-                editor.command("Harness send")
                 self.assertTrue(editor.exec_lua("return saved_session.restoring"))
                 self.assertEqual(
                     0,
@@ -441,7 +440,12 @@ class EditorUI(unittest.TestCase):
                         "return #require('rediff.connections').connected()"
                     ),
                 )
-                self.assertNotEqual("acwrite", editor.current.buffer.options["buftype"])
+                self.assertIn(
+                    "Checking the saved harness session",
+                    editor.exec_lua(
+                        "return select(2, pcall(require('rediff.harness').deliver,saved_session.root,'early','/missing',{}))"
+                    ),
+                )
                 if outcome == "superseded":
                     editor.exec_lua(
                         "require('rediff.harness').select(saved_session.root,{name='none'})"
@@ -473,13 +477,18 @@ class EditorUI(unittest.TestCase):
                         expected_connection,
                         editor.exec_lua("return saved_session.target.connection"),
                     )
-                    self.assertEqual(
-                        "acwrite", editor.current.buffer.options["buftype"]
-                    )
-                    self.assertEqual([""], list(editor.current.buffer[:]))
                     self.assertEqual(1, editor.exec_lua("return #bridge_calls"))
-                    editor.current.buffer[:] = ["Send to the selected local thread"]
-                    editor.command("write")
+                    # Same steps as Review submission, without taking the
+                    # Review lock that earlier subtests' editors still hold.
+                    editor.exec_lua(
+                        """
+                        local feedback = require('rediff.feedback')
+                        local argv = feedback.command(saved_session.target)
+                        local id, path = feedback.enqueue(saved_session.root,
+                            {{text='Send to the selected local thread'}}, {}, argv)
+                        require('rediff.harness').deliver(saved_session.root, id, path, argv)
+                        """
+                    )
                     pump(editor)
                     self.assertEqual(
                         [
@@ -490,12 +499,15 @@ class EditorUI(unittest.TestCase):
                         ],
                         editor.exec_lua("return vim.list_slice(bridge_calls[2],1,4)"),
                     )
+                    self.assertEqual(
+                        "Send to the selected local thread",
+                        editor.exec_lua(
+                            "return require('rediff.feedback').read(bridge_calls[2][#bridge_calls[2]]).comments[1].text"
+                        ),
+                    )
                 elif outcome == "gone":
                     self.assertEqual(
-                        "connect",
-                        editor.exec_lua(
-                            "return require('rediff.harness_panel').state.purpose"
-                        ),
+                        "disconnected", editor.exec_lua("return saved_session.delivery")
                     )
                     self.assertFalse(
                         editor.exec_lua(
@@ -516,9 +528,6 @@ class EditorUI(unittest.TestCase):
                 else:
                     self.assertEqual(
                         "none", editor.exec_lua("return saved_session.target.name")
-                    )
-                    self.assertNotEqual(
-                        "acwrite", editor.current.buffer.options["buftype"]
                     )
                     self.assertEqual(
                         0,
@@ -548,91 +557,51 @@ class EditorUI(unittest.TestCase):
             """,
             str(Path(FIXTURE).with_name("receiver.lua")),
         )
-        for kind in ("message", "annotation"):
-            with self.subTest(kind=kind):
-                if kind == "message":
-                    self.keys(editor, ":harness send<CR>")
-                else:
-                    self.lua(
-                        editor,
-                        "vim.api.nvim_set_current_win(s.new_win); "
-                        "vim.api.nvim_win_set_cursor(0,{5,0}); r.compose()",
-                    )
-                    self.keys(editor, "<Esc>")
-                writes = self.lua(editor, "return vim.g.feedback_writes")
-                self.keys(editor, f"iPending {kind}<Esc>")
-                self.assertEqual(
-                    writes, self.lua(editor, "return vim.g.feedback_writes")
-                )
-                if kind == "annotation":
-                    self.keys(editor, ":w<CR>")  # Save locally first.
-                    self.wait_for(editor, "s.composer == nil")
-                self.lua(
-                    editor,
-                    "vim.g.delivery_tick = false; "
-                    "vim.defer_fn(function() vim.g.delivery_tick = true end, 50)",
-                )
-                self.keys(editor, ":w<CR>")
-                path = self.lua(
-                    editor, "return require('rediff.harness').get(s.root).last.path"
-                )
-                try:
-                    self.wait_for(
-                        editor,
-                        "vim.fn.filereadable(require('rediff.harness').get(s.root).last.path .. '.calls') == 1",
-                    )
-                    self.assertTrue(
-                        self.lua(
-                            editor, "return require('rediff.feedback').busy(s.root)"
-                        )
-                    )
-                    self.assertTrue(self.lua(editor, "return vim.g.delivery_tick"))
-                    if kind == "message":
-                        self.keys(editor, "A with newer edits<Esc>")
-                        self.assertEqual(
-                            ["Pending message with newer edits"],
-                            list(editor.current.buffer[:]),
-                        )
-                        self.keys(editor, "<Tab>")
-                        self.assertTrue(
-                            self.lua(
-                                editor,
-                                "return vim.api.nvim_get_current_win() == s.tree_win",
-                            )
-                        )
-                    else:
-                        self.keys(editor, "gg3j")
-                        self.assertEqual(
-                            4,
-                            self.lua(
-                                editor, "return vim.api.nvim_win_get_cursor(0)[1]"
-                            ),
-                        )
-                        self.assertEqual(1, self.lua(editor, "return #s.comments"))
-                    self.assertTrue(
-                        self.lua(
-                            editor, "return require('rediff.feedback').busy(s.root)"
-                        )
-                    )
-                finally:
-                    Path(path + ".release").touch()
-                self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
-                self.assertEqual(
-                    "completed",
-                    self.lua(
-                        editor, "return require('rediff.harness').get(s.root).delivery"
-                    ),
-                )
-                if kind == "message":
-                    self.assertEqual(
-                        "Pending message with newer edits",
-                        self.lua(
-                            editor,
-                            "return require('rediff.harness').get(s.root).message",
-                        ),
-                    )
-                else:
-                    self.assertEqual(0, self.lua(editor, "return #s.comments"))
+        self.lua(
+            editor,
+            "vim.api.nvim_set_current_win(s.new_win); "
+            "vim.api.nvim_win_set_cursor(0,{5,0}); r.compose()",
+        )
+        self.keys(editor, "<Esc>")
+        writes = self.lua(editor, "return vim.g.feedback_writes")
+        self.keys(editor, "iPending annotation<Esc>")
+        self.assertEqual(writes, self.lua(editor, "return vim.g.feedback_writes"))
+        self.keys(editor, ":w<CR>")  # Save locally first.
+        self.wait_for(editor, "s.composer == nil")
+        self.lua(
+            editor,
+            "vim.g.delivery_tick = false; "
+            "vim.defer_fn(function() vim.g.delivery_tick = true end, 50)",
+        )
+        self.keys(editor, ":w<CR>")
+        path = self.lua(
+            editor, "return require('rediff.harness').get(s.root).last.path"
+        )
+        try:
+            self.wait_for(
+                editor,
+                "vim.fn.filereadable(require('rediff.harness').get(s.root).last.path .. '.calls') == 1",
+            )
+            self.assertTrue(
+                self.lua(editor, "return require('rediff.feedback').busy(s.root)")
+            )
+            self.assertTrue(self.lua(editor, "return vim.g.delivery_tick"))
+            self.keys(editor, "gg3j")
+            self.assertEqual(
+                4, self.lua(editor, "return vim.api.nvim_win_get_cursor(0)[1]")
+            )
+            self.assertEqual(1, self.lua(editor, "return #s.comments"))
+            self.assertTrue(
+                self.lua(editor, "return require('rediff.feedback').busy(s.root)")
+            )
+        finally:
+            Path(path + ".release").touch()
+        self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
+        self.assertEqual(
+            "completed",
+            self.lua(editor, "return require('rediff.harness').get(s.root).delivery"),
+        )
+        self.assertEqual(0, self.lua(editor, "return #s.comments"))
 
     def test_harness_use_discovers_and_picks_live_session(self):
         editor = self.launch(self.root)
@@ -712,10 +681,7 @@ class EditorUI(unittest.TestCase):
         self.assertIn("external-worktree", rows[5])
         self.keys(editor, "q:hl<CR>")
         self.wait_for(editor, "require('rediff.harness_panel').state ~= nil")
-        self.assertEqual(
-            "manage",
-            self.lua(editor, "return require('rediff.harness_panel').state.purpose"),
-        )
+        self.assertEqual("rediff-harness-panel", editor.current.buffer.options["filetype"])
         self.keys(editor, "<CR>")
         self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
         self.assertIn("Enter disconnect", "\n".join(editor.current.buffer[:]))
@@ -769,40 +735,12 @@ class EditorUI(unittest.TestCase):
             editor,
             "r.add_comment({file=s.current.path,side='new',snapshot_id=s.current.id,selection=require('rediff.selection').line(s.new_buf,5)},'Local annotation')",
         )
-        self.keys(editor, ":harness send<CR>")
-        self.assertEqual(
-            "send",
-            self.lua(editor, "return require('rediff.harness_panel').state.purpose"),
-        )
-        self.keys(editor, "/backend<CR><CR>")
-        self.assertEqual("acwrite", editor.current.buffer.options["buftype"])
-        self.keys(editor, "iMessage for external worker<Esc>:w<CR>")
-        self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
-        sent = self.lua(editor, "return _G.sent_feedback[1]")
-        self.assertEqual(remote, sent["cwd"])
-        self.assertEqual("rediff-omp-live", sent["argv"][0])
-        self.assertEqual("T-remote", sent["argv"][3])
-        self.assertEqual(self.root, sent["payload"]["sender"]["repository"])
-        self.assertEqual(self.root, sent["payload"]["sender"]["directory"])
-        self.assertTrue(sent["payload"]["sender"]["instance"])
-        self.assertEqual(
-            {"provider": "omp", "id": "T-remote", "repository": remote},
-            sent["payload"]["recipient"],
-        )
-        self.assertNotIn("comments", sent["payload"])
-        self.assertEqual([""], list(editor.current.buffer[:]))
-        self.assertEqual(1, self.lua(editor, "return #s.comments"))
-        self.keys(editor, "iRetain this remote draft<Esc>:q<CR>")
-        self.keys(editor, ":harness send T-local<CR>")
-        self.assertEqual([""], list(editor.current.buffer[:]))
-        self.keys(editor, "iIndependent local draft<Esc>:q<CR>")
-        self.keys(editor, ":harness send backend<CR>")
-        self.assertEqual(["Retain this remote draft"], list(editor.current.buffer[:]))
-        self.keys(editor, ":q<CR>")
         self.lua(editor, "vim.api.nvim_set_current_win(s.new_win)")
         self.keys(editor, ":w<CR>")
         self.wait_for(editor, "not require('rediff.feedback').busy(s.root)")
-        annotation = self.lua(editor, "return _G.sent_feedback[2]")
+        self.assertEqual(1, self.lua(editor, "return #_G.sent_feedback"))
+        annotation = self.lua(editor, "return _G.sent_feedback[1]")
+        self.assertEqual("rediff-amp-live", annotation["argv"][0])
         self.assertEqual("T-local", annotation["argv"][3])
         self.assertEqual(
             "Local annotation", annotation["payload"]["comments"][0]["text"]
@@ -829,9 +767,15 @@ class EditorUI(unittest.TestCase):
         )
         self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
         self.assertIn("Enter connect", "\n".join(editor.current.buffer[:]))
-        self.keys(editor, "<CR>q:harness send backend<CR>")
-        self.assertEqual(["Retain this remote draft"], list(editor.current.buffer[:]))
-        self.assertEqual(2, self.lua(editor, "return #_G.sent_feedback"))
+        self.keys(editor, "<CR>q")
+        self.assertTrue(
+            self.lua(
+                editor,
+                "for _,e in ipairs(require('rediff.connections').connected()) do if e.alias=='backend' then return e.online end end",
+            )
+        )
+        self.assertEqual("T-local", self.lua(editor, "return s.harness.session"))
+        self.assertEqual(1, self.lua(editor, "return #_G.sent_feedback"))
 
     def test_harness_panel_polls_without_overlapping_or_losing_selection(self):
         editor = self.launch(self.root)
@@ -2159,7 +2103,7 @@ class EditorUI(unittest.TestCase):
         saved = Path(buffer.name).read_text()
         buffer[0] = "-- unsaved edit"
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
-        for focus in ("", "<Tab>", ":hs<CR>"):
+        for focus in ("", "<Tab>"):
             self.keys(editor, " r")
             self.assertTrue(self.lua(editor, "return r.active() ~= nil"))
             # From the editing tab, focus the existing Review rather than closing it.
@@ -3272,65 +3216,6 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, ":setlocal nowrap<CR>")
         self.assertFalse(editor.current.window.options["wrap"])
 
-    def test_message_tab_returns_to_review_without_sending(self):
-        editor = self.launch(self.root)
-        self.keys(editor, ":harness send<CR>iDraft<Tab>message<Esc>")
-        message = editor.current.buffer
-        draft = message[:]
-        self.assertRegex(draft[0], r"^Draft\s+message$")
-        self.assertTrue(message.name.startswith("harness://"))
-        self.keys(editor, "<Tab>")
-        self.assertTrue(
-            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
-        )
-        self.keys(editor, "<Tab>")
-        self.assertTrue(
-            self.lua(editor, "return vim.api.nvim_get_current_win() == s.new_win")
-        )
-        self.keys(editor, "<Tab>")
-        self.assertTrue(
-            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
-        )
-        self.keys(editor, ":harness send<CR>")
-        self.assertEqual(message.number, editor.current.buffer.number)
-        self.assertEqual(draft, message[:])
-        self.assertTrue(
-            self.lua(editor, 'return require("rediff.harness").get(s.root).last == nil')
-        )
-        self.keys(editor, "<Tab>")
-        self.assertTrue(
-            self.lua(editor, "return vim.api.nvim_get_current_win() == s.tree_win")
-        )
-
-    def test_successful_message_clears_without_enter_prompt(self):
-        editor = self.launch(self.root)
-        self.lua(
-            editor,
-            """
-            local feedback = require('rediff.feedback')
-            feedback.settings = function() return {feedback_command={'fake-receiver'}} end
-            require('rediff.harness').select(s.root, {name='custom'})
-            local system = vim.system
-            vim.system = function(argv, opts, callback)
-                if argv[1] ~= 'fake-receiver' then return system(argv, opts, callback) end
-                local payload = feedback.read(argv[#argv])
-                vim.schedule(function()
-                    callback({code=0, stdout=vim.json.encode({
-                        submission_id=payload.submission_id, status='accepted'
-                    })})
-                end)
-            end
-            vim.notify = original_notify
-        """,
-        )
-        self.keys(editor, ":harness send<CR>iSteer the agent<Esc>:w<CR>")
-        self.wait_for(
-            editor, 'require("rediff.harness").get(s.root).delivery == "accepted"'
-        )
-        self.assertEqual([""], editor.current.buffer[:])
-        self.keys(editor, "iNext message<Esc>")
-        self.assertEqual(["Next message"], editor.current.buffer[:])
-
     def test_branch_and_manual_refresh(self):
         editor = self.launch(self.root)
         self.assertIn(" REVIEW · main · ", self.lua(editor, "return r.statusline()"))
@@ -3580,84 +3465,6 @@ class EditorUI(unittest.TestCase):
             self.lua(editor, "return s == nil and left_review.live_refresh == nil")
         )
 
-    def test_live_refresh_from_harness_message_preserves_draft_and_focus(self):
-        # Begin with an empty tree, as in the reported stale-list failure.
-        subprocess.run(["git", "-C", self.root, "add", "."], check=True)
-        subprocess.run(
-            ["git", "-C", self.root, "commit", "-m", "Clean fixture"], check=True
-        )
-        index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
-        editor = self.launch(self.root)
-        self.lua(
-            editor,
-            "local f=require('rediff.feedback'); local p=vim.fn.stdpath('config'); "
-            "vim.fn.mkdir(p,'p'); f.write(p..'/settings.json',{review_refresh_interval=1}); "
-            "require('rediff.live').start(s)",
-        )
-        self.assertEqual(0, self.lua(editor, "return #s.entries"))
-        self.keys(editor, ":harness send<CR>iKeep this unsent draft<Esc>")
-        buf, win = (
-            editor.current.buffer.number,
-            editor.current.window.handle,
-        )
-        self.assertTrue(self.lua(editor, "return require('rediff.live').ready(s)"))
-        self.assertFalse(
-            self.lua(
-                editor, "return require('rediff.harness').in_message('/other/worktree')"
-            )
-        )
-        path = Path(self.root, "new file.txt")
-        path.write_text("first\n")
-        self.wait_for(editor, '#s.entries == 1 and s.current.new == "first\\n"')
-        for mode in ("i", "R"):
-            self.keys(editor, mode)
-            position = editor.current.window.cursor
-            self.assertEqual(mode, self.lua(editor, "return vim.fn.mode()"))
-            self.assertTrue(self.lua(editor, "return require('rediff.live').ready(s)"))
-            path.write_text(mode + "\n")
-            self.wait_for(editor, f's.current.new == "{mode}\\n"')
-            self.assertEqual(mode, self.lua(editor, "return vim.fn.mode()"))
-            self.assertEqual(position, editor.current.window.cursor)
-            self.assertEqual(buf, editor.current.buffer.number)
-            self.assertEqual(win, editor.current.window.handle)
-            self.assertEqual(["Keep this unsent draft"], editor.current.buffer[:])
-            self.keys(editor, "<Esc>")
-        # Visual selections still defer refresh rather than being cancelled by it.
-        self.keys(editor, "v")
-        self.assertFalse(self.lua(editor, "return require('rediff.live').ready(s)"))
-        path.write_text("visual\n")
-        snapshot = self.lua(editor, "return s.current.id")
-        time.sleep(1.2)
-        pump(editor)
-        self.assertEqual(snapshot, self.lua(editor, "return s.current.id"))
-        self.assertEqual("v", self.lua(editor, "return vim.fn.mode()"))
-        self.keys(editor, "<Esc>")
-        self.wait_for(editor, 's.current.new == "visual\\n"')
-
-        # The same draft must allow file events with fallback polling disabled.
-        self.lua(
-            editor,
-            "local f=require('rediff.feedback'); "
-            "f.write(vim.fn.stdpath('config')..'/settings.json',{review_refresh_interval=0}); "
-            "require('rediff.live').start(s)",
-        )
-        self.keys(editor, "A")
-        cursor = editor.current.window.cursor
-        Path(self.root, "auth.lua").write_text("return 'edited externally'\n")
-        self.lua(editor, "require('rediff.live').changed(s.root)")
-        self.wait_for(editor, "#s.entries == 2")
-        self.assertEqual(buf, editor.current.buffer.number)
-        self.assertEqual(win, editor.current.window.handle)
-        self.assertEqual(cursor, editor.current.window.cursor)
-        self.assertEqual("i", self.lua(editor, "return vim.fn.mode()"))
-        self.assertEqual(["Keep this unsent draft"], editor.current.buffer[:])
-        self.keys(editor, " intact<Esc>")
-        self.assertEqual(["Keep this unsent draft intact"], editor.current.buffer[:])
-        self.assertTrue(editor.current.buffer.options["modified"])
-        self.assertEqual(
-            index, subprocess.check_output(["git", "-C", self.root, "write-tree"])
-        )
-
     def test_live_refresh_interval_setting_and_disable(self):
         editor = self.launch(self.root)
 
@@ -3898,6 +3705,142 @@ class EditorUI(unittest.TestCase):
             external.terminate()
             external.wait(timeout=5)
 
+    def test_live_refresh_preserves_harness_terminal_input(self):
+        subprocess.run(["git", "-C", self.root, "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-m", "Clean fixture"],
+            check=True,
+            capture_output=True,
+        )
+        editor = self.launch(self.root)
+        self.lua(
+            editor,
+            "require('rediff.harness').launch(s.root, {'sh', '-c', "
+            "[[echo ready; while IFS= read -r line; do printf 'Reply: %s\\n' \"$line\"; done]]})",
+        )
+        buf, win = editor.current.buffer.number, editor.current.window.handle
+        job = editor.current.buffer.vars["terminal_job_id"]
+        path = Path(self.root, "terminal edits.txt")
+        for interval in (1, 0):
+            # Exercise fallback polling and file events independently.
+            self.lua(
+                editor,
+                "local f=require('rediff.feedback'); local p=vim.fn.stdpath('config'); "
+                "vim.fn.mkdir(p,'p'); "
+                f"f.write(p..'/settings.json',{{review_refresh_interval={interval}}}); "
+                "require('rediff.live').start(s)",
+            )
+            self.keys(editor, "keep this draft")
+            for text in ("first", "second"):
+                path.write_text(text + "\n")
+                if interval == 0:
+                    self.lua(editor, "require('rediff.live').changed(s.root)")
+                self.wait_for(
+                    editor, f'#s.entries == 1 and s.current.new == "{text}\\n"'
+                )
+                self.assertEqual(buf, editor.current.buffer.number)
+                self.assertEqual(win, editor.current.window.handle)
+                self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+                self.assertEqual("t", editor.api.get_mode()["mode"])
+                self.assertEqual(
+                    [text],
+                    self.lua(
+                        editor,
+                        "return vim.api.nvim_buf_get_lines(s.new_buf,0,-1,false)",
+                    ),
+                )
+            self.keys(editor, f" {interval}<CR>")
+            self.wait_for(
+                editor,
+                f"table.concat(vim.api.nvim_buf_get_lines({buf},0,-1,false),'\\n'):find('Reply: keep this draft {interval}',1,true) ~= nil",
+            )
+            path.unlink()
+            if interval == 0:
+                self.lua(editor, "require('rediff.live').changed(s.root)")
+            self.wait_for(editor, "#s.entries == 0")
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.assertEqual("t", editor.api.get_mode()["mode"])
+
+    def test_harness_terminal_does_not_inherit_outer_terminal_identity(self):
+        executable = Path(self.directory.name, "terminal-fixture")
+        log = Path(self.directory.name, "terminal-env")
+        executable.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "$TMUX" ] || [ "$TERM_PROGRAM" = tmux ]; then\n'
+            "  printf '\\033Ptmux;\\033\\033]777;notify;amp;Agent is ready\\007\\033\\\\'\n"
+            "else\n"
+            "  printf '\\033]777;notify;amp;Agent is ready\\007'\n"
+            "fi\n"
+            "printf '\\033]2;Readiff terminal fixture\\007Harness ready\\n'\n"
+            'printf \'%s\\n\' "$TERM" "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" '
+            '"$KITTY_WINDOW_ID" "$COLUMNS" "$LINES" "$NVIM" '
+            '"$SSH_AUTH_SOCK" "$COLORTERM" "$HOME" "$PATH" > "$HARNESS_TEST_LOG"\n'
+            "while IFS= read -r line; do printf 'Reply: %s\\n' \"$line\"; done\n"
+        )
+        executable.chmod(0o755)
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        editor = self.launch(self.root)
+        # Set the parent's identity after UI startup; don't alter its own renderer.
+        self.lua(
+            editor,
+            """
+            vim.env.TMUX='/outer/tmux,123,0'
+            vim.env.TMUX_PANE='%42'
+            vim.env.TERM_PROGRAM='tmux'
+            vim.env.KITTY_WINDOW_ID='27'
+            vim.env.TERM='screen-256color'
+            vim.env.COLUMNS='999'
+            vim.env.LINES='777'
+            vim.env.SSH_AUTH_SOCK='/test/forwarded-agent'
+            vim.env.COLORTERM='truecolor'
+        """,
+        )
+        editor.exec_lua(
+            "require('rediff.harness').launch(require('rediff.review').state.root, {...})",
+            str(executable),
+        )
+        self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1")
+        self.wait_for(
+            editor,
+            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):find('Harness ready',1,true) ~= nil",
+        )
+        self.assertEqual(
+            ["Harness ready"], [line for line in editor.current.buffer if line]
+        )
+        self.assertEqual(
+            "Readiff terminal fixture", editor.current.buffer.vars["term_title"]
+        )
+        self.assertEqual(
+            [
+                "xterm-256color",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                editor.vvars["servername"],
+                "/test/forwarded-agent",
+                "truecolor",
+                self.directory.name,
+                self.lua(editor, "return vim.env.PATH"),
+            ],
+            log.read_text().splitlines(),
+        )
+        self.assertEqual(
+            ["/outer/tmux,123,0", "%42", "tmux", "27", "screen-256color", "999", "777"],
+            self.lua(
+                editor,
+                "return {vim.env.TMUX,vim.env.TMUX_PANE,vim.env.TERM_PROGRAM,"
+                "vim.env.KITTY_WINDOW_ID,vim.env.TERM,vim.env.COLUMNS,vim.env.LINES}",
+            ),
+        )
+        self.keys(editor, "typing still works<CR>")
+        self.wait_for(
+            editor,
+            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):find('Reply: typing still works',1,true) ~= nil",
+        )
+
     def test_harness_terminal_pane_reuses_process_across_layouts_and_reviews(self):
         binary = Path(self.directory.name, "bin")
         binary.mkdir()
@@ -3914,6 +3857,7 @@ class EditorUI(unittest.TestCase):
         editor = self.launch(self.root)
         self.lua(editor, "require('rediff.live').stop(s)")
         tabs = len(editor.api.list_tabpages())
+        edit_windows = self.lua(editor, "return #vim.api.nvim_tabpage_list_wins(s.previous_tab)")
         self.keys(editor, ":harness use claude<CR>:harness open<CR>")
         self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1")
         buf = editor.current.buffer.number
@@ -3928,7 +3872,24 @@ class EditorUI(unittest.TestCase):
             editor,
             f"table.concat(vim.api.nvim_buf_get_lines({buf},0,-1,false),'\\n'):find('Reply: hello pane',1,true) ~= nil",
         )
-        self.keys(editor, "<C-w><C-w>")
+        # Ctrl-W belongs to the TUI, including consecutive word deletions.
+        # A long mapping timeout exposes any intercepted prefix immediately.
+        self.lua(editor, "vim.o.timeoutlen = 10000")
+        for text, deleted in (
+            ("single unwanted", "<C-w>"),
+            ("double one two", "<C-w><C-w>"),
+        ):
+            self.keys(editor, text + deleted)
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.assertEqual("t", editor.api.get_mode()["mode"])
+            self.assertFalse(editor.api.get_mode()["blocking"])
+            self.keys(editor, "kept<CR>")
+            expected = text.split()[0] + " kept"
+            self.wait_for(
+                editor,
+                f"table.concat(vim.api.nvim_buf_get_lines({buf},0,-1,false),'\\n'):find('Reply: {expected}',1,true) ~= nil",
+            )
+        self.keys(editor, "<D-w>p")
         self.assertNotEqual("terminal", editor.current.buffer.options["buftype"])
         self.assertEqual("n", editor.api.get_mode()["mode"])
         self.keys(editor, ":ho<CR>")
@@ -3941,21 +3902,68 @@ class EditorUI(unittest.TestCase):
             self.assertEqual(buf, editor.current.buffer.number)
             self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
             self.assertEqual(count, len(editor.api.tabpage_list_wins(0)))
+            self.keys(editor, "pending input")
+            for _ in range(2):
+                self.keys(editor, "<Esc>")
+                self.assertEqual(buf, editor.current.buffer.number)
+                self.assertEqual("nt", editor.api.get_mode()["mode"])
+            self.keys(editor, "<D-w><Up>")
+            self.assertNotEqual(buf, editor.current.buffer.number)
+            self.assertEqual("n", editor.api.get_mode()["mode"])
+            self.keys(editor, ":ho<CR>")
+            self.assertEqual(buf, editor.current.buffer.number)
+            self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+            self.keys(editor, f" intact {layout}<CR>")
+            self.wait_for(
+                editor,
+                f"table.concat(vim.api.nvim_buf_get_lines({buf},0,-1,false),'\\n'):find('Reply: pending input intact {layout}',1,true) ~= nil",
+            )
             self.keys(editor, "<C-\\><C-n>")
             self.lua(editor, "r.refresh_live()")
             self.assertEqual(buf, editor.current.buffer.number)
-            self.keys(editor, "i<C-w><C-w>")
+            self.keys(editor, "i<D-w>p")
             self.assertNotEqual("terminal", editor.current.buffer.options["buftype"])
             self.keys(editor, ":ho<CR>")
-        self.keys(editor, "<C-\\><C-n>")
-        self.lua(editor, "r.leave(); r.open()")
-        self.keys(editor, ":harness open<CR>")
-        self.assertEqual(buf, editor.current.buffer.number)
+        for _ in range(2):
+            edit_focus = self.lua(editor, "return vim.api.nvim_tabpage_get_win(s.previous_tab)")
+            self.keys(editor, "<Esc><Space>r")
+            self.assertTrue(self.lua(editor, "return r.active() == nil"))
+            self.assertEqual(edit_windows + 1, len(editor.api.tabpage_list_wins(0)))
+            self.assertEqual(
+                1,
+                sum(w.buffer.number == buf for w in editor.current.tabpage.windows),
+                "Leaving Review keeps exactly one harness pane visible",
+            )
+            self.assertEqual(edit_focus, editor.current.window.handle)
+            self.keys(editor, ":ho<CR>")
+            self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+            self.keys(editor, "<Esc><Space>r")
+            self.assertEqual(
+                1,
+                sum(w.buffer.number == buf for w in editor.current.tabpage.windows),
+                "Entering Review keeps the harness visible without :ho",
+            )
+            self.assertEqual(1, len(editor.funcs.win_findbuf(buf)))
+            self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
+            self.keys(editor, ":ho<CR>")
+            self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+        # Hiding in Review carries through both directions of the toggle.
+        self.keys(editor, "<Esc>:hide<CR><Space>r")
+        self.assertTrue(self.lua(editor, "return r.active() == nil"))
+        self.assertEqual(edit_windows, len(editor.api.tabpage_list_wins(0)))
+        self.assertEqual([], editor.funcs.win_findbuf(buf))
+        self.keys(editor, "<Space>r")
+        self.assertEqual([], editor.funcs.win_findbuf(buf))
+        # Reopen, leave Review, then hide in editing; it must not reappear either.
+        self.keys(editor, ":ho<CR><Esc><Space>r:ho<CR><Esc>:hide<CR><Space>r")
+        self.assertEqual([], editor.funcs.win_findbuf(buf))
+        self.keys(editor, "<Space>r")
+        self.assertTrue(self.lua(editor, "return r.active() == nil"))
+        self.assertEqual([], editor.funcs.win_findbuf(buf))
         self.assertEqual(
             1, len(log.read_text().splitlines()), "Reopening must not restart the agent"
         )
-        self.keys(editor, "<C-\\><C-n>")
-        self.lua(editor, "require('rediff.harness').stop(s.root)")
+        self.lua(editor, "require('rediff.harness').stop(require('rediff.git').root())")
         self.assertFalse(editor.api.buf_is_valid(buf))
         self.assertEqual(-3, editor.funcs.jobwait([job], 0)[0])
 
@@ -4082,14 +4090,14 @@ class EditorUI(unittest.TestCase):
         other_job = editor.current.buffer.vars["terminal_job_id"]
         self.assertEqual(str(other), editor.funcs.getcwd())
         self.assertEqual("none", self.lua(editor, "return s.harness.name"))
-        self.keys(editor, "<C-w><C-w>")
+        self.keys(editor, "<D-w>p")
         self.assertEqual(self.root, editor.funcs.getcwd())
         self.keys(editor, ":ho<CR>1<CR>")
         self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG)==2")
         local_job = editor.current.buffer.vars["terminal_job_id"]
         self.assertNotEqual(other_job, local_job)
         self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
-        self.keys(editor, "<C-w><C-w>:ho<CR>2<CR>")
+        self.keys(editor, "<D-w>p:ho<CR>2<CR>")
         self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
         self.assertEqual(
             2,

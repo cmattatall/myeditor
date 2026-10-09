@@ -40,6 +40,11 @@ return function(root, equal, fails, keys)
 		equal(true, notices[1]:find("Installed", 1, true) ~= nil, "Installer reports success")
 		local bundled = vim.env.REDIFF_RUNTIME .. "/amp/readiff.ts"
 		equal(vim.fn.readfile(bundled), vim.fn.readfile(plugin), "Editor installs its exact bundled plugin")
+		equal(
+			"ctrl+l",
+			vim.json.decode(table.concat(vim.fn.readfile(install_home .. "/.config/amp/settings.json"), "\n"))["amp.keymap"]["thread.interrupt"],
+			"Harness install configures Amp interruption away from Escape"
+		)
 		vim.fn.delete(plugin)
 		assert(vim.uv.fs_symlink(bundled, plugin))
 		notices = {}
@@ -70,11 +75,11 @@ return function(root, equal, fails, keys)
 	vim.fn.delete(install_home, "rf")
 	assert(install_ok, install_err)
 
-	-- Reload uses the existing authenticated bridge, never the draft composer.
+	-- Reload uses the existing authenticated bridge, never a feedback delivery.
 	local original_system, original_target = vim.system, session.target
 	local calls, callbacks = {}, {}
 	session.target = { name = "amp-live", connection = "/fake/connection.json", session = thread }
-	local original_message, original_last = session.message, session.last
+	local original_last = session.last
 	vim.fn.confirm = function(message)
 		assert(message:find(thread, 1, true) and message:find("reload", 1, true))
 		return choice
@@ -114,7 +119,6 @@ return function(root, equal, fails, keys)
 		vim.wait(10)
 		equal("Reload outcome uncertain", notices[#notices], "Reload failure remains visible")
 		equal(5, #calls, "Uncertain reload is never automatically retried")
-		equal(original_message, session.message, "Reload does not change the message draft")
 		equal(original_last, session.last, "Reload preserves the last feedback retry target")
 	end, debug.traceback)
 	vim.system, vim.fn.confirm, vim.notify = original_system, confirm, notify
@@ -155,7 +159,7 @@ return function(root, equal, fails, keys)
 	keys(":harness use amp<CR>")
 	respond(matches)
 	equal("amp", session.provider, "Use persists the worktree launch type")
-	equal("amp-live", s.harness.name, "Lowercase use connects Review and messages to the only live session")
+	equal("amp-live", s.harness.name, "Lowercase use connects Review feedback to the only live session")
 	equal(
 		"harness: amp-live · …44444444 · idle",
 		harness.statusline(root),
@@ -280,83 +284,45 @@ return function(root, equal, fails, keys)
 		harness.disconnect(entry)
 	end
 
-	local comment = review.add_comment({
-		file = s.current.path,
-		side = "new",
-		snapshot_id = s.current.id,
-		selection = require("rediff.selection").line(s.new_buf, 5),
-	}, "Unsent review comment")
+	local function annotate(text)
+		return review.add_comment({
+			file = s.current.path,
+			side = "new",
+			snapshot_id = s.current.id,
+			selection = require("rediff.selection").line(s.new_buf, 5),
+		}, text)
+	end
 	local settings = feedback.settings
 	feedback.settings = function()
 		return {
-			feedback_command = { vim.v.progpath, "--headless", "-u", "NONE", "-l", tests .. "/receiver.lua", "ok" },
+			feedback_command = { vim.v.progpath, "--headless", "-u", "NONE", "-l", tests .. "/receiver.lua", "wait" },
 		}
 	end
 	harness.select(root, { name = "custom" })
-	keys(":hs<CR>iExplain the approach.<Esc>")
-	local buf, win = session.buf, vim.api.nvim_get_current_win()
-	equal("acwrite", vim.bo[buf].buftype, "hs opens a normal editable message buffer")
-	for _, key in ipairs({ "i", "c", "d", "p", "u" }) do
-		equal("", vim.fn.maparg(key, "n"), "Message composer preserves native " .. key)
-	end
-	vim.cmd.write()
-	equal(true, feedback.busy(root), "Message and review share the in-flight lock")
-	equal("harness: custom · running", harness.statusline(root), "Status shows an in-flight message")
+	local comment = annotate("Review comment")
+	vim.api.nvim_set_current_win(s.new_win)
+	keys(":w<CR>")
+	equal(true, feedback.busy(root), "Review feedback holds the in-flight lock")
+	equal("harness: custom · running", harness.statusline(root), "Status shows in-flight feedback")
 	fails(function()
 		harness.select(root, { name = "none" })
 	end, "Wait for the current")
 	fails(review.submit, "Wait for the current")
+	vim.fn.writefile({}, session.last.path .. ".release") -- Release the deliberately pending receiver.
 	assert(vim.wait(10000, function()
 		return not feedback.busy(root)
 	end))
 	equal("harness: custom · completed", harness.statusline(root), "Acknowledgment updates the persistent status bar")
 	local path = session.last.path
-	local payload = feedback.read(path)
-	equal("Explain the approach.", payload.message, "Write sends exact message text")
-	equal(nil, payload.comments, "General message excludes pending comments")
-	equal(nil, payload.snapshots, "General message excludes review snapshots")
-	equal(comment, s.comments[1], "General send retains review drafts")
-	equal(win, vim.api.nvim_get_current_win(), "Write keeps composer open")
-	equal({ "" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false), "Successful :w clears the visible message")
-	equal(nil, feedback.read(session.directory .. "/harness.json").message, "Composer text is never persisted")
-	keys(":w<CR>")
-	equal({ "1" }, vim.fn.readfile(path .. ".calls"), "Writing an empty composer sends nothing")
-	keys(":wq<CR>")
-	equal(false, vim.api.nvim_win_is_valid(win), "Write-quit closes only message window")
-	equal(s, review.state, "Message write-quit preserves Review")
-	-- Lifecycle tests use the command directly; real-input alias coverage lives in input.lua.
-	vim.cmd("Harness send")
-	equal({ "" }, vim.api.nvim_buf_get_lines(session.buf, 0, -1, false), "Next message opens empty")
-	keys("iExplain the approach.<Esc>:q!<CR>")
-	vim.cmd("Harness send")
-	equal(
-		{ "Explain the approach." },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"An old acknowledgment cannot clear a newly typed identical message"
-	)
-	vim.api.nvim_buf_set_lines(session.buf, 0, -1, false, { "" })
-	keys("iKeep this unsent.<Esc>:q<CR>")
-	equal("Keep this unsent.", session.message, "Plain quit retains changed message")
-	equal(path, session.last.path, "Plain quit does not send")
-	vim.cmd("Harness send")
-	equal(
-		{ "Keep this unsent." },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"Reopen restores unsent draft"
-	)
-	local layout = vim.fn.winlayout()
-	keys("?")
-	equal("editor", vim.api.nvim_win_get_config(0).relative, "Message help is an overlay")
-	keys("?")
-	equal(layout, vim.fn.winlayout(), "Closing message help preserves layout")
-	fails(function()
-		vim.cmd("write " .. vim.fn.fnameescape(root .. "/leak.txt"))
-	end, "do not write files")
-	equal(0, vim.fn.filereadable(root .. "/leak.txt"), "Named writes cannot leak a message")
-	keys(":q!<CR>")
+	equal(s.last_submission, path, "Review delivery is the harness retry target")
+	local review_payload = feedback.read(path)
+	equal({ comment }, review_payload.comments, "Review :w sends the accumulated annotation batch")
+	equal(nil, review_payload.message, "Review feedback carries no freeform message")
+	equal({}, s.comments, "Successful review send clears individual annotations")
 	harness.retry()
-	equal(path, session.last.path, "Retry uses original payload, not edited message")
-	equal({ "1" }, vim.fn.readfile(path .. ".calls"), "Retry cannot resend a completed message")
+	equal(path, session.last.path, "Retry uses the original payload")
+	equal({ "1" }, vim.fn.readfile(path .. ".calls"), "Retry cannot resend completed feedback")
+	local retained = annotate("Unsent review comment")
 	vim.cmd("Harness disconnect")
 	fails(harness.retry, "Harness changed")
 	equal(
@@ -364,16 +330,12 @@ return function(root, equal, fails, keys)
 		harness.statusline(root),
 		"Disconnect cannot attribute old delivery to a new target"
 	)
-	equal("Keep this unsent.", session.message, "Disconnect retains message draft")
-	equal(comment, s.comments[1], "Disconnect retains review drafts")
+	equal(retained, s.comments[1], "Disconnect retains review drafts")
 	equal(
 		"none",
 		feedback.read(session.directory .. "/harness.json").target.name,
 		"Binding is persisted independently of Review"
 	)
-	vim.cmd("Harness send")
-	keys(":w<CR>")
-	equal("Keep this unsent.", session.message, "Local queued feedback is not treated as sent")
 	harness.select(root, { name = "custom" })
 	notices = {}
 	vim.notify = function(message)
@@ -403,64 +365,19 @@ return function(root, equal, fails, keys)
 			return not feedback.busy(root)
 		end))
 	end
-	keys(":wq<CR>")
-	equal(false, vim.fn.bufwinid(session.buf) ~= -1, "wq closes while send is pending")
-	vim.cmd("Harness send")
-	equal(
-		{ "Keep this unsent." },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"Pending send retains draft on reopen"
-	)
-	finish("failed")
-	equal(true, notices[1]:find("Fixture failure", 1, true) ~= nil, "Delivery failure is reported")
-	equal(
-		{ "Keep this unsent." },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"Failure preserves visible message"
-	)
-	harness.retry()
-	finish("accepted")
-	equal({ "" }, vim.api.nvim_buf_get_lines(session.buf, 0, -1, false), "Accepted retry clears the message")
-	keys("iFirst message<Esc>:w<CR>")
-	vim.api.nvim_buf_set_lines(session.buf, 0, -1, false, { "New draft typed during delivery" })
-	finish("accepted")
-	equal(
-		{ "New draft typed during delivery" },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"Late ACK preserves newer buffer edits even before capture"
-	)
-	equal(
-		nil,
-		feedback.read(session.directory .. "/harness.json").message,
-		"Late ACK does not persist draft text across sessions"
-	)
-	keys(":q!<CR>")
-	vim.cmd("Harness send")
-	equal("New draft typed during delivery", session.message, "Reopen preserves the newer draft")
-	keys(":wq<CR>")
-	finish("completed")
-	vim.cmd("Harness send")
-	equal(
-		{ "" },
-		vim.api.nvim_buf_get_lines(session.buf, 0, -1, false),
-		"ACK after closing also clears the next composition"
-	)
-	keys(":q<CR>")
+	local delivery_ok, delivery_err = xpcall(function()
+		vim.api.nvim_set_current_win(s.new_win)
+		keys(":w<CR>")
+		finish("failed")
+		equal(true, notices[1]:find("Fixture failure", 1, true) ~= nil, "Delivery failure is reported")
+		equal({ retained }, s.comments, "Failure preserves the annotation batch")
+		harness.retry()
+		finish("accepted")
+		equal({}, s.comments, "Accepted retry clears the delivered annotations")
+	end, debug.traceback)
 	vim.system, vim.notify = system, notify
-	equal(comment, s.comments[1], "Clearing messages never clears review comments")
-	vim.cmd("Harness send")
-	keys("iSeparate unsent message<Esc>:q!<CR>")
-	vim.api.nvim_set_current_win(s.new_win)
-	keys(":w<CR>")
-	assert(vim.wait(10000, function()
-		return not feedback.busy(root)
-	end))
-	local review_payload = feedback.read(s.last_submission)
-	equal({ comment }, review_payload.comments, "Review :w sends the accumulated annotation batch")
-	equal(nil, review_payload.message, "Review :w excludes the harness message draft")
-	equal({}, s.comments, "Successful review send clears individual annotations")
-	equal("Separate unsent message", session.message, "Review acknowledgment does not clear a general message")
 	feedback.settings = settings
+	assert(delivery_ok, delivery_err)
 	review.archive()
 	vim.cmd("new")
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, { "Unwritten ordinary buffer" })
@@ -479,75 +396,47 @@ return function(root, equal, fails, keys)
 	assert(vim.system({ "git", "init", restart_root }, { text = true }):wait().code == 0)
 	restart_root = vim.uv.fs_realpath(restart_root)
 	local directory = feedback.directory(restart_root)
-	local function reopen(retype, hidden)
+	local function reopen()
 		local child = vim.fn.jobstart(
 			{ vim.fn.exepath("rediff"), "--embed", "--headless", "-i", "NONE" },
 			{ rpc = true }
 		)
 		assert(child > 0)
-		local ok, text = pcall(
+		local ok, restored = pcall(
 			vim.rpcrequest,
 			child,
 			"nvim_exec_lua",
 			[[
-			local root, retype, hidden = ...
+			local root = ...
 			vim.cmd.cd(root)
 			require("rediff.feedback").deliver = function() error("Opening must not send") end
-			vim.cmd("Harness send")
-			local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
-			if retype then
-				vim.api.nvim_buf_set_lines(0, 0, -1, false, {retype})
-			end
-			vim.cmd(hidden and "hide" or "q")
-			return text
+			local s = require("rediff.harness").get(root)
+			return { last = s.last, delivery = s.delivery }
 		]],
-			{ restart_root, retype or false, hidden or false }
+			{ restart_root }
 		)
 		vim.rpcnotify(child, "nvim_command", "q")
-		local exited = vim.fn.jobwait({ child }, 5000)[1]
-		if exited == -1 then
+		if vim.fn.jobwait({ child }, 5000)[1] == -1 then
 			vim.fn.jobstop(child)
 			vim.fn.jobwait({ child }, 1000)
 		end
-		assert(ok, text)
-		equal(0, exited, "Plain quit exits even with a hidden message draft")
-		return text
+		assert(ok, restored)
+		return restored
 	end
 	local ok, err = xpcall(function()
-		for _, case in ipairs({
-			{ status = "accepted" },
-			{ status = "completed" },
-			{ status = "failed" },
-			{ status = "running" },
-			{ status = "queued" },
-			{ status = "accepted", draft = "New unsent draft" },
-			{ status = "accepted", review = true },
-			{ status = "accepted", tracked = false },
-			{ status = "accepted", tracked = true },
-		}) do
-			local id, payload_path = feedback.enqueue(
-				restart_root,
-				case.review and { { text = "Annotation" } } or nil,
-				nil,
-				{},
-				not case.review and "Sent text" or nil
-			)
-			feedback.write(directory .. "/" .. id .. ".status.json", { status = case.status })
+		for _, status in ipairs({ "completed", "failed", "running" }) do
+			local id, payload_path = feedback.enqueue(restart_root, { { text = "Annotation" } }, nil, {})
+			feedback.write(directory .. "/" .. id .. ".status.json", { status = status })
 			local last = { id = id, path = payload_path, argv = {} }
-			feedback.write(directory .. "/harness.json", {
-				target = { name = "none" },
-				message = case.draft or "Sent text",
-				last = last,
-				last_message = case.tracked == true and last or case.tracked,
-			})
-			equal("", reopen("Sent text"), "Fresh launch: " .. vim.inspect(case))
-			equal(nil, feedback.read(directory .. "/harness.json").message, "Legacy draft text is removed on save")
-			equal(nil, feedback.read(directory .. "/harness.json").last_message, "ACK draft identity is process-local")
-			equal(last, feedback.read(directory .. "/harness.json").last, "Delivery reference remains available")
-			equal("", reopen(), "Another restart discards even a newly typed identical draft")
+			feedback.write(directory .. "/harness.json", { target = { name = "none" }, last = last })
+			local restored = reopen()
+			equal(last, restored.last, "Fresh launch restores the retry target: " .. status)
+			equal(
+				status == "running" and "uncertain" or status,
+				restored.delivery,
+				"Fresh launch reports the saved delivery receipt: " .. status
+			)
 		end
-		reopen("Hidden pending draft", true)
-		equal("", reopen(), "Fresh launch never restores hidden composer text")
 	end, debug.traceback)
 	vim.fn.delete(restart_root, "rf")
 	vim.fn.delete(directory, "rf")

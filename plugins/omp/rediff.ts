@@ -472,7 +472,7 @@ export default function rediffExtension(pi: ExtensionAPI): void {
     'Rediff is connected.',
     'In rediff, open this same checkout and run :harness connect omp.',
     `If multiple sessions match, select session ${c.thread} in the picker.`,
-    'Use :harness send to compose a message, then :w to send it.',
+    'Then :w in the Review tree or diff sends saved annotations to this session.',
     '',
     `Connection: ${c.descriptor}`,
     'This connection is replaced when the session changes (/new, /resume, /fork, /branch) and removed when',

@@ -9,10 +9,10 @@ return function(equal)
 		{ "help", "" },
 		{ "harness", "" },
 		{ "ReviewRe", "fresh" },
-		{ "Harness se", "nd" },
+		{ "Harness op", "en" },
+		{ "Harness se", "" }, -- send was removed; :harness open takes interactive input.
 		{ "Harness connect a", "mp" },
 		{ "Harness install ", "amp" },
-		{ "Harness send ", "" },
 		{ "Harness connect amp ", "" },
 		{ "Harness use a", "mp" },
 		{ "Harness use c", "laude" },
@@ -227,36 +227,12 @@ return function(equal)
 			"Typed ft focuses filesystem tree outside Review"
 		)
 		lua([[vim.cmd("Neotree close")]])
-		for pass = 1, 3 do
-			vim.rpcnotify(child, "nvim_input", ":hs<CR>")
-			equal(
-				true,
-				vim.wait(1000, function()
-					return lua([[return vim.api.nvim_buf_get_name(0):match("^harness://") ~= nil]])
-				end, 10),
-				"Typed hs reopens composer on pass " .. pass
-			)
-			vim.rpcnotify(child, "nvim_input", ":q!<CR>")
-			equal(
-				true,
-				vim.wait(1000, function()
-					return lua([[return vim.bo.buftype == ""]])
-				end, 10),
-				"Composer closes back to file on pass " .. pass
-			)
-		end
-		lua([[vim.cmd("Harness send")]])
-		line_shortcuts("Harness message")
-		word_shortcuts("Harness message")
-		vim.rpcnotify(child, "nvim_input", "i<D-w>k")
+		equal("", lua([[return vim.fn.maparg("hs", "c", true)]]), "The removed hs alias is not abbreviated")
 		equal(
-			true,
-			vim.wait(1000, function()
-				return lua([[return vim.bo.buftype == "" and vim.fn.mode() == "n"]])
-			end, 10),
-			"Cmd-w leaves Insert mode and moves above the message pane"
+			false,
+			vim.tbl_contains(lua([[return vim.fn.getcompletion("Harness ", "cmdline")]]), "send"),
+			"Harness completion no longer offers send"
 		)
-		lua([[vim.cmd("Harness send"); vim.cmd("q")]])
 		local function hint()
 			return lua([[
 				for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -285,8 +261,8 @@ return function(equal)
 		input("<End>", "ha", "rness")
 		input("<BS>", "h", "elp")
 		input("a<Tab>", "Harness", "")
-		input(" se", "Harness se", "nd")
-		input("<Tab>", "Harness send", "")
+		input(" op", "Harness op", "en")
+		input("<Tab>", "Harness open", "")
 		input("<C-C>", "", "")
 		input("/ha", "ha", "")
 		input("<C-C>", "", "")

@@ -141,7 +141,7 @@ async function showConnection(thread: PluginThread, descriptor: string): Promise
       'Readiff is connected. Setup information for the human user, not a request for the agent to run commands or edit files.',
       'In rediff, open this same checkout and run :harness connect amp.',
       `If multiple sessions match, select thread ${thread.id} in the picker.`,
-      'Use :harness send to compose a message, then :w to send it.',
+      'Then :w in the Review tree or diff sends saved annotations to this thread.',
       '',
       `Connection: ${descriptor}`,
       'This connection is valid until the plugin disconnects or reloads. Run readiff: connect again to show setup information.',

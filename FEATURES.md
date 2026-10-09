@@ -36,7 +36,7 @@ revdiff parity.
   **Space E** toggles ordinary Neo-tree while editing and is focus-only in
   Review. **Tab** switches tree/diff focus in Review.
 - **Ctrl-A / Ctrl-E** move to the start/end of the line in Insert mode and
-  command/search input, including annotations and harness messages.
+  command/search input, including annotations.
   Normal-mode Vim bindings remain unchanged.
 - **Option+Left/Up/h/k** moves backward by a word; **Option+Right/Down/l/j**
   moves forward. Works in Normal, Visual, Insert, and command/search input.
@@ -68,10 +68,10 @@ revdiff parity.
   and Review. `?` opens help; `:help rediff-commands` lists editor commands
   with their arguments and meanings.
 - Connected Amp file-edit events trigger Review refreshes. Three-second polling
-  catches other edits/index changes. Normal-mode tree/diff/harness-message focus
+  catches other edits/index changes. Normal-mode tree/diff focus
   allows refresh; annotation editing, typing, selections, commands, pickers, and
   delivery defer it. Selection and focus stay put. **Space R** refreshes immediately.
-  Typing in the harness send pane does not pause refresh or interrupt the draft.
+  Typing in an embedded harness terminal does not pause refresh.
   Home Manager's `programs.rediff.reviewRefreshInterval` (JSON:
   `review_refresh_interval`) sets whole seconds; `0` disables polling, not events.
   Leave and re-enter Review after changing settings.
@@ -110,7 +110,7 @@ the remaining view toggles, filters, and general commands in the revdiff fork.
 ## Live harness steering
 
 Built-in harnesses receive JSON with overarching `rules` once, then context and
-`annotations` (or `message`). There is no prose prefix or trailing epilogue.
+`annotations`. There is no prose prefix or trailing epilogue.
 Rules require permission for Git/PR actions unless explicitly authorized in
 the feedback. Annotations retain absolute paths, old/new side, Git group, and
 snapshot status.
@@ -123,14 +123,10 @@ and complete selections stay in the local outbox. Archive paths are local to
 rediff; remote agents may need historical context supplied separately.
 Custom receivers still receive the complete JSON payload.
 
-General-message drafts clear after accepted/completed delivery, including the
-open `:harness send` window. Success updates the status bar quietly, without a
-receipt-path notification or Enter prompt. Failed/pending/local-only messages
-and newer edits remain intact within this editor process only. A fresh editor opens an
-empty composer, including when an older version saved draft text to disk.
-Review annotations are separate: annotation `:w` saves the note
+Annotation `:w` saves the note
 locally and closes the panel. `:w` from a diff pane or Git
-sidebar sends the saved batch. An empty batch shows a notice.
+sidebar sends the saved batch. An empty batch shows a notice. Success updates
+the status bar quietly, without a receipt-path notification or Enter prompt.
 Accepted/completed delivery deletes sent notes, preserving newer notes and edits.
 Pending, failed, and local-only batches remain in the current editor session.
 Annotations survive leaving and
@@ -152,8 +148,7 @@ files and annotation text retain native paragraph motions.
 the original snapshot; **Space R** returns to current files and live refresh.
 Saved notes remain in the batch. **d** in a source pane deletes a
 note covering the cursor, with a picker if several overlap; it never deletes
-source or retracts sent feedback. General-message `:q` retains its draft for
-continued editing and does not block quitting, even with a hidden composer.
+source or retracts sent feedback.
 
 `:Harness install amp` installs the bundled rediff bridge plugin after
 confirmation, leaving other plugin files untouched.
@@ -161,7 +156,7 @@ With a selected live Amp target, it then asks that thread to call
 `reload_plugins`; queued acknowledgment is not proof the reload completed.
 Without a live target, reload manually once and use `:harness connect amp`.
 It preserves Home Manager symlinks, does not install the Amp CLI, and never
-sends annotations or composer text as part of installation.
+sends annotations as part of installation.
 
 `:Harness use amp` selects Amp and discovers sessions for this checkout: one
 match connects directly, multiple matches open the harness panel. No matches or
@@ -171,18 +166,16 @@ Use `/` to filter, Enter to connect/disconnect, `r` to give a local alias, `d` t
 and `c` to show only connected harnesses. Amp streams state and active tool names;
 running agents show a spinner. Other providers show unknown activity.
 
-Multiple harnesses may stay connected. `:Harness send` asks for a recipient when
-there is more than one; `:Harness send ALIAS` selects directly. Each recipient has
-a separate draft (`:w` submits, `:wq` submits and closes, `:q!` retains the draft).
-Annotations stay bound to a harness in their own worktree. General messages
-include the sender directory/editor instance and recipient; external recipients
-are instructed not to edit the sender's worktree. This is not filesystem isolation.
+Multiple harnesses may stay connected. Annotations stay bound to a harness in
+their own worktree. `:Harness open` / `:ho` opens an embedded terminal for
+typing to an agent directly.
 Claude has no live discovery adapter; use `:ReviewHarness claude SESSION_ID`.
 Connecting never launches an agent or sends feedback. `:Harness status` and
-`:Harness retry` refer to the current composer or worktree binding. Disconnecting
-retains drafts and does not stop the agent. An ACK is not a completed agent turn.
+`:Harness retry` refer to the worktree binding and its last annotation submission.
+Disconnecting keeps saved annotations and does not stop the agent. An ACK is not
+a completed agent turn.
 
-Typed `:harness` and `:hs` expand to `:Harness` and `:Harness send`; scripts
+Typed `:harness` and `:ho` expand to `:Harness` and `:Harness open`; scripts
 must use uppercase Neovim custom-command names. This live transport is separate
 from `:ReviewHarness amp THREAD`, which starts an Amp CLI continuation. This
 repository owns the readiff plugin, installer, and tests under `plugins/amp/`.
@@ -192,5 +185,5 @@ reload. The registry is
 without a prose prefix or epilogue. Startup revalidates a saved live Amp binding
 by thread ID and worktree, replacing expired endpoint paths without sending.
 If that session is gone, one live match in the current worktree connects
-automatically; otherwise `:harness send` opens the connection picker. Other
+automatically; otherwise run `:harness connect amp` to choose one. Other
 discovery is manual, and credentials never belong in Nix or Git.

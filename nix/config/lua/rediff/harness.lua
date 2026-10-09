@@ -3,7 +3,6 @@ local api = vim.api
 local feedback = require("rediff.feedback")
 local connections = require("rediff.connections")
 local sessions = {}
-local messages = {}
 local jobs = {} -- Only terminal jobs launched by this editor, never discovered sessions.
 local display_cwd, display_root
 local installing = false
@@ -13,30 +12,11 @@ local function notify(message, status)
 end
 
 local function save(s)
-	feedback.write(s.metadata_path or (s.directory .. "/harness.json"), {
+	feedback.write(s.directory .. "/harness.json", {
 		target = s.target,
 		provider = s.provider,
 		last = s.last,
 	})
-end
-
-local function clear_sent_message(s, path)
-	local payload = feedback.read(path)
-	if not payload or not payload.message or not s.last_message or s.last_message.path ~= path then
-		return -- Reviews and already-consumed acknowledgments cannot clear a new draft.
-	end
-	local loaded = s.buf and api.nvim_buf_is_loaded(s.buf)
-	local text = loaded and table.concat(api.nvim_buf_get_lines(s.buf, 0, -1, false), "\n") or s.message
-	s.message = text
-	if payload.message == text then
-		s.message = ""
-		if loaded then
-			api.nvim_buf_set_lines(s.buf, 0, -1, false, { "" })
-			vim.bo[s.buf].modified = false
-		end
-	end
-	s.last_message = nil -- Consume once, even if newer text prevented clearing.
-	save(s)
 end
 
 local function delivery_status(s)
@@ -59,7 +39,6 @@ function M.get(root)
 			directory = directory,
 			target = target,
 			provider = saved.provider or feedback.provider(target),
-			message = "", -- Draft text belongs only to this editor process, including legacy saved drafts.
 			last = saved.last,
 			epoch = 0,
 		}
@@ -70,7 +49,7 @@ function M.get(root)
 			s.delivery = "checking connection"
 			s.connection_error = "The previous "
 				.. feedback.provider(target)
-				.. " session is unavailable. Select a live harness, then run :harness send."
+				.. " session is unavailable. Select a live harness with :harness connect."
 			local function restored(result)
 				vim.schedule(function()
 					if s.epoch ~= 0 then
@@ -104,11 +83,6 @@ function M.get(root)
 						end
 					end
 					s.delivery = s.connection_error and "disconnected" or delivery_status(s)
-					local compose = s.compose_after_restore
-					s.compose_after_restore = nil
-					if compose then
-						compose()
-					end
 				end)
 			end
 			local ok = pcall(
@@ -127,29 +101,7 @@ function M.get(root)
 	return sessions[root]
 end
 
-local function current_message()
-	for _, s in pairs(messages) do
-		if s.buf == api.nvim_get_current_buf() then
-			return s
-		end
-	end
-	for _, s in pairs(sessions) do
-		if s.buf == api.nvim_get_current_buf() then
-			return s
-		end
-	end
-end
-
-function M.in_message(root)
-	local s = current_message()
-	return s ~= nil and s.root == root
-end
-
 local function current(cached)
-	local message = current_message()
-	if message then
-		return message
-	end
 	if vim.b.rediff_harness_root then
 		return M.get(vim.b.rediff_harness_root)
 	end
@@ -210,7 +162,7 @@ function M.select(root, target)
 		s.provider = feedback.provider(target)
 	end
 	s.epoch = s.epoch + 1
-	s.restoring, s.connection_error, s.compose_after_restore = nil, nil, nil
+	s.restoring, s.connection_error = nil, nil
 	s.delivery = delivery_status(s)
 	save(s)
 	if target.session then
@@ -260,7 +212,28 @@ local function terminal_pane(root, buf)
 	vim.wo.signcolumn = "no"
 	vim.wo.winfixheight = true
 	vim.wo.winbar =
-		" Harness · Ctrl-W Ctrl-W: back to editor · Ctrl-\\ Ctrl-N: normal mode · :hide: hide · :ho: open "
+		" Harness · Esc: Neovim controls · i: harness input · Cmd-W + direction: switch pane · :ho: open "
+end
+
+function M.move_pane(tab)
+	local current_win = api.nvim_get_current_win()
+	local windows = api.nvim_tabpage_list_wins(tab)
+	for _, win in ipairs(windows) do
+		local buf = api.nvim_win_get_buf(win)
+		if vim.b[buf].rediff_harness_root then
+			-- Keep an editing tab to return to even after :only in the harness.
+			if #windows == 1 then
+				local empty = api.nvim_open_win(api.nvim_create_buf(true, false), false, { split = "above", win = win })
+				vim.wo[empty].winbar = ""
+			end
+			api.nvim_win_set_config(win, {
+				split = "below",
+				win = -current_win,
+				height = api.nvim_win_get_height(win),
+			})
+			return
+		end
+	end
 end
 
 function M.launch(root, argv, target)
@@ -280,15 +253,46 @@ function M.launch(root, argv, target)
 	vim.b[owned.buf].rediff_harness_root = root
 	vim.keymap.set(
 		"t",
-		"<C-w><C-w>",
-		"<C-\\><C-n><C-w>p",
-		{ buffer = owned.buf, desc = "Return to editor without stopping harness" }
+		"<D-w>",
+		"<C-\\><C-n><C-w>",
+		{ buffer = owned.buf, desc = "Leave harness input for window command (Cmd-w)" }
+	)
+	vim.keymap.set(
+		"t",
+		"<Esc>",
+		"<C-\\><C-n>",
+		{ buffer = owned.buf, nowait = true, desc = "Return control to Neovim without interrupting harness" }
 	)
 	terminal_pane(root, owned.buf)
 	jobs[root] = jobs[root] or {}
+	-- This PTY ends at Neovim, not the outer tmux/Kitty terminal. Inheriting
+	-- their identity makes CLIs emit passthrough sequences libvterm cannot decode.
+	local env = vim.fn.environ()
+	for _, name in ipairs({
+		"TMUX",
+		"TMUX_PANE",
+		"TERM_PROGRAM",
+		"TERM_PROGRAM_VERSION",
+		"KITTY_WINDOW_ID",
+		"KITTY_PID",
+		"KITTY_LISTEN_ON",
+		-- Keep jobstart's normal terminal environment defaults and PTY dimensions.
+		"TERM",
+		"COLUMNS",
+		"LINES",
+		"NVIM",
+		"NVIM_LISTEN_ADDRESS",
+		"NVIM_LOG_FILE",
+		"VIM",
+		"VIMRUNTIME",
+	}) do
+		env[name] = nil
+	end
 	local job = vim.fn.jobstart(argv, {
 		cwd = root,
 		term = true,
+		clear_env = true,
+		env = env,
 		on_exit = function(id, code)
 			jobs[root][id] = nil
 			if code ~= 0 and not owned.stopping then
@@ -437,8 +441,8 @@ function M.stop(root)
 	end
 end
 
-function M.deliver(root, id, path, argv, retry, callback, owner)
-	local s = owner or M.get(root)
+function M.deliver(root, id, path, argv, retry, callback)
+	local s = M.get(root)
 	assert(not s.restoring, "Checking the saved harness session. Try again shortly.")
 	assert(not s.connection_error, s.connection_error)
 	assert(not feedback.busy(root), "A feedback delivery is already running for this repository")
@@ -448,7 +452,6 @@ function M.deliver(root, id, path, argv, retry, callback, owner)
 	local ok, err = pcall(feedback.deliver, root, id, path, argv, retry, function(status)
 		s.delivery = status.status
 		if status.status == "accepted" or status.status == "completed" then
-			clear_sent_message(s, path)
 			require("rediff.review").clear_sent(root, path)
 		elseif status.status == "failed" then
 			notify("Feedback failed: " .. (status.error or "Inspect :ReviewOutbox before retrying"), "failed")
@@ -473,7 +476,7 @@ function M.retry()
 		vim.deep_equal(last.argv, feedback.command(s.target)),
 		"Harness changed; reselect the original target before retrying"
 	)
-	M.deliver(s.root, last.id, last.path, last.argv, true, nil, s)
+	M.deliver(s.root, last.id, last.path, last.argv, true)
 end
 
 function M.status()
@@ -494,7 +497,7 @@ function M.connect(provider)
 	provider = provider or "amp"
 	local s = M.get(current().root)
 	if s.restoring then
-		s.restoring, s.compose_after_restore = nil, nil
+		s.restoring = nil
 		s.delivery = "disconnected"
 	end
 	s.epoch = s.epoch + 1
@@ -543,12 +546,6 @@ end
 function M.disconnect(entry)
 	assert(not feedback.busy(current().root), "Wait for the current feedback delivery before disconnecting")
 	assert(not feedback.busy(entry.root), "Wait for this worktree's delivery before disconnecting")
-	for _, message in pairs(messages) do
-		assert(
-			message.connection_key ~= entry.key or not feedback.busy(message.root),
-			"Wait for this harness's delivery before disconnecting"
-		)
-	end
 	connections.disconnect(entry.key)
 	for root, s in pairs(sessions) do
 		if root == entry.root and s.target.name == entry.name and s.target.session == entry.session then
@@ -558,20 +555,17 @@ function M.disconnect(entry)
 end
 
 function M.panel(purpose, provider)
-	local root, directory = current().root, vim.fn.getcwd()
+	local root = current().root
 	local source = M.get(root)
 	local epoch = source.epoch
 	return require("rediff.harness_panel").open({
 		root = root,
 		provider = provider,
-		purpose = purpose or "manage",
 		on_select = function(entry)
 			if purpose == "connect" and source.epoch ~= epoch then
 				return
 			end
-			if purpose == "send" then
-				M.compose(entry, root, directory)
-			elseif entry.connected then
+			if entry.connected then
 				M.disconnect(entry)
 				epoch = source.epoch
 			elseif entry.root == root then
@@ -588,182 +582,8 @@ function M.panel(purpose, provider)
 				connections.connect(entry)
 			end
 		end,
-		on_message = function(entry)
-			M.compose(entry, root, directory)
-		end,
 		on_disconnect = M.disconnect,
 	})
-end
-
-local function message_session(target, root, directory)
-	local key = vim.fn.sha256(root .. "\0" .. target.key)
-	if not messages[key] then
-		local outbox = feedback.directory(root)
-		local path = outbox .. "/message-" .. key .. ".json"
-		local saved = feedback.read(path) or {}
-		messages[key] = {
-			root = root,
-			directory = outbox,
-			metadata_path = path,
-			message = "",
-			epoch = 0,
-			target = vim.deepcopy(target),
-			provider = target.provider,
-			last = saved.last,
-			key = key,
-			connection_key = target.key,
-			origin_directory = directory,
-		}
-		messages[key].delivery = delivery_status(messages[key])
-	end
-	local s = messages[key]
-	-- A descriptor may change after reload, but never retarget an in-flight message.
-	if not feedback.busy(root) then
-		s.target = vim.deepcopy(target)
-	end
-	return s
-end
-
-function M.compose(target, root, directory)
-	root = root or current().root
-	directory = directory or vim.fn.getcwd()
-	if not target then
-		local source = M.get(root)
-		if source.restoring then
-			local win, buf = api.nvim_get_current_win(), api.nvim_get_current_buf()
-			source.compose_after_restore = function()
-				local ok, context = pcall(current)
-				if
-					ok
-					and context.root == root
-					and api.nvim_get_current_win() == win
-					and api.nvim_get_current_buf() == buf
-				then
-					local opened, err = pcall(M.compose, nil, root, directory)
-					if not opened then
-						notify(tostring(err), "failed")
-					end
-				end
-			end
-			return
-		end
-		if source.connection_error then
-			notify(source.connection_error)
-			M.panel("connect")
-			return
-		end
-		local connected = connections.connected()
-		if #connected > 1 then
-			M.panel("send")
-			return
-		end
-		target = connected[1]
-	end
-	local s
-	if target then
-		local live = assert(connections.get(target.key), "Harness no longer exists")
-		assert(live.connected and live.online, "Harness is offline. Reconnect it from :harness list")
-		s = message_session(live, root, directory)
-	else
-		s = M.get(root)
-	end
-	local loaded = s.buf and api.nvim_buf_is_loaded(s.buf)
-	if loaded then
-		local win = vim.fn.bufwinid(s.buf)
-		if win ~= -1 then
-			api.nvim_set_current_win(win)
-			return
-		end
-	end
-	-- Start the next composition empty only after an ACK for this exact text.
-	-- Keep in-flight/failed drafts and edits made while delivery was running.
-	if s.last_message then
-		local receipt = feedback.read(s.directory .. "/" .. s.last_message.id .. ".status.json") or {}
-		if receipt.status == "accepted" or receipt.status == "completed" then
-			clear_sent_message(s, s.last_message.path)
-		end
-	end
-	if not loaded then
-		if s.buf and api.nvim_buf_is_valid(s.buf) then
-			api.nvim_buf_delete(s.buf, { force = true })
-		end
-		local buf = api.nvim_create_buf(false, true)
-		s.buf = buf
-		api.nvim_buf_set_name(buf, "harness://" .. (s.key or vim.fn.sha256(s.root)) .. "/message")
-		vim.bo[buf].buftype = "acwrite"
-		vim.bo[buf].bufhidden = "hide"
-		vim.bo[buf].swapfile = false
-		vim.bo[buf].undofile = false
-		vim.bo[buf].filetype = "markdown"
-		api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(s.message, "\n", { plain = true }))
-		vim.bo[buf].modified = false
-		vim.keymap.set("n", "<Tab>", function()
-			return require("rediff.review").active() and "<Cmd>Explorer<CR>" or "<Tab>"
-		end, { buffer = buf, expr = true, desc = "Focus Review tree" })
-		local function capture()
-			if api.nvim_buf_is_loaded(buf) then
-				s.message = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-			end
-		end
-		local function reject()
-			error("Harness messages do not write files; :w submits the message")
-		end
-		api.nvim_create_autocmd(
-			{ "TextChanged", "TextChangedI", "BufLeave", "BufUnload" },
-			{ buffer = buf, callback = capture }
-		)
-		api.nvim_create_autocmd(
-			{ "FileWriteCmd", "FileAppendCmd", "FilterWritePre" },
-			{ buffer = buf, callback = reject }
-		)
-		api.nvim_create_autocmd("BufWriteCmd", {
-			buffer = buf,
-			callback = function(event)
-				if event.match ~= api.nvim_buf_get_name(buf) then
-					reject()
-				end
-				assert(not feedback.busy(s.root), "Wait for the current feedback delivery")
-				capture()
-				if vim.trim(s.message) == "" then
-					vim.bo[buf].modified = false -- :wq can close a successfully cleared message.
-					return
-				end
-				local argv = feedback.command(s.target)
-				if s.connection_key then
-					local connected = connections.get(s.connection_key)
-					assert(
-						connected and connected.connected and connected.online,
-						"Reconnect this harness before sending"
-					)
-				end
-				local recipient = s.target.session
-						and {
-							provider = feedback.provider(s.target),
-							id = s.target.session,
-							repository = s.target.root or s.root,
-						}
-					or nil
-				local id, path = feedback.enqueue(s.root, nil, nil, argv, s.message, nil, recipient, s.origin_directory)
-				s.last_message = { id = id, path = path }
-				M.deliver(s.root, id, path, argv, false, nil, s)
-				vim.bo[buf].modified = false
-			end,
-		})
-	end
-	vim.cmd("botright 6split")
-	api.nvim_win_set_buf(0, s.buf)
-	vim.wo.wrap = true
-	vim.wo.linebreak = true
-	vim.wo.number = false
-	vim.wo.signcolumn = "no"
-	local label = s.target.alias or (s.target.title ~= "" and s.target.title) or s.target.session or s.target.name
-	vim.wo.winbar = (
-		" To "
-		.. vim.fn.strtrans(label)
-		.. " · "
-		.. vim.fn.strtrans(s.target.root or s.root)
-		.. " · :w send · :wq send+close · :q retain "
-	):gsub("%%", "%%%%")
 end
 
 function M.install(provider)
@@ -777,6 +597,7 @@ function M.install(provider)
 	local prompt = "Install the bundled readiff Amp plugin at "
 		.. directory
 		.. "readiff.ts?\n"
+		.. "Set Amp's interrupt shortcut to Ctrl+L instead of Esc Esc in ~/.config/amp/settings.json.\n"
 		.. "This does not install the Amp CLI.\n"
 		.. (
 			reload and ("Ask Amp thread " .. target.session .. " to reload its plugins after installation?")
@@ -855,8 +676,6 @@ function M.setup()
 				M.install(args[2])
 			elseif #args == 0 or (#args == 1 and args[1] == "status") then
 				M.status()
-			elseif #args <= 2 and args[1] == "send" then
-				M.compose(args[2] and find_connection(args[2]) or nil)
 			elseif #args >= 3 and args[1] == "rename" then
 				connections.rename(find_connection(args[2]).key, table.concat(args, " ", 3))
 			elseif #args == 1 and args[1] == "retry" then
@@ -874,7 +693,7 @@ function M.setup()
 				end
 			else
 				error(
-					"Usage: Harness open | resume | list | connect [amp|omp] | use amp|omp|claude | send [alias] | rename ID ALIAS | disconnect [alias] | status | retry | install amp|omp"
+					"Usage: Harness open | resume | list | connect [amp|omp] | use amp|omp|claude | rename ID ALIAS | disconnect [alias] | status | retry | install amp|omp"
 				)
 			end
 		end)
@@ -896,7 +715,6 @@ function M.setup()
 					"connect",
 					"use",
 					"disconnect",
-					"send",
 					"status",
 					"retry",
 				}
@@ -904,7 +722,7 @@ function M.setup()
 				return { "amp", "omp", "claude" }
 			elseif #args == 3 and (args[2] == "connect" or args[2] == "install") then
 				return { "amp", "omp" }
-			elseif #args == 3 and (args[2] == "send" or args[2] == "disconnect" or args[2] == "rename") then
+			elseif #args == 3 and (args[2] == "disconnect" or args[2] == "rename") then
 				return vim.tbl_map(function(entry)
 					return entry.alias or entry.session
 				end, connections.connected())
@@ -914,7 +732,6 @@ function M.setup()
 	})
 	for from, to in pairs({
 		harness = "Harness",
-		hs = "Harness send",
 		hl = "Harness list",
 		hc = "Harness connect",
 		ho = "Harness open",
@@ -930,19 +747,6 @@ function M.setup()
 			)
 		)
 	end
-	api.nvim_create_autocmd({ "QuitPre", "VimLeavePre" }, {
-		callback = function()
-			for _, s in pairs(vim.tbl_extend("force", sessions, messages)) do
-				if s.buf and api.nvim_buf_is_loaded(s.buf) then
-					s.message = table.concat(api.nvim_buf_get_lines(s.buf, 0, -1, false), "\n")
-					save(s) -- Also removes legacy persisted drafts without writing on every edit.
-					-- Session-only drafts need not be sent to allow :q/:qa.
-					-- Include hidden composers, which otherwise cause E162 at exit.
-					vim.bo[s.buf].modified = false
-				end
-			end
-		end,
-	})
 end
 
 return M
