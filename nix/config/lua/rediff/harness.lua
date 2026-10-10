@@ -398,7 +398,7 @@ function M.open(root, startup)
 		local target = choice.target
 		choice.label = vim.fn.strtrans(
 			(target and (target.alias or target.session) or (choice.owned.session or choice.owned.provider))
-				.. (choice.owned and " [editor TUI]" or " [resume]")
+				.. (choice.owned and " [editor TUI]" or (feedback.is_live(target) and " [connection]" or " [resume]"))
 				.. " · "
 				.. choice.root
 		)
@@ -423,6 +423,12 @@ function M.open(root, startup)
 				assert(jobs[choice.root][choice.id] == choice.owned, "Harness exited; run :ho again")
 				terminal_pane(choice.root, choice.owned.buf)
 				vim.cmd.startinsert()
+			elseif feedback.is_live(target) then
+				M.panel("list", feedback.provider(target))
+				notify(
+					"Live connection selected for annotations and activity; use its existing terminal for input. "
+						.. "No new CLI started. :harness resume explicitly starts another TUI for the same session."
+				)
 			else
 				M.resume(target, automatic)
 			end
@@ -435,7 +441,7 @@ function M.open(root, startup)
 		open(choices[1])
 	else
 		vim.ui.select(choices, {
-			prompt = "Open harness TUI:",
+			prompt = "Open harness:",
 			format_item = function(choice)
 				return choice.label
 			end,

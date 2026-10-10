@@ -52,6 +52,9 @@ function M.stop(s)
 end
 
 function M.changed(root)
+	-- Agent edits can touch unloaded directories, beyond neo-tree's file watchers.
+	local events = require("neo-tree.events")
+	events.fire_event(events.FS_EVENT, { afile = root })
 	local s = require("rediff.review").state
 	local watcher = s and s.root == root and watchers[s]
 	if not watcher then

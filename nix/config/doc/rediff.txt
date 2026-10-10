@@ -190,18 +190,21 @@ machines and orbs are not discoverable through this local connection.
   c / R / q   Connected-only filter / rediscover / close
 
 Multiple harnesses can stay connected. Annotations only go to this worktree's
-selected harness; :w from the tree/diff sends them. To type to an agent
-directly, use :harness open (below). Separate editors can watch the same agent.
+selected harness; :w from the tree/diff sends them. To type to an editor-owned
+agent, use :harness open (below); external agents keep their original terminal.
+Separate editors can watch the same agent.
 Amp streams running/idle/approval/error state and active tool names to the panel.
 Offline or unsupported activity is shown as such, never inferred from an ACK.
 Aliases persist locally; connection subscriptions end when this editor exits.
 
-:harness open (alias :ho) opens a bottom terminal split for the current worktree.
+:harness open (alias :ho) opens the current worktree's harness.
 Its selected harness takes precedence; otherwise a single connected/editor-owned
 harness opens directly. Multiple local candidates with no default show a chooser.
 Other worktrees are excluded. Opening a connected session selects it for annotations.
-An editor-owned TUI reuses its process and buffer; switching choices reuses the
-pane, not the process.
+An editor-owned TUI reuses its terminal split, process and buffer. An external live
+connection opens the connection/activity panel without offering another CLI.
+The bridge carries annotations and activity, not terminal screen or keyboard input.
+Use the external terminal to chat or interrupt work.
 With no available or selected session, open starts this worktree's selected CLI.
 The shared startup policy for every harness is: connect to a live session in this
 directory/worktree, otherwise resume the last recorded session, otherwise start
@@ -242,10 +245,11 @@ In Review, press Escape then type :w (or :write) from its harness pane to send
 the saved annotation batch, just as from the tree or diff panes. This shortcut
 applies only to the active Review's own worktree, not to ordinary terminals.
 
-An external TUI cannot be moved into Neovim. For a selected Amp or Claude session,
-explicit :harness open (or :harness resume) confirms before starting a new TUI for that
-session. Stop using the other terminal first. This does not attach to or kill its
-process, and sends no prompt. OMP session resumption is not supported here.
+The bridge cannot move an external TUI into Neovim. For a selected Amp or Claude
+session, :harness resume confirms before starting another TUI for the same session.
+Open also offers this confirmation for saved sessions without a live bridge.
+Stop using the other terminal first. This does not create a new thread, attach to
+or kill its process, or send a prompt. OMP session resumption is not supported here.
 Resumed live Amp sessions reconnect feedback when their plugin registers a fresh
 endpoint for the same thread and worktree. Until then, annotations remain saved;
 retry :w after the connection is ready.

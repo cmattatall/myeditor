@@ -407,11 +407,15 @@ either mode keeps it hidden across toggles until **:ho** reopens it.
 only connected/editor-owned harness, without a chooser. Multiple local harnesses
 with no selected default prompt for a choice; other worktrees are excluded.
 Opening a connected session makes it this worktree's annotation target.
-With no available/selected
-session, it starts the selected CLI in the current worktree.
-For an external Amp/Claude session, explicitly opening it (or **:harness resume**) asks before
-starting a new TUI for that session; stop using its other terminal first. This is not process
-attachment. A resumed live Amp session reconnects feedback when its plugin registers
+An editor-owned TUI reopens its existing terminal. An external live connection
+opens the connection/activity panel instead, without a resume prompt or another CLI.
+The bridge carries annotations and activity, not the external terminal's screen or
+keyboard input; continue chatting and interrupting work in its original terminal.
+With no available/selected session, it starts the selected CLI in the current worktree.
+**:harness resume** explicitly asks before starting another TUI for the same Amp/Claude
+session; stop using its other terminal first. Saved sessions without a live bridge
+also offer this confirmation on open. This is not process attachment or a new thread.
+A resumed live Amp session reconnects feedback when its plugin registers
 a fresh endpoint for the same thread and worktree. Until then, annotations stay saved;
 retry **:w** after it connects. OMP resumption is unsupported.
 Editor exit stops its terminal processes.

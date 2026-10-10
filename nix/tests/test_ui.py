@@ -2391,7 +2391,8 @@ class EditorUI(unittest.TestCase):
         self.assertTrue(self.lua(editor, "return s == nil"))
         self.wait_for(
             editor,
-            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):match('auth%.lua[^\\n]*M') ~= nil",
+            # Async Git status publishes tracked files before its untracked pass.
+            "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):match('plan%.md[^\\n]*U') ~= nil",
         )
         expected = {
             "modified-dir": ("M", 0xFACC15),
@@ -2441,6 +2442,60 @@ class EditorUI(unittest.TestCase):
             (root / "modified-dir" / "changed.txt").resolve(),
             Path(editor.current.buffer.name).resolve(),
         )
+
+    def test_explorer_git_markers_follow_external_and_agent_edits(self):
+        root = Path(self.root)
+        tracked = root / "quiet-dir" / "unopened" / "tracked.txt"
+        tracked.parent.mkdir(parents=True)
+        tracked.write_text("original\n")
+        (root / "clean.txt").write_text("original\n")
+        for args in (["add", "."], ["commit", "-m", "Clean explorer fixture"]):
+            subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
+        editor = self.launch(self.directory.name, file=self.root)
+        self.wait_for(editor, "vim.bo.filetype == 'neo-tree'")
+        self.assertTrue(self.lua(editor, "return s == nil"))
+        tree = editor.current.buffer.number
+        win = editor.current.window.handle
+        editor.exec_lua(
+            """
+            local tree = ...
+            function _G.explorer_marker(name, marker)
+                for _,line in ipairs(vim.api.nvim_buf_get_lines(tree,0,-1,false)) do
+                    if line:find(name,1,true) then
+                        line = line .. ' '
+                        return marker == '' and not line:match('%s[AMU]%s')
+                            or marker ~= '' and line:match('%s'..marker..'%s') ~= nil
+                    end
+                end
+                return false
+            end
+            """,
+            tree,
+        )
+        self.wait_for(editor, "explorer_marker('quiet-dir','') and explorer_marker('clean.txt','')")
+        # No BufWritePost or focus change: a different process edits the visible tree.
+        (root / "clean.txt").write_text("external edit\n")
+        (root / "external.txt").write_text("new file\n")
+        self.wait_for(editor, "explorer_marker('clean.txt','M') and explorer_marker('external.txt','U')")
+        (root / "clean.txt").write_text("original\n")
+        (root / "external.txt").unlink()
+        self.wait_for(editor, "explorer_marker('clean.txt','') and not explorer_marker('external.txt','U')")
+        self.assertEqual(win, editor.current.window.handle)
+        self.assertEqual(tree, editor.current.buffer.number)
+        editor.exec_lua(
+            "require('rediff.harness').launch(..., {'sh','-c','exec sleep 60'})", self.root
+        )
+        terminal = editor.current.window.handle
+        # Agent notifications also cover descendants of never-expanded directories.
+        tracked.write_text("agent edit\n")
+        editor.exec_lua("require('rediff.live').changed(...)", self.root)
+        self.wait_for(editor, "explorer_marker('quiet-dir','M')")
+        tracked.write_text("original\n")
+        editor.exec_lua("require('rediff.live').changed(...)", self.root)
+        self.wait_for(editor, "explorer_marker('quiet-dir','')")
+        self.assertEqual(terminal, editor.current.window.handle)
+        self.assertEqual("t", editor.api.get_mode()["mode"])
+        self.assertNotIn("tracked.txt", "\n".join(editor.buffers[tree][:]))
 
     def test_leaving_startup_review_can_explore_worktree_subdirectories(self):
         worktree = Path(self.directory.name, "linked-worktree")
@@ -4500,8 +4555,14 @@ with open(sys.argv[1], 'ab', buffering=0) as log:
                 self.keys(editor, ":harness open<CR>")
                 self.assertFalse(
                     log.exists(),
-                    "Open must confirm before resuming an external session",
+                    "Open must not silently resume an external session",
                 )
+                if provider == "amp":
+                    self.assertIsNone(editor.vars.get("resume_prompt"))
+                    self.assertEqual("rediff-harness-panel", editor.current.buffer.options["filetype"])
+                    self.assertEqual(session, self.lua(editor, "return s.harness.session"))
+                    self.assertIn("existing terminal", editor.vars["startup_notice"])
+                    self.keys(editor, "q")
                 self.keys(editor, ":harness resume<CR>")
                 self.assertFalse(
                     log.exists(), "Cancelling resume must not spawn a process"

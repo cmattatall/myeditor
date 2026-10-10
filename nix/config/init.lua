@@ -111,6 +111,7 @@ require("neo-tree").setup({
 	},
 	filesystem = {
 		hijack_netrw_behavior = "open_current",
+		use_libuv_file_watcher = true,
 		renderers = {
 			directory = {
 				{ "indent" },

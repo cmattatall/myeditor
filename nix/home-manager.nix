@@ -9,13 +9,25 @@ let
   cfg = config.programs.rediff;
   nvim = pkgs.runCommand "rediff-nvim" { } ''
     mkdir -p "$out/bin"
-    ln -s ${cfg.package}/bin/rediff "$out/bin/nvim"
+    ${lib.optionalString cfg.nvimAlias ''ln -s ${cfg.package}/bin/rediff "$out/bin/nvim"''}
+    ${lib.optionalString cfg.vimAlias ''ln -s ${cfg.package}/bin/rediff "$out/bin/vim"''}
   '';
 in
 {
   options.programs.rediff = {
     enable = lib.mkEnableOption "the isolated rediff Neovim profile";
     nvimAlias = lib.mkEnableOption "installing rediff as nvim ahead of other editors on PATH";
+    vimAlias = lib.mkEnableOption "installing rediff as vim ahead of other editors on PATH";
+    manageSettings = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Manage rediff/settings.json with the harness, feedbackCommand and
+        reviewRefreshInterval options. Disable to keep an existing user-managed
+        settings file; those options then do not configure the editor.
+        Plugin installation remains controlled by ampPlugin and ompPlugin.
+      '';
+    };
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
@@ -69,19 +81,23 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package ] ++ lib.optional cfg.nvimAlias nvim;
+    home.packages = [ cfg.package ] ++ lib.optional (cfg.nvimAlias || cfg.vimAlias) nvim;
     # A store path here pins existing shells to an obsolete editor after switch.
-    home.sessionPath = lib.optional cfg.nvimAlias "${config.home.profileDirectory}/bin";
+    home.sessionPath = lib.optional (
+      cfg.nvimAlias || cfg.vimAlias
+    ) "${config.home.profileDirectory}/bin";
     home.file.".config/amp/plugins/readiff.ts" = lib.mkIf cfg.ampPlugin.enable {
       source = ../plugins/amp/readiff.ts;
     };
     home.file.".omp/agent/extensions/rediff.ts" = lib.mkIf cfg.ompPlugin.enable {
       source = ../plugins/omp/rediff.ts;
     };
-    xdg.configFile."rediff/settings.json".text = builtins.toJSON {
-      harness = cfg.harness;
-      feedback_command = cfg.feedbackCommand;
-      review_refresh_interval = cfg.reviewRefreshInterval;
+    xdg.configFile."rediff/settings.json" = lib.mkIf cfg.manageSettings {
+      text = builtins.toJSON {
+        harness = cfg.harness;
+        feedback_command = cfg.feedbackCommand;
+        review_refresh_interval = cfg.reviewRefreshInterval;
+      };
     };
   };
 }

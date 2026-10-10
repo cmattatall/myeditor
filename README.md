@@ -89,6 +89,7 @@ Add these settings to `home.nix`:
 programs.rediff = {
   enable = true;
   nvimAlias = true;           # Use this editing configuration when running nvim
+  vimAlias = false;           # Independently opt into the vim command name
   ampPlugin.enable = false;  # Opt in to managing the readiff Amp plugin
   reviewRefreshInterval = 3; # Seconds; 0 disables fallback polling, not events
 };
@@ -103,6 +104,14 @@ With `nvimAlias = true`, disable `programs.neovim.enable` and remove any separat
 The bundled configuration stays isolated under `NVIM_APPNAME=rediff`; existing
 `~/.config/nvim` files are neither overwritten nor loaded. Omit `nvimAlias` (it
 defaults to false) to keep another `nvim` and launch this editor as `rediff` only.
+`vimAlias` likewise defaults to false; avoid another package providing `bin/vim`
+when enabling it.
+
+The module normally manages `~/.config/rediff/settings.json`. Set
+`programs.rediff.manageSettings = false` to preserve an existing user-managed file;
+`harness`, `feedbackCommand`, and `reviewRefreshInterval` then do not write editor
+settings. Plugin file management remains independently controlled by
+`ampPlugin.enable` and `ompPlugin.enable` (their defaults follow `harness`).
 
 The editor uses this repository's pinned dependencies by default. You may set
 `inputs.rediff.inputs.nixpkgs.follows = "nixpkgs"` to share your nixpkgs instead,

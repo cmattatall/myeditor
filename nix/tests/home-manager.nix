@@ -36,15 +36,22 @@ let
     nvimAlias = true;
     reviewRefreshInterval = 17;
   };
+  vimOnly = evaluate {
+    enable = true;
+    vimAlias = true;
+    manageSettings = false;
+  };
   overridden = evaluate {
     enable = true;
     nvimAlias = true;
+    vimAlias = true;
     package = customEditor;
   };
   paths = packages: map toString packages;
 in
 assert !(builtins.elem (toString editor) (paths disabled.home.packages));
 assert !(disabled.xdg.configFile ? "rediff/settings.json");
+assert !(vimOnly.xdg.configFile ? "rediff/settings.json");
 assert builtins.elem (toString editor) (paths enabled.home.packages);
 assert enabled.home.sessionPath == disabled.home.sessionPath;
 assert aliased.home.username == "consumer";
@@ -77,6 +84,9 @@ pkgs.runCommand "rediff-home-manager-composition-tests" { } ''
   cp ${aliased.xdg.configFile."nvim/init.lua".source} "$HOME/.config/nvim/init.lua"
   test ! -e ${enabled.home.path}/bin/nvim
   test "$(realpath ${aliased.home.path}/bin/nvim)" = "${editor}/bin/rediff"
+  test ! -e ${aliased.home.path}/bin/vim
+  test ! -e ${vimOnly.home.path}/bin/nvim
+  test "$(realpath ${vimOnly.home.path}/bin/vim)" = "${editor}/bin/rediff"
   test "$(${aliased.home.path}/bin/consumer-command)" = consumer-package
   test ! -e ${aliased.home.path}/bin/amp
   test ! -e ${aliased.home.path}/bin/omp
@@ -84,5 +94,6 @@ pkgs.runCommand "rediff-home-manager-composition-tests" { } ''
     -c 'lua if vim.env.NVIM_APPNAME ~= "rediff" or vim.api.nvim_get_hl(0, {name="Normal"}).bg ~= 0x191724 then vim.cmd("cquit 1") end' \
     -c 'qa!'
   test "$(${overridden.home.path}/bin/nvim)" = custom-editor
+  test "$(${overridden.home.path}/bin/vim)" = custom-editor
   touch "$out"
 ''
