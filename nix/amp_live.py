@@ -4,7 +4,9 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import stat
+import subprocess
 import sys
 import tempfile
 import urllib.parse
@@ -111,6 +113,57 @@ def discover(root, provider="amp"):
         except (OSError, ValueError, TypeError, json.JSONDecodeError, http.client.HTTPException):
             continue
     return found
+
+
+def startup(root, previous=""):
+    """First adapter for the shared connect -> resume -> fresh startup policy.
+
+    Amp's registry, ID format, lookup command, and diagnostics below are adapter
+    details, not a model for separate provider-specific startup policies. Other
+    adapters should supply these capabilities without changing the selection or
+    state-retention rules. Startup never sends a prompt or takes over a process.
+    """
+    root = os.path.realpath(root)
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    history = state / "rediff/amp" / (hashlib.sha256(root.encode()).hexdigest() + ".json")
+    thread = previous
+    if history.exists():
+        if not _private(history):
+            raise ValueError("Unsafe Amp session history; refusing automatic startup")
+        try:
+            saved = json.loads(history.read_text())
+            thread = saved["thread"] if saved["root"] == root else None
+        except (ValueError, KeyError, TypeError):
+            thread = None
+    matches = discover(None)
+    local = [row for row in matches if os.path.realpath(row["root"]) == root]
+    if local:
+        preferred = [row for row in local if row["session"] == thread]
+        return {"action": "connect", "matches": preferred or local}
+    if not isinstance(thread, str) or not re.fullmatch(r"T-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", thread):
+        return {"action": "new"}
+    if any(row["session"] == thread for row in matches):
+        raise RuntimeError("Saved Amp thread is active in another directory; not starting a second instance")
+    # Export is read-only. Do not infer deletion from an auth/network failure, or
+    # inspect private Amp databases. The CLI remains responsible for ownership at resume.
+    try:
+        result = subprocess.run(["amp", "threads", "export", thread], cwd=root,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=20)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Amp thread lookup timed out; saved session retained") from error
+    if result.returncode == 0:
+        return {"action": "resume", "session": thread}
+    diagnostic = result.stderr.strip()
+    missing = re.fullmatch(r"Thread https?://\S+/threads/" + re.escape(thread) + r" does not exist\.", diagnostic)
+    if missing:
+        # A tombstone also suppresses migration from an older saved harness target.
+        # Do not overwrite a newer session recorded while the lookup was running.
+        history.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if history.exists() and json.loads(history.read_text()).get("thread") != thread:
+            raise RuntimeError("Amp session history changed during lookup; reopen the editor to connect")
+        _write_private(history, {"root": root, "thread": None})
+        return {"action": "new", "invalidated": thread}
+    raise RuntimeError(diagnostic or "Amp thread lookup failed; saved session retained")
 
 
 def watch(connection_path, expected_thread, provider="amp"):
@@ -298,7 +351,9 @@ def main():
         del sys.argv[1:3]
     if provider not in (*LABELS, "all"):
         raise ValueError("unknown live harness provider")
-    if len(sys.argv) == 3 and sys.argv[1] == "discover":
+    if provider == "amp" and len(sys.argv) in (3, 4) and sys.argv[1] == "startup":
+        print(json.dumps(startup(*sys.argv[2:])))
+    elif len(sys.argv) == 3 and sys.argv[1] == "discover":
         root = None if sys.argv[2] == "--all" else sys.argv[2]
         if provider == "all":
             print(json.dumps([dict(row, provider=name) for name in LABELS for row in discover(root, name)]))
@@ -315,7 +370,7 @@ def main():
     elif provider == "amp" and len(sys.argv) == 5 and sys.argv[1] == "reload":
         print(request_reload(*sys.argv[2:]))
     else:
-        raise ValueError("usage: [--provider amp|omp|all] discover ROOT|--all | watch CONNECTION SESSION | send CONNECTION SESSION SUBMISSION.json | reload CONNECTION THREAD ROOT (Amp only)")
+        raise ValueError("usage: [--provider amp|omp|all] discover ROOT|--all | watch CONNECTION SESSION | send CONNECTION SESSION SUBMISSION.json | reload CONNECTION THREAD ROOT | startup ROOT [PREVIOUS_THREAD] (Amp only)")
 
 
 if __name__ == "__main__":

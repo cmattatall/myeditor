@@ -23,8 +23,8 @@
  */
 import type { PluginAPI, PluginCommandContext, PluginThread } from '@ampcode/plugin'
 
-import { randomBytes } from 'node:crypto'
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
@@ -159,6 +159,19 @@ export default async function readiffPlugin(amp: PluginAPI): Promise<void> {
   const connections = new Map<string, Connection>()
   const connecting = new Map<string, Promise<void>>()
   const disconnected = new Set<string>()
+
+  async function remember(thread: string, root: string): Promise<void> {
+    const directory = join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'rediff/amp')
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const path = join(directory, createHash('sha256').update(root).digest('hex') + '.json')
+    const temporary = path + '.' + randomBytes(8).toString('hex')
+    try {
+      await writeFile(temporary, JSON.stringify({ root, thread }), { mode: 0o600, flag: 'wx' })
+      await rename(temporary, path)
+    } finally {
+      await rm(temporary, { force: true })
+    }
+  }
 
   async function disconnect(threadID: string): Promise<boolean> {
     const connection = connections.get(threadID)
@@ -317,6 +330,7 @@ export default async function readiffPlugin(amp: PluginAPI): Promise<void> {
         ...(title ? { title } : {}),
       }), { mode: 0o600 })
       connections.set(thread.id, { server, directory, descriptor, root, activity })
+      await remember(thread.id, root).catch((error) => amp.logger.log('readiff session history failed', error))
     } catch (error) {
       activity.dispose()
       await closeServer(server)
@@ -349,7 +363,12 @@ export default async function readiffPlugin(amp: PluginAPI): Promise<void> {
       amp.logger.log('readiff automatic connection failed', error)
     }
   }
-  amp.on('session.start', autoConnect)
+  amp.on('session.start', async (event, ctx) => {
+    const existing = connections.get(ctx.thread.id)
+    await autoConnect(event, ctx)
+    // Switching back to an already-connected thread makes it the last session too.
+    if (existing) await remember(ctx.thread.id, existing.root).catch((error) => amp.logger.log('readiff session history failed', error))
+  })
   // Also registers after reloading the plugin in an already-open session.
   amp.on('agent.start', autoConnect)
   amp.on('tool.call', (event) => {

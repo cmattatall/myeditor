@@ -1196,6 +1196,14 @@ function M.submit(retry)
 		notify("No agent notes to send to the harness")
 		return
 	end
+	local session = harness.get(s.root)
+	if session.restoring or session.connection_error then
+		notify(
+			session.connection_error or "Checking the saved harness session. Try again shortly.",
+			vim.log.levels.WARN
+		)
+		return
+	end
 	assert(not feedback.busy(s.root), "Wait for the current feedback delivery before submitting again")
 	local snapshots, snapshot_status, warnings = {}, {}, {}
 	for _, comment in ipairs(s.comments) do
@@ -1500,11 +1508,15 @@ function M.open()
 	s.new_win = api.nvim_get_current_win()
 	s.new_buf = owned_buffer("review://" .. s.id .. "/new", {})
 	api.nvim_win_set_buf(s.new_win, s.new_buf)
+	for _, win in ipairs({ s.tree_win, s.old_win, s.new_win }) do
+		vim.wo[win].winhighlight = "WinBar:ReviewFocusedPane,WinBarNC:ReviewInactivePane"
+	end
+	vim.wo[s.tree_win].winbar = " FILE TREE "
 	vim.wo[s.tree_win].number = false
 	vim.wo[s.tree_win].signcolumn = "no"
 	vim.wo[s.tree_win].winfixwidth = true
 	vim.wo[s.tree_win].cursorlineopt = "line"
-	vim.wo[s.tree_win].winhighlight = "CursorLine:ReviewTreeSelection"
+	vim.wo[s.tree_win].winhighlight = vim.wo[s.tree_win].winhighlight .. ",CursorLine:ReviewTreeSelection"
 	vim.wo[s.tree_win].foldmethod = "manual"
 	vim.wo[s.tree_win].foldenable = true
 	vim.wo[s.tree_win].foldminlines = 0
@@ -1653,13 +1665,11 @@ function M.setup()
 		api.nvim_set_hl(0, "ReviewUnseenPulse", { fg = palette.text, bold = true })
 		api.nvim_set_hl(0, "ReviewSeen", { fg = palette.foam })
 		api.nvim_set_hl(0, "ReviewAnnotation", { fg = "#ff9e64" })
+		api.nvim_set_hl(0, "ReviewFocusedPane", { fg = palette.base, bg = palette.foam, bold = true })
+		api.nvim_set_hl(0, "ReviewInactivePane", { fg = palette.subtle, bg = palette.surface })
 		-- CursorLine must preserve the status marker's foreground color.
-		api.nvim_set_hl(0, "ReviewTreeSelection", { bg = palette.highlight_high, bold = true })
-		api.nvim_set_hl(
-			0,
-			"ReviewTreeCursor",
-			{ fg = palette.highlight_high, bg = palette.highlight_high, blend = 100 }
-		)
+		api.nvim_set_hl(0, "ReviewTreeSelection", { bg = "#33445c", bold = true })
+		api.nvim_set_hl(0, "ReviewTreeCursor", { fg = "#33445c", bg = "#33445c", blend = 100 })
 	end
 	review_highlights()
 	api.nvim_create_autocmd("ColorScheme", { callback = review_highlights })

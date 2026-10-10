@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile, fork } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { access, chmod, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -28,13 +29,17 @@ class ObservableMock<T> {
 
 let home: string
 const originalHome = process.env.HOME
+const originalState = process.env.XDG_STATE_HOME
 before(async () => {
   home = await mkdtemp(join(tmpdir(), 'rediff-plugin-'))
   process.env.HOME = home
+  process.env.XDG_STATE_HOME = join(home, 'state')
 })
 after(async () => {
   if (originalHome === undefined) delete process.env.HOME
   else process.env.HOME = originalHome
+  if (originalState === undefined) delete process.env.XDG_STATE_HOME
+  else process.env.XDG_STATE_HOME = originalState
   await rm(home, { recursive: true, force: true })
 })
 
@@ -140,6 +145,25 @@ test('connect posts editor instructions to its thread, reuses connections, and c
   await assert.rejects(access(a.path)); assert.equal((await fetch(a.descriptor.url).catch(() => null)), null)
   await Promise.all(f.disposers.map((dispose) => dispose()))
   await assert.rejects(access(b.path))
+})
+
+test('last started thread survives shutdown and is isolated by canonical worktree', async (t) => {
+  const root = await realpath(await mkdtemp(join(home, 'history-')))
+  const other = await realpath(await mkdtemp(join(home, 'other-')))
+  const f = fakeAmp(root), g = fakeAmp(other)
+  await plugin(f.amp); await plugin(g.amp)
+  t.after(() => Promise.all([...f.disposers, ...g.disposers].map((dispose) => dispose())))
+  const history = (path: string) => join(process.env.XDG_STATE_HOME!, 'rediff/amp', createHash('sha256').update(path).digest('hex') + '.json')
+  await f.events.get('session.start')!({}, f.context('T-first'))
+  await f.events.get('session.start')!({}, f.context('T-second'))
+  await g.events.get('session.start')!({}, g.context('T-other'))
+  await f.events.get('agent.start')!({}, f.context('T-first'))
+  assert.deepEqual(JSON.parse(await readFile(history(root), 'utf8')), { root, thread: 'T-second' }, 'another turn must not rewrite launch order')
+  await f.events.get('session.start')!({}, f.context('T-first'))
+  await Promise.all(f.disposers.map((dispose) => dispose()))
+  assert.deepEqual(JSON.parse(await readFile(history(root), 'utf8')), { root, thread: 'T-first' })
+  assert.deepEqual(JSON.parse(await readFile(history(other), 'utf8')), { root: other, thread: 'T-other' })
+  assert.equal((await stat(history(root))).mode & 0o777, 0o600)
 })
 
 test('thread titles are optional metadata and a failed lookup still connects', async (t) => {

@@ -151,6 +151,28 @@ vim.api.nvim_create_autocmd("VimEnter", {
 		})
 		local ok, err = pcall(require("rediff.review").open)
 		if ok then
+			local review = require("rediff.review").active()
+			local harness = require("rediff.harness")
+			local session = harness.get(review.root)
+			local win = vim.api.nvim_get_current_win()
+			local function open_harness()
+				-- Do not steal focus if the user has already left the startup view.
+				if require("rediff.review").active() ~= review or vim.api.nvim_get_current_win() ~= win then
+					return
+				end
+				if session.restoring then
+					vim.defer_fn(open_harness, 50)
+					return
+				end
+				if session.provider ~= "amp" and session.provider ~= "omp" and session.provider ~= "claude" then
+					return
+				end
+				local opened, failure = pcall(harness.open, review.root, true)
+				if not opened then
+					vim.notify("Could not open harness: " .. tostring(failure), vim.log.levels.WARN)
+				end
+			end
+			open_harness()
 			return
 		end
 		vim.notify("Could not open Review: " .. tostring(err), vim.log.levels.WARN)

@@ -83,6 +83,7 @@ function M.switch(target)
 		end
 		error(err)
 	end
+	harness.connect(harness.get(path).provider, true)
 end
 
 function M.new(branch, destination)
@@ -207,10 +208,10 @@ local function prompt_new(before_create)
 	end)
 end
 
-function M.choose()
+function M.choose(action)
+	action = action or "list"
 	if picker_win and api.nvim_win_is_valid(picker_win) then
-		api.nvim_set_current_win(picker_win)
-		return
+		api.nvim_win_close(picker_win, true)
 	end
 	local source = root()
 	local entries = M.list()
@@ -227,7 +228,7 @@ function M.choose()
 		height = height,
 		style = "minimal",
 		border = "single",
-		title = " Worktrees ",
+		title = action == "list" and " Worktrees " or (" Worktree " .. action .. " "),
 		title_pos = "center",
 	})
 	picker_win = win
@@ -239,7 +240,8 @@ function M.choose()
 		end
 	end
 	local function render()
-		local lines = { " Enter switch   n new + harness   dd delete   R refresh   q close", "" }
+		local help = action == "list" and " Enter switch   n new + harness   dd delete" or (" Enter " .. action)
+		local lines = { help .. "   R refresh   q close", "" }
 		for i, entry in ipairs(entries) do
 			table.insert(
 				lines,
@@ -266,17 +268,7 @@ function M.choose()
 			guarded(fn)
 		end, { buffer = buf, nowait = true, desc = desc })
 	end
-	map("<CR>", function()
-		local entry = selected()
-		if entry then
-			close()
-			M.switch(entry.path)
-		end
-	end, "Switch worktree")
-	map("n", function()
-		prompt_new(close)
-	end, "Create worktree and launch harness")
-	map("dd", function()
+	local function delete_selected()
 		local entry = selected()
 		if not entry then
 			return
@@ -291,11 +283,30 @@ function M.choose()
 				assert(root() == source, "Checkout changed; reopen the worktree list")
 				close()
 				local ok, err = pcall(M.delete, entry.path)
-				M.choose()
+				if action == "list" or not ok then
+					M.choose(action)
+				end
 				assert(ok, err)
 			end)
 		end)
-	end, "Delete worktree and stop harness")
+	end
+	if action == "delete" then
+		map("<CR>", delete_selected, "Delete worktree and stop harness")
+	else
+		map("<CR>", function()
+			local entry = selected()
+			if entry then
+				close()
+				M.switch(entry.path)
+			end
+		end, "Switch worktree")
+	end
+	if action == "list" then
+		map("n", function()
+			prompt_new(close)
+		end, "Create worktree and launch harness")
+		map("dd", delete_selected, "Delete worktree and stop harness")
+	end
 	map("R", function()
 		assert(root() == source, "Checkout changed; reopen the worktree list")
 		entries = M.list()
@@ -316,8 +327,8 @@ function M.setup()
 	api.nvim_create_user_command("Worktree", function(opts)
 		guarded(function()
 			local args = opts.fargs
-			if (#args == 1 and args[1] == "list") or (#args == 1 and args[1] == "switch") then
-				M.choose()
+			if #args == 1 and (args[1] == "list" or args[1] == "switch" or args[1] == "delete") then
+				M.choose(args[1])
 			elseif #args == 2 and args[1] == "switch" then
 				M.switch(args[2])
 			elseif #args == 2 and args[1] == "delete" then
@@ -327,7 +338,7 @@ function M.setup()
 			elseif args[1] == "new" and (#args == 2 or #args == 3) then
 				M.new(args[2], args[3])
 			else
-				error("Usage: Worktree list | switch [branch|path] | new [branch [path]] | delete branch|path")
+				error("Usage: Worktree list | switch [branch|path] | new [branch [path]] | delete [branch|path]")
 			end
 		end)
 	end, {

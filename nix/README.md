@@ -37,11 +37,17 @@ nix run path:/path/to/rediff -- src/main.lua
 ```
 
 Interactive launches with no file arguments inside a Git worktree open Review,
-focused on the tree with the first diff previewed. File arguments open directly
-for editing. Outside Git, startup stays in ordinary editing without a sidebar.
+with the first diff previewed. The intended startup policy for any configured
+harness is **connect to a live session → resume the last recorded session → start
+fresh**, scoped to the same directory and worktree. See
+[Harness startup policy](#harness-startup-policy) for current adapter support.
+Without a configured CLI harness, focus stays on the tree. Missing CLIs leave
+Review usable and show a warning. File/directory arguments open directly for
+editing/exploring without starting a harness. Outside Git, startup stays in
+ordinary editing without a sidebar.
 **Space r** toggles Review; **Space q** also leaves it. **Space R** refreshes snapshots.
 **Space e** or **:ft** opens/focuses the tree, **Space d** returns to the editor, and
-**Space E** toggles it. Headless runs open neither Review nor the tree.
+**Space E** toggles it. Headless runs open neither Review, the tree, nor a harness.
 If Review is locked by another editor or cannot open, startup reports the
 reason and leaves ordinary editing available. Startup never sends feedback.
 
@@ -353,13 +359,16 @@ Bare **s/S** retains native substitution inside annotations and ordinary files.
 :worktree switch feature-branch
 :worktree new
 :worktree new feature-branch ../rediff-feature
+:worktree delete
 :worktree delete feature-branch
 ```
 
-`list` and `switch` open a pane showing paths and branches. Use **j/k** to select,
+`list` opens a management pane showing paths and branches. Use **j/k** to select,
 **Enter** to switch, **n** to create a worktree and launch its harness, **dd** to
 confirm deletion, **R** to refresh, and **q/Esc** to close. The current checkout
-is marked `*`. `switch` also accepts a branch or path directly.
+is marked `*`. Bare `switch` and `delete` open action-specific pickers: **Enter**
+switches or confirms deletion, without the management shortcuts. Both also accept
+a branch or path directly.
 `new` asks for a branch when omitted, otherwise
 uses `new branch [path]`. Its default directory is `<current-root>-<branch>` beside
 the current checkout (branch slashes become hyphens). It runs `git worktree add -b`
@@ -394,13 +403,17 @@ passes through to the harness for word deletion, including repeated presses.
 Toggling Review with **Space r** moves an open harness pane between Review and
 editing, using the same window, process, and terminal buffer. Hiding the pane in
 either mode keeps it hidden across toggles until **:ho** reopens it.
-**:harness open** / **:ho** reopens a terminal and offers a chooser when multiple
-sessions are connected or running in the editor. Selecting another worktree's
-TUI does not change the review's annotation recipient. With no available/selected
+**:harness open** / **:ho** opens the current worktree's selected harness, or its
+only connected/editor-owned harness, without a chooser. Multiple local harnesses
+with no selected default prompt for a choice; other worktrees are excluded.
+Opening a connected session makes it this worktree's annotation target.
+With no available/selected
 session, it starts the selected CLI in the current worktree.
-For an external Amp/Claude session, opening it (or **:harness resume**) asks before
+For an external Amp/Claude session, explicitly opening it (or **:harness resume**) asks before
 starting a new TUI for that session; stop using its other terminal first. This is not process
-attachment. OMP resumption is unsupported; live feedback may need reconnecting.
+attachment. A resumed live Amp session reconnects feedback when its plugin registers
+a fresh endpoint for the same thread and worktree. Until then, annotations stay saved;
+retry **:w** after it connects. OMP resumption is unsupported.
 Editor exit stops its terminal processes.
 If a launch fails, the new worktree is retained and an error is reported.
 
@@ -408,7 +421,10 @@ New worktrees inherit only the selected harness type, not a thread ID, feedback
 connection, or drafts. In the new Review, use `:harness connect amp` to select its
 live Amp session; for Claude, use `:ReviewHarness claude SESSION_ID`. Changing
 the selected type clears an incompatible feedback binding; `:harness status`
-shows both. Switching worktrees does not spawn additional agents. Dirty editing
+shows both. Switching worktrees preserves a saved selection, or automatically
+connects a single live session matching that exact directory and the selected
+harness type (either live provider if no type is selected). Missing or ambiguous
+matches do not interrupt switching. Switching never spawns additional agents. Dirty editing
 buffers and saved notes remain with their original checkout; save or close an
 open annotation before switching. Worktrees owned by another editor are refused.
 Scripts use uppercase `:Worktree` / `:Harness`, not the typed abbreviations.
@@ -419,6 +435,28 @@ The editor is harness-independent. Built-in adapters support **Amp**, **oh-my-pi
 and **Claude Code**; other harnesses can implement the receiver protocol below.
 Install and authenticate the chosen agent CLI separately. The Nix package
 includes the adapters, not the agent CLIs or credentials.
+
+### Harness startup policy
+
+Startup has one provider-independent policy for the selected harness:
+
+1. Connect to a live session in the same canonical directory and worktree without
+   spawning a duplicate CLI or moving its terminal.
+2. If none is live, resume the last recorded session for that provider and worktree.
+3. Start fresh only when there is no usable recorded session. A confirmed missing
+   ID invalidates history; authentication, network, or active-elsewhere failures
+   preserve it and report the problem instead of silently changing conversations.
+
+Discovery, session history, ID validation, resume commands, and provider error
+interpretation belong in adapters. Provider limitations are capability gaps to
+report or implement, not reasons to define different startup policies. Ambiguous
+live matches require a choice unless the recorded session identifies a match.
+Startup never sends a prompt or retries feedback.
+
+**Current support:** the full sequence is implemented for Amp. OMP and Claude
+still use their earlier startup paths; bringing them under this shared policy is
+pending. The Amp-specific paths and commands below describe its current adapter,
+not requirements for other harnesses.
 
 ### Steer a live Amp process
 
@@ -539,12 +577,26 @@ same agent. Lost connections show offline; panel polling or `R` reconnects their
 streams when available, without resending feedback. Providers without live activity show unknown.
 Aliases persist locally; live subscriptions end when the editor exits.
 
-On startup, a saved live Amp binding is checked asynchronously against the live
-registry. The same thread in the same worktree can acquire a new endpoint after
-a plugin reload. If it is gone, a single live session in the current worktree
-connects automatically. With multiple matches (or none), run
-`:harness connect amp` to choose one. Sessions in other worktrees are never
-selected as an automatic fallback. Failed feedback is never resent by reconnecting.
+The current Amp adapter checks the live registry before trying saved history.
+A matching live thread connects for feedback and activity; its terminal is not
+moved or duplicated.
+With several matches, the last recorded thread wins if present; otherwise a picker
+asks which to connect (cancelling launches nothing). Sessions in other worktrees
+are never selected as an automatic fallback.
+
+The Amp plugin records the last started/switched-to thread per canonical workspace
+directory in `$XDG_STATE_HOME/rediff/amp/` (default `~/.local/state/rediff/amp/`).
+This survives CLI/editor exit and includes sessions started outside Neovim. An empty
+welcome screen has no thread ID to record yet. Existing saved editor bindings are
+used as a migration fallback until the updated plugin records a session.
+Without a live match, startup checks the saved ID with Amp's read-only export
+command, then resumes it. A confirmed missing thread invalidates the saved ID and
+starts fresh. Network/authentication failures or a thread active in another local
+directory stop startup without discarding history. If Amp refuses the actual resume
+(for example, it is active elsewhere), the terminal shows the error; no replacement
+conversation is launched. Plugin reconnection waits at most 30 seconds; use
+`:harness connect amp` after resolving an error. Failed feedback is never resent
+by reconnecting.
 
 `:w` in a Review diff pane or sidebar sends the saved annotation batch; its
 successful acknowledgment clears only those sent notes. An `accepted` ACK means

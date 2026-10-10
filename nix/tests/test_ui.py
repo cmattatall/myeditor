@@ -536,6 +536,130 @@ class EditorUI(unittest.TestCase):
                         ),
                     )
 
+    def test_resumed_harness_reconnects_before_flushing_annotations(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        cli = binary / "amp"
+        cli.write_text('#!/bin/sh\necho "Resumed harness ready"\nexec sleep 600\n')
+        cli.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        self.fixture.exec_lua(
+            """
+            local root=...
+            local f=require('rediff.feedback')
+            f.write(f.directory(root)..'/harness.json', {
+                provider='amp',target={name='amp-live',
+                    session='T-11111111-2222-4333-8444-555555555555',connection='/stale/connection.json'}})
+        """,
+            self.root,
+        )
+        editor = self.launch(
+            self.root,
+            before_init="""
+            local system=vim.system
+            local initial=true
+            vim.system=function(argv,opts,callback)
+                if argv[1]~='rediff-amp-live' then return system(argv,opts,callback) end
+                if argv[2]=='discover' then
+                    if initial then initial=false; callback({code=0,stdout='[]'})
+                    else _G.reconnect_reply=callback end
+                elseif argv[2]=='startup' then
+                    callback({code=0,stdout=vim.json.encode({
+                        action='resume',session='T-11111111-2222-4333-8444-555555555555'})})
+                elseif argv[2]=='send' then
+                    vim.g.sent_argv=argv
+                    _G.send_reply=callback
+                else error('Unexpected bridge command') end
+            end
+        """,
+        )
+        self.wait_for(editor, "vim.bo.buftype == 'terminal'")
+        self.wait_for(editor, "reconnect_reply ~= nil")
+        self.keys(editor, "<Esc>")
+        self.lua(
+            editor,
+            "vim.api.nvim_set_current_win(s.new_win); vim.api.nvim_win_set_cursor(0,{5,0}); r.compose()",
+        )
+        self.keys(editor, "<Esc>iKeep this annotation until accepted<Esc>:w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.keys(editor, ":w<CR>")
+        self.assertFalse(editor.api.get_mode()["blocking"])
+        self.assertIn("Waiting for the resumed amp", editor.vars["startup_notice"])
+        self.assertEqual(1, self.lua(editor, "return #s.comments"))
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        # Neither the original endpoint nor another thread/worktree may win.
+        self.lua(
+            editor,
+            """
+            reconnect_reply({code=0,stdout=vim.json.encode({
+                {root=s.root,session=s.harness.session,connection='/stale/connection.json'},
+                {root=s.root,session='T-other',connection='/other/thread'},
+                {root=s.root..'/other',session=s.harness.session,connection='/other/worktree'},
+            })}); reconnect_reply=nil
+        """,
+        )
+        self.wait_for(editor, "reconnect_reply ~= nil")
+        self.assertEqual(
+            "/stale/connection.json", self.lua(editor, "return s.harness.connection")
+        )
+        self.assertIsNone(editor.vars.get("sent_argv"))
+        self.lua(
+            editor,
+            """
+            reconnect_reply({code=0,stdout=vim.json.encode({{
+                root=s.root,session=s.harness.session,connection='/fresh/connection.json'
+            }})})
+        """,
+        )
+        self.wait_for(editor, "s.harness.connection == '/fresh/connection.json'")
+        self.keys(editor, ":ho<CR><Esc>:w<CR>")
+        self.wait_for(editor, "send_reply ~= nil")
+        self.assertEqual(1, self.lua(editor, "return #s.comments"))
+        self.assertEqual(
+            [
+                "rediff-amp-live",
+                "send",
+                "/fresh/connection.json",
+                "T-11111111-2222-4333-8444-555555555555",
+            ],
+            editor.vars["sent_argv"][:4],
+        )
+        self.lua(
+            editor,
+            """
+            local payload=require('rediff.feedback').read(vim.g.sent_argv[#vim.g.sent_argv])
+            assert(payload.comments[1].text=='Keep this annotation until accepted')
+            send_reply({code=0,stdout=vim.json.encode({submission_id=payload.submission_id,status='accepted'})})
+        """,
+        )
+        self.wait_for(editor, "s.delivery == 'accepted' and #s.comments == 0")
+        self.assertIsNone(
+            self.lua(
+                editor, "return require('rediff.harness').get(s.root).connection_error"
+            )
+        )
+        # A delayed registration must not undo an explicit disconnect.
+        self.lua(
+            editor,
+            "require('rediff.harness').stop(s.root); reconnect_reply=nil; vim.fn.confirm=function() return 1 end",
+        )
+        self.keys(editor, "<Esc>:harness resume<CR>")
+        self.wait_for(editor, "reconnect_reply ~= nil")
+        self.keys(editor, "<Esc>:harness disconnect<CR>")
+        self.lua(
+            editor,
+            """
+            reconnect_reply({code=0,stdout=vim.json.encode({{
+                root=s.root,session='T-11111111-2222-4333-8444-555555555555',connection='/late/connection.json'
+            }})})
+        """,
+        )
+        pump(editor)
+        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+        self.assertEqual(
+            0, self.lua(editor, "return #require('rediff.connections').connected()")
+        )
+
     def test_harness_delivery_keeps_editor_responsive(self):
         editor = self.launch(self.root)
         editor.exec_lua(
@@ -603,6 +727,60 @@ class EditorUI(unittest.TestCase):
         )
         self.assertEqual(0, self.lua(editor, "return #s.comments"))
 
+    def test_harness_pane_write_sends_only_its_active_review_annotations(self):
+        editor = self.launch(self.root)
+        editor.exec_lua(
+            STATE
+            + """
+            local feedback = require('rediff.feedback')
+            local receiver = ...
+            feedback.settings = function()
+                return {feedback_command={vim.v.progpath,'--headless','-u','NONE','-l',receiver,'ok'}}
+            end
+            r.select_harness('custom')
+            vim.api.nvim_set_current_win(s.new_win)
+            vim.api.nvim_win_set_cursor(0,{5,0})
+            r.compose()
+            """,
+            str(Path(FIXTURE).with_name("receiver.lua")),
+        )
+        self.keys(editor, "<Esc>iSend from the harness pane<Esc>:w<CR>")
+        self.wait_for(editor, "s.composer == nil")
+        self.assertIsNone(self.lua(editor, "return s.last_submission"))
+        self.lua(
+            editor,
+            "require('rediff.harness').launch(s.root,{'sh','-c','exec sleep 60'})",
+        )
+        buf = editor.current.buffer.number
+        job = editor.current.buffer.vars["terminal_job_id"]
+        self.keys(editor, "<Esc>:w<CR>")
+        self.wait_for(editor, "s.delivery == 'completed'")
+        self.assertEqual(0, self.lua(editor, "return #s.comments"))
+        path = self.lua(editor, "return s.last_submission")
+        self.assertEqual(
+            "Send from the harness pane",
+            self.lua(
+                editor,
+                "return require('rediff.feedback').read(s.last_submission).comments[1].text",
+            ),
+        )
+        self.assertEqual(buf, editor.current.buffer.number)
+        self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+        self.assertEqual("terminal", editor.current.buffer.options["buftype"])
+        self.keys(editor, ":write<CR>")
+        self.assertEqual(
+            "No agent notes to send to the harness", editor.vars["startup_notice"]
+        )
+        self.assertEqual("1", Path(path + ".calls").read_text().strip())
+        # Outside Review the same terminal must not submit to the saved Review.
+        self.keys(editor, "<Space>r:ho<CR><Esc>")
+        self.assertTrue(self.lua(editor, "return r.active() == nil"))
+        self.lua(editor, "vim.v.errmsg = ''")
+        self.keys(editor, ":w<CR>")
+        self.assertIn("E382", editor.vvars["errmsg"])
+        self.assertEqual("1", Path(path + ".calls").read_text().strip())
+        self.assertEqual(buf, editor.current.buffer.number)
+
     def test_harness_use_discovers_and_picks_live_session(self):
         editor = self.launch(self.root)
         self.lua(
@@ -636,6 +814,47 @@ class EditorUI(unittest.TestCase):
         self.assertIsNone(
             self.lua(editor, 'return require("rediff.harness").get(s.root).last')
         )
+
+    def test_worktree_switch_connects_only_an_unambiguous_local_harness(self):
+        other = Path(self.directory.name, "other-worktree")
+        subprocess.run(
+            ["git", "-C", self.root, "worktree", "add", "-b", "other", str(other)],
+            check=True,
+            capture_output=True,
+        )
+        editor = self.launch(self.root)
+        editor.exec_lua(
+            """
+            local system = vim.system
+            local root = ...
+            vim.system = function(argv, opts, callback)
+                if argv[1] ~= 'rediff-live' then return system(argv, opts, callback) end
+                local rows = {{provider='amp',root=root..'/nested',session='T-wrong',connection='/fake/wrong'}}
+                for i=1,vim.g.local_matches do
+                    table.insert(rows, {provider='amp',root=root,session='T-local-'..i,connection='/fake/'..i})
+                end
+                callback({code=0,stdout=vim.json.encode(rows)})
+            end
+            """,
+            str(other),
+        )
+        for matches in (2, 0, 1):
+            self.lua(editor, f"vim.g.local_matches={matches}")
+            self.keys(editor, ":worktree switch other<CR>")
+            self.assertEqual(str(other), self.lua(editor, "return s.root"))
+            self.assertEqual("n", editor.api.get_mode()["mode"])
+            self.assertIsNone(
+                self.lua(editor, "return require('rediff.harness_panel').state")
+            )
+            if matches == 1:
+                self.wait_for(editor, "s.harness.session == 'T-local-1'")
+            else:
+                self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+            self.keys(editor, ":worktree switch main<CR>")
+        # A remembered selection remains the default even with new local candidates.
+        self.lua(editor, "vim.g.local_matches=2")
+        self.keys(editor, ":worktree switch other<CR>")
+        self.assertEqual("T-local-1", self.lua(editor, "return s.harness.session"))
 
     def test_multiple_harnesses_panel_routing_and_activity(self):
         editor = self.launch(self.root)
@@ -1926,6 +2145,174 @@ class EditorUI(unittest.TestCase):
             self.assertEqual(
                 shows, self.lua(editor, "return vim.g.annotation_show_count")
             )
+
+    def test_startup_opens_configured_harness_once(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        cli = binary / "amp"
+        log = Path(self.directory.name, "startup-harness")
+        cli.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$PWD" >> "$HARNESS_TEST_LOG"\n'
+            'echo "Startup harness ready"\nexec sleep 600\n'
+        )
+        cli.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        self.fixture.exec_lua(
+            "local f=require('rediff.feedback'); local p=vim.fn.stdpath('config'); "
+            "vim.fn.mkdir(p,'p'); f.write(p..'/settings.json',{harness='amp'})"
+        )
+        for directory, options in (
+            (self.root, {"headless": True}),
+            (self.root, {"file": "auth.lua"}),
+            (self.directory.name, {"file": self.root}),
+            (self.directory.name, {}),
+        ):
+            self.launch(directory, **options)
+            self.assertFalse(
+                log.exists(), "Only bare interactive Git startup opens a harness"
+            )
+        missing = self.launch(
+            self.root,
+            before_init="""
+            local exepath=vim.fn.exepath
+            vim.fn.exepath=function(name) return name=='amp' and '' or exepath(name) end
+        """,
+        )
+        self.assertTrue(self.lua(missing, "return r.active() ~= nil"))
+        self.wait_for(missing, "vim.g.startup_notice ~= nil")
+        self.assertIn("Could not open harness", missing.vars["startup_notice"])
+        self.assertFalse(log.exists())
+        self.keys(missing, ":ReviewLeave<CR>")
+        editor = self.launch(self.root)
+        self.wait_for(editor, "vim.bo.buftype == 'terminal'")
+        self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG) == 1")
+        self.assertEqual([self.root], log.read_text().splitlines())
+        self.assertEqual("t", editor.api.get_mode()["mode"])
+        self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
+        job = editor.current.buffer.vars["terminal_job_id"]
+        self.keys(editor, "<Esc>:hide<CR><Space>r<Space>r")
+        self.assertEqual(3, len(editor.api.tabpage_list_wins(0)))
+        self.keys(editor, ":ho<CR>")
+        self.assertEqual(job, editor.current.buffer.vars["terminal_job_id"])
+        self.assertEqual([self.root], log.read_text().splitlines())
+
+    def test_startup_waits_for_restored_harness_without_stealing_focus(self):
+        binary = Path(self.directory.name, "bin")
+        binary.mkdir()
+        cli = binary / "amp"
+        log = Path(self.directory.name, "resumed-harness")
+        cli.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@" > "$HARNESS_TEST_LOG"\n'
+            'if [ "$HARNESS_TEST_FAIL" = 1 ]; then echo "Thread is active somewhere else"; exit 1; fi\n'
+            'echo "Resumed harness ready"\nexec sleep 600\n'
+        )
+        cli.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
+        os.environ["HARNESS_TEST_LOG"] = str(log)
+        thread = "T-11111111-2222-4333-8444-555555555555"
+        for outcome in (
+            "connect", "leave", "superseded", "ambiguous", "resume", "new", "invalidated", "error", "exit-error",
+        ):
+            os.environ["HARNESS_TEST_FAIL"] = "1" if outcome == "exit-error" else "0"
+            root = self.fixture.exec_lua(
+                "local root=dofile(...).create(); return root", FIXTURE
+            )
+            self.fixture.exec_lua(
+                """
+                local root,thread=...
+                local f=require('rediff.feedback')
+                f.write(f.directory(root)..'/harness.json',{
+                    provider='amp',target={name='amp',session=thread}})
+            """,
+                root,
+                thread,
+            )
+            editor = self.launch(
+                root,
+                before_init="""
+                local system=vim.system
+                vim.system=function(argv,opts,callback)
+                    if argv[1]=='rediff-amp-live' and argv[2]=='startup' then
+                        _G.startup_restore=callback; return
+                    end
+                    if argv[1]=='rediff-amp-live' and argv[2]=='discover' then
+                        callback({code=0,stdout='[]'}); return
+                    end
+                    return system(argv,opts,callback)
+                end
+                vim.fn.confirm=function(prompt) vim.g.resume_prompt=prompt; return 2 end
+                vim.ui.select=function(items,opts,callback) vim.g.choices=items; callback(nil) end
+            """,
+            )
+            self.assertIsNone(editor.vars.get("resume_prompt"))
+            self.assertFalse(log.exists(), "Wait for discovery before resuming")
+            if outcome == "leave":
+                self.keys(editor, "<Space>r")
+            if outcome == "superseded":
+                self.lua(editor, "require('rediff.harness').select(s.root,{name='none'})")
+            editor.exec_lua(
+                """
+                local outcome,thread=...
+                local root=vim.fn.getcwd()
+                local decision={action='connect',matches={{root=root,session=thread,connection='/fake/live'}}}
+                if outcome=='ambiguous' then
+                    table.insert(decision.matches,{root=root,session='T-second',connection='/fake/second'})
+                elseif outcome=='resume' or outcome=='exit-error' then
+                    decision={action='resume',session=thread}
+                elseif outcome=='new' or outcome=='invalidated' then
+                    decision={action='new',invalidated=outcome=='invalidated' and thread or nil}
+                end
+                startup_restore({code=outcome=='error' and 1 or 0,stdout=vim.json.encode(decision),stderr='Lookup unavailable'})
+            """,
+                outcome,
+                thread,
+            )
+            pump(editor)
+            if outcome in ("connect", "leave", "superseded", "ambiguous", "error"):
+                self.assertIsNone(editor.vars.get("resume_prompt"))
+                self.assertFalse(log.exists(), outcome + " must not launch a process")
+                self.assertNotEqual(
+                    "terminal", editor.current.buffer.options["buftype"]
+                )
+                if outcome == "connect":
+                    self.assertEqual("/fake/live", self.lua(editor, "return s.harness.connection"))
+                    self.assertIn("existing terminal", editor.vars["startup_notice"])
+                elif outcome == "leave":
+                    self.assertTrue(self.lua(editor, "return r.active() == nil"))
+                elif outcome == "superseded":
+                    self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+                elif outcome == "ambiguous":
+                    self.assertEqual(2, len(editor.vars["choices"]))
+                else:
+                    self.assertIn("Lookup unavailable", editor.vars["startup_notice"])
+                    self.assertEqual(thread, self.lua(editor, "return s.harness.session"))
+            else:
+                self.wait_for(
+                    editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1"
+                )
+                self.assertIsNone(editor.vars.get("resume_prompt"))
+                argv = ["threads", "continue", thread] if outcome in ("resume", "exit-error") else []
+                self.assertEqual(
+                    [root, *argv], log.read_text().splitlines()
+                )
+                self.assertEqual("terminal", editor.current.buffer.options["buftype"])
+                if outcome == "exit-error":
+                    self.wait_for(editor, "require('rediff.harness').get(s.root).delivery == 'disconnected'")
+                    self.assertEqual(thread, self.lua(editor, "return s.harness.session"))
+                    self.assertIn("active somewhere else", "\n".join(editor.current.buffer[:]))
+                else:
+                    self.assertEqual("t", editor.api.get_mode()["mode"])
+                if not argv:
+                    self.assertIsNone(self.lua(editor, "return s.harness.session"))
+                    self.assertFalse(editor.exec_lua(
+                        "for _,entry in ipairs(require('rediff.connections').connected()) do "
+                        "if entry.root == ... then return true end end; return false", root
+                    ))
+                    saved = editor.exec_lua("local f=require('rediff.feedback'); return f.read(f.directory(... )..'/harness.json')", root)
+                    self.assertNotIn("session", saved["target"])
+                self.lua(editor, "require('rediff.harness').stop(s.root)")
+                log.unlink()
 
     def test_startup_and_lock(self):
         index = subprocess.check_output(["git", "-C", self.root, "write-tree"])
@@ -3590,6 +3977,12 @@ class EditorUI(unittest.TestCase):
         self.keys(editor, "j<CR>")
         self.assertEqual(target, self.lua(editor, "return s.root"))
         self.keys(editor, ":worktree switch<CR>")
+        self.assertNotIn("new", editor.current.buffer[0])
+        self.assertNotIn("delete", editor.current.buffer[0])
+        self.keys(editor, "ndd")
+        self.assertEqual("n", editor.api.get_mode()["mode"])
+        self.assertEqual("rediff-worktrees", editor.current.buffer.options["filetype"])
+        self.assertTrue(Path(target).exists())
         self.keys(editor, "k<CR>")
         self.assertEqual(self.root, self.lua(editor, "return s.root"))
         # Changing provider clears an incompatible feedback connection, not drafts.
@@ -3701,6 +4094,29 @@ class EditorUI(unittest.TestCase):
             self.assertFalse(Path(self.root + "-second").exists())
             self.assertEqual(self.root, self.lua(editor, "return s.root"))
             os.kill(main_pid, 0)
+            # The delete picker offers only deletion, not the management actions.
+            self.keys(editor, ":worktree new third<CR>")
+            self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG) == 4")
+            third_pid = int(log.read_text().splitlines()[3].split("|")[1])
+            self.keys(editor, "<Esc>:worktree delete<CR>")
+            self.assertIn("Enter delete", editor.current.buffer[0])
+            self.assertNotIn("new", editor.current.buffer[0])
+            self.assertNotIn("switch", editor.current.buffer[0])
+            self.keys(editor, "n")
+            self.assertEqual("n", editor.api.get_mode()["mode"])
+            self.keys(editor, "<CR>1<CR>")
+            self.assertTrue(Path(self.root + "-third").exists())
+            self.assertEqual(
+                "rediff-worktrees", editor.current.buffer.options["filetype"]
+            )
+            self.keys(editor, "<CR>2<CR>")
+            self.assertFalse(Path(self.root + "-third").exists())
+            self.assertEqual(self.root, self.lua(editor, "return s.root"))
+            self.assertNotEqual(
+                "rediff-worktrees", editor.current.buffer.options["filetype"]
+            )
+            with self.assertRaises(ProcessLookupError):
+                os.kill(third_pid, 0)
         finally:
             external.terminate()
             external.wait(timeout=5)
@@ -3840,6 +4256,87 @@ class EditorUI(unittest.TestCase):
             editor,
             "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):find('Reply: typing still works',1,true) ~= nil",
         )
+
+    def test_harness_wheel_keeps_live_view_and_forwards_tui_mouse_events(self):
+        import sys
+
+        log = Path(self.directory.name, "mouse-input")
+        fixture = """
+import os, sys, tty
+tty.setraw(0)
+os.write(1, b''.join(b'History line %d\\r\\n' % i for i in range(80)))
+if sys.argv[2] != 'none':
+    os.write(1, b'\\x1b[?1000h')
+    if sys.argv[2] == 'mouse':
+        os.write(1, b'\\x1b[?1006h')
+os.write(1, b'LIVE TUI READY')
+with open(sys.argv[1], 'ab', buffering=0) as log:
+    while True:
+        data = os.read(0, 1024)
+        if not data: break
+        log.write(data)
+"""
+        editor = self.launch(self.root)
+        for reporting in ("none", "mouse", "legacy"):
+            editor.exec_lua(
+                "require('rediff.harness').launch(require('rediff.review').state.root, ...)",
+                [sys.executable, "-u", "-c", fixture, str(log), reporting],
+            )
+            self.wait_for(
+                editor,
+                "table.concat(vim.api.nvim_buf_get_lines(0,0,-1,false),'\\n'):find('LIVE TUI READY',1,true) ~= nil",
+            )
+            win = editor.current.window.handle
+            row, col = editor.api.win_get_position(win)
+
+            def view():
+                return editor.exec_lua(
+                    "return vim.api.nvim_win_call(...,function() local v=vim.fn.winsaveview(); return {v.topline,v.leftcol} end)",
+                    win,
+                )
+
+            live = view()
+            for focus in ("input", "normal", "diff"):
+                if focus == "normal":
+                    self.keys(editor, "<Esc>")
+                elif focus == "diff":
+                    self.keys(editor, "<D-w>p")
+                before = log.read_bytes()
+                focused_win = editor.current.window.handle
+                mode = editor.api.get_mode()["mode"]
+                for direction in ("up", "up", "down", "down", "right", "left"):
+                    editor.api.input_mouse("wheel", direction, "", 0, row + 3, col + 6)
+                    pump(editor)
+                    self.assertEqual(live, view(), (reporting, focus, direction))
+                self.assertEqual(focused_win, editor.current.window.handle)
+                if reporting != "none" or focus != "input":
+                    self.assertEqual(mode, editor.api.get_mode()["mode"])
+                received = log.read_bytes()[len(before):]
+                if reporting == "mouse" and focus in ("input", "normal"):
+                    self.assertEqual(2, received.count(b"\x1b[<64;"), focus)
+                    self.assertEqual(2, received.count(b"\x1b[<65;"), focus)
+                elif reporting == "legacy" and focus in ("input", "normal"):
+                    self.assertEqual(2, received.count(b"\x1b[M`"), focus)
+                    self.assertEqual(2, received.count(b"\x1b[Ma"), focus)
+                elif reporting == "none":
+                    self.assertEqual(b"", received)
+                if focus == "input":
+                    native_events = received
+                elif focus == "normal":
+                    # Identical coordinates/protocol, with no leaked mode-switch keys.
+                    self.assertEqual(native_events, received)
+                    diff_row, diff_col = editor.api.win_get_position(
+                        self.lua(editor, "return s.new_win")
+                    )
+                    before = log.read_bytes()
+                    editor.api.input_mouse("wheel", "up", "", 0, diff_row + 2, diff_col + 6)
+                    pump(editor)
+                    self.assertEqual(before, log.read_bytes())
+                    self.assertEqual(focused_win, editor.current.window.handle)
+                    self.assertEqual(mode, editor.api.get_mode()["mode"])
+            self.lua(editor, "require('rediff.harness').stop(s.root)")
+            pump(editor)
+            log.unlink()
 
     def test_harness_terminal_pane_reuses_process_across_layouts_and_reviews(self):
         binary = Path(self.directory.name, "bin")
@@ -4051,7 +4548,7 @@ class EditorUI(unittest.TestCase):
         )
         self.assertFalse(log.exists())
 
-    def test_harness_open_chooses_connected_session_without_rebinding_review(self):
+    def test_harness_open_defaults_to_current_worktree_and_reuses_its_process(self):
         binary = Path(self.directory.name, "bin")
         binary.mkdir()
         log = Path(self.directory.name, "chosen-harnesses")
@@ -4080,31 +4577,47 @@ class EditorUI(unittest.TestCase):
         """,
             str(other),
         )
-        self.keys(editor, ":ho<CR><CR>")
-        self.assertFalse(
-            log.exists(), "Cancelling the picker must not start any harness"
-        )
-        self.keys(editor, ":ho<CR>2<CR>")
+        self.keys(editor, ":ho<CR>")
         self.wait_for(editor, "vim.fn.filereadable(vim.env.HARNESS_TEST_LOG)==1")
-        self.assertEqual([str(other) + "|session-b"], log.read_text().splitlines())
-        other_job = editor.current.buffer.vars["terminal_job_id"]
-        self.assertEqual(str(other), editor.funcs.getcwd())
-        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
-        self.keys(editor, "<D-w>p")
-        self.assertEqual(self.root, editor.funcs.getcwd())
-        self.keys(editor, ":ho<CR>1<CR>")
-        self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG)==2")
+        self.assertEqual([self.root + "|session-a"], log.read_text().splitlines())
         local_job = editor.current.buffer.vars["terminal_job_id"]
+        self.assertEqual(self.root, editor.funcs.getcwd())
+        self.assertEqual("session-a", self.lua(editor, "return s.harness.session"))
+        self.keys(editor, "<Esc>:worktree switch other<CR>:ho<CR>")
+        self.wait_for(editor, "#vim.fn.readfile(vim.env.HARNESS_TEST_LOG)==2")
+        self.assertEqual(str(other) + "|session-b", log.read_text().splitlines()[1])
+        other_job = editor.current.buffer.vars["terminal_job_id"]
         self.assertNotEqual(other_job, local_job)
         self.assertEqual(4, len(editor.api.tabpage_list_wins(0)))
-        self.keys(editor, "<D-w>p:ho<CR>2<CR>")
+        self.keys(editor, "<Esc>:worktree switch main<CR>:ho<CR>")
+        self.assertEqual(local_job, editor.current.buffer.vars["terminal_job_id"])
+        self.keys(editor, "<Esc>:worktree switch other<CR>:ho<CR>")
         self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
         self.assertEqual(
             2,
             len(log.read_text().splitlines()),
             "Selecting an owned session must reuse it",
         )
-        self.assertEqual("none", self.lua(editor, "return s.harness.name"))
+        self.assertEqual("session-b", self.lua(editor, "return s.harness.session"))
+        # Multiple local sessions still use the explicitly selected local default.
+        self.keys(editor, "<Esc>")
+        self.lua(
+            editor,
+            "require('rediff.connections').connect({name='claude',root=s.root,session='session-c'})",
+        )
+        self.keys(editor, ":ho<CR>")
+        self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
+        # Without a default, prompt for only this worktree's sessions.
+        self.keys(editor, "<Esc>")
+        self.lua(editor, "require('rediff.harness').select(s.root,{name='none'})")
+        self.keys(editor, ":ho<CR>")
+        self.keys(editor, "<CR>")  # Cancel without launching anything.
+        self.assertEqual(2, len(log.read_text().splitlines()))
+        self.keys(editor, ":ho<CR>1<CR>")
+        self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
+        self.assertEqual("session-b", self.lua(editor, "return s.harness.session"))
+        self.keys(editor, "<Esc>:ho<CR>")
+        self.assertEqual(other_job, editor.current.buffer.vars["terminal_job_id"])
 
     def test_worktree_delete_protects_data_and_other_editors(self):
         target = Path(self.directory.name, "linked worktree")

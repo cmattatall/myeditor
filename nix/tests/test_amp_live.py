@@ -1,6 +1,8 @@
+import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -75,6 +77,50 @@ class AmpLiveTests(unittest.TestCase):
     def discover(self):
         with patch.dict(os.environ, {"HOME": str(self.home)}):
             return amp_live.discover(self.root)
+
+    def test_startup_prefers_live_exact_worktree_then_last_started_thread(self):
+        state = self.home / "state"
+        history = state / "rediff/amp" / (hashlib.sha256(str(self.root.resolve()).encode()).hexdigest() + ".json")
+        history.parent.mkdir(parents=True)
+        newer = "T-11111111-2222-4333-8444-555555555555"
+        history.write_text(json.dumps({"root": str(self.root.resolve()), "thread": newer}))
+        history.chmod(0o600)
+        with patch.dict(os.environ, {"HOME": str(self.home), "XDG_STATE_HOME": str(state)}):
+            self.assertEqual("connect", amp_live.startup(self.root)["action"])
+            self.assertEqual(THREAD, amp_live.startup(self.root)["matches"][0]["session"])
+            # A sibling checkout must not be mistaken for a match, even in the same repo.
+            self.descriptor["root"] = str(self.root) + "-other"
+            self.descriptor["thread"] = newer
+            Handler.descriptor = dict(self.descriptor)
+            self.write_descriptor()
+            with self.assertRaisesRegex(RuntimeError, "active in another directory"):
+                amp_live.startup(self.root, THREAD)
+            self.connection.unlink()
+            # The last-started record takes precedence over Neovim's older selection.
+            with patch.object(amp_live.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                self.assertEqual({"action": "resume", "session": newer}, amp_live.startup(self.root, THREAD))
+                self.assertEqual(newer, run.call_args.args[0][-1])
+
+    def test_startup_invalidates_only_confirmed_missing_threads(self):
+        self.connection.unlink()
+        state = self.home / "state"
+        history = state / "rediff/amp" / (hashlib.sha256(str(self.root.resolve()).encode()).hexdigest() + ".json")
+        with patch.dict(os.environ, {"HOME": str(self.home), "XDG_STATE_HOME": str(state)}):
+            self.assertEqual({"action": "new"}, amp_live.startup(self.root))
+            for message in ("Unauthorized", "Network unreachable", "Thread is active somewhere else", "Resource not found"):
+                with patch.object(amp_live.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stderr=message)):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        amp_live.startup(self.root, THREAD)
+                    self.assertFalse(history.exists(), "Failures must not invalidate the saved thread")
+            missing = f"Thread https://ampcode.com/threads/{THREAD} does not exist.\n"
+            with patch.object(amp_live.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stderr=missing)):
+                self.assertEqual({"action": "new", "invalidated": THREAD}, amp_live.startup(self.root, THREAD))
+            self.assertIsNone(json.loads(history.read_text())["thread"])
+            with patch.object(amp_live.subprocess, "run", side_effect=AssertionError("Must not retry invalid ID")):
+                self.assertEqual({"action": "new"}, amp_live.startup(self.root, THREAD))
+                for invalid in ('{broken', '[]', json.dumps({"root": str(self.root.resolve()), "thread": 42})):
+                    history.write_text(invalid)
+                    self.assertEqual({"action": "new"}, amp_live.startup(self.root, THREAD))
 
     def test_reload_requests_are_small_scoped_and_not_claimed_complete(self):
         for wrong_thread, wrong_root in (("T-other", self.root), (THREAD, self.home)):

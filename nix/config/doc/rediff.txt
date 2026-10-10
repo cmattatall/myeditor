@@ -196,17 +196,41 @@ Amp streams running/idle/approval/error state and active tool names to the panel
 Offline or unsupported activity is shown as such, never inferred from an ACK.
 Aliases persist locally; connection subscriptions end when this editor exits.
 
-:harness open (alias :ho) opens a bottom terminal split. With multiple connected
-sessions or editor-owned TUIs, a chooser shows aliases/session IDs and worktrees.
+:harness open (alias :ho) opens a bottom terminal split for the current worktree.
+Its selected harness takes precedence; otherwise a single connected/editor-owned
+harness opens directly. Multiple local candidates with no default show a chooser.
+Other worktrees are excluded. Opening a connected session selects it for annotations.
 An editor-owned TUI reuses its process and buffer; switching choices reuses the
-pane, not the process. Opening another worktree's TUI does not rebind annotations.
+pane, not the process.
 With no available or selected session, open starts this worktree's selected CLI.
+The shared startup policy for every harness is: connect to a live session in this
+directory/worktree, otherwise resume the last recorded session, otherwise start
+fresh. Discovery, validation, and resume commands are provider-adapter concerns.
+The full sequence currently has an Amp implementation; OMP/Claude support is
+pending, not an intended difference in policy.
+With the current Amp adapter, bare interactive startup connects to a live thread
+in this exact worktree without launching another CLI. Its terminal stays where
+it is. If several threads match, the last recorded one wins, or a picker asks
+you to choose.
+If none is live, startup resumes the last recorded thread; only missing/invalid
+history starts a fresh CLI. The Amp plugin stores history per canonical workspace
+under $XDG_STATE_HOME/rediff/amp (default ~/.local/state/rediff/amp), including
+threads started outside Neovim. Empty welcome screens have no thread ID yet.
+A confirmed missing ID is invalidated; auth/network/active-elsewhere errors retain
+history and stop startup. Resume errors stay visible in the terminal and never
+silently launch a replacement. Reconnection stops after 30 seconds; resolve the
+error and run :harness connect amp.
+Missing CLIs leave Review usable.
+File/directory arguments, headless runs, and none/custom harnesses do not auto-open.
 Space r moves an open harness pane between Review and editing, keeping its
 window, buffer, and process. Hiding it in either mode keeps it hidden across
 toggles until :ho reopens it.
 
 Escape returns control to Neovim in the same pane (Terminal-Normal mode), without
 sending Escape to the harness. Repeated Escape does not interrupt the agent.
+With the harness pane focused, the mouse wheel scrolls the harness UI in both
+input and Terminal-Normal modes, provided the harness enables mouse reporting.
+Scrolling in Terminal-Normal mode leaves Neovim in control; i still resumes input.
 Use Cmd-W then an arrow to switch panes, or i to resume harness input. In Amp
 input, Ctrl-L interrupts the agent after :harness install amp configures it.
 Cmd-W p returns to the previous editor window from Terminal mode, leaving the
@@ -214,11 +238,17 @@ TUI running. Cmd-W also accepts other window commands, such as h/j/k/l. Ctrl-W
 passes through to the TUI for word deletion, including repeated presses.
 Ctrl-\ Ctrl-N enters Terminal-Normal mode; :hide hides the pane; :ho brings it back.
 
+In Review, press Escape then type :w (or :write) from its harness pane to send
+the saved annotation batch, just as from the tree or diff panes. This shortcut
+applies only to the active Review's own worktree, not to ordinary terminals.
+
 An external TUI cannot be moved into Neovim. For a selected Amp or Claude session,
-open (or :harness resume) confirms before starting a new interactive TUI for that exact
+explicit :harness open (or :harness resume) confirms before starting a new TUI for that
 session. Stop using the other terminal first. This does not attach to or kill its
 process, and sends no prompt. OMP session resumption is not supported here.
-Live feedback may need :harness connect again after the old TUI exits.
+Resumed live Amp sessions reconnect feedback when their plugin registers a fresh
+endpoint for the same thread and worktree. Until then, annotations remain saved;
+retry :w after the connection is ready.
 
 Plugin installation asks for confirmation, preserves Home Manager symlinks, and
 does not install/authenticate the Amp CLI. With a live target, it also requests
@@ -240,14 +270,18 @@ its submission ID. See nix/README.md for installation and receiver details.
 ==============================================================================
 WORKTREES                                                  *rediff-worktrees*
 
-:worktree list or :worktree switch opens a pane. Supply a branch/path to switch
-directly. The current checkout is marked *. In the list:
+:worktree list opens the management pane. The current checkout is marked *.
+In the list:
   j/k         Select worktree
   Enter       Switch to selected worktree
   n           Prompt for new branch, create worktree, and launch harness
   dd          Confirm deletion and stop editor-owned harness jobs
   R           Refresh list
   q / Esc     Close list
+
+:worktree switch and :worktree delete open action-specific pickers when no
+branch/path is supplied. Enter switches or confirms deletion; j/k, R and q/Esc
+select, refresh and close. These pickers have no create/delete management shortcuts.
 
 :harness use amp|omp|claude selects the launch type for this worktree.
 
@@ -258,7 +292,7 @@ forced. A launch failure keeps the worktree; inspect its terminal and :messages.
 Ctrl-\ Ctrl-N leaves Terminal mode; :hide hides the pane. Editor exit stops its
 terminal processes. Switching alone never launches a harness.
 
-:worktree delete branch|path deletes a linked checkout, keeping its branch and
+:worktree delete [branch|path] deletes a linked checkout, keeping its branch and
 saved review metadata. It stops only harness jobs launched by this editor, never
 external or merely connected agents. The main checkout, locked/unavailable trees,
 another editor's live review, unsaved file buffers, and staged/unstaged/untracked
@@ -268,6 +302,9 @@ If Git refuses removal after a harness stops, the checkout is retained.
 
 New worktrees inherit launch type, not connections or drafts. Dirty files and
 saved notes stay with their checkout; save/close an open note before switching.
+Switching preserves a saved harness selection, or connects a single live session
+in that exact worktree for its selected type (either live provider if unset).
+No match or multiple matches never open a picker during switching.
 Changing harness type disconnects incompatible bindings but retains notes.
 
 ==============================================================================
